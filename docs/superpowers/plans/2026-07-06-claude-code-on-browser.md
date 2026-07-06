@@ -33,7 +33,7 @@ spawn: `claude.exe -p --input-format stream-json --output-format stream-json --v
 {"type":"control_request","request_id":"m_1","request":{"subtype":"set_model","model":"sonnet"}}
 {"type":"control_request","request_id":"pm_1","request":{"subtype":"set_permission_mode","mode":"acceptEdits"}}
 ```
-(interrupt/set_model/set_permission_mode 서브타입은 SDK 관례 — E2E에서 확인, 실패 시 응답 error를 UI에 표출)
+(interrupt/set_model/set_permission_mode 서브타입은 SDK 관례 — E2E에서 확인 전까지 **선택 기능으로 취급**: control_response가 error이거나 30s 타임아웃이면 해당 기능만 비활성 안내(toast)하고 턴 흐름·세션은 유지한다. 핵심 계약(user 턴, can_use_tool)과 결합하지 않는다.)
 
 **CLI → 서버 (stdout), type별:**
 - `control_response`: initialize 응답. `response.response`에 `commands[]`, `models[]`(value/displayName/description), `account{email,subscriptionType}`, `output_style`.
@@ -209,6 +209,7 @@ loadTranscript(projectsRoot, dirName, sessionId) => Promise<{messages: object[]}
 listDirs(absPath|'' ) => Promise<{path, parent|null, dirs: string[]}> // ''→드라이브 나열, 숨김폴더 제외, 접근불가 EPERM은 빈 배열
 ```
 - 경로 검증: dirName/sessionId에 `..`,`/`,`\` 포함 시 throw (경로 탈출 방지).
+- listDirs 경로 정책: 입력을 `path.resolve`로 정규화하고, UNC/네트워크 경로(`\\\\`로 시작)는 거부, 디렉터리가 아니면 거부, 심볼릭 링크는 따라가지 않고 이름만 나열(lstat 기준). 파일 내용은 어떤 경우에도 반환하지 않음.
 
 - [ ] **Step 1: 실패 테스트** — 임시 디렉터리에 가짜 `projects/<dir>/<uuid>.jsonl` 2개 생성(첫 줄에 `{"type":"user","cwd":"C:\\fake","message":{"role":"user","content":[{"type":"text","text":"제목이 될 텍스트"}]}}` 포함), listProjects/listSessions/loadTranscript 검증 + 경로 탈출 시 reject.
 - [ ] **Step 2:** FAIL 확인 → 구현 → PASS → 커밋 `feat(server): session history + directory browse APIs`
@@ -270,7 +271,7 @@ listDirs(absPath|'' ) => Promise<{path, parent|null, dirs: string[]}> // ''→�
 **Interfaces:**
 - Consumes: store, WS send 함수, REST(`lib/api.js`: bootstrap/projects/sessions/transcript/browse — `x-auth-token` 헤더).
 - Produces/동작:
-  - **PermissionDialog**: `permission_request` 수신 시 모달. 도구명·description·입력 렌더(ToolCard와 동일 렌더러 재사용). 버튼: [허용] `{"behavior":"allow","updatedInput":<원본 input>}`, [거부] 사유 입력란과 함께 `{"behavior":"deny","message":<사유||'사용자가 거부'>}`. suggestions 있으면 "이 세션에서 계속 허용" 체크박스(적용 시 suggestions를 updatedPermissions로 동봉). 큐잉: 요청 여러 개면 순차 표시. Esc는 다이얼로그를 닫지 않음(명시적 선택 강제).
+  - **PermissionDialog**: `permission_request` 수신 시 모달. 도구명·description·입력 렌더(ToolCard와 동일 렌더러 재사용). 버튼: [허용] `{"behavior":"allow","updatedInput":<원본 input>}`, [거부] 사유 입력란과 함께 `{"behavior":"deny","message":<사유||'사용자가 거부'>}`. suggestions 있으면 체크박스를 표시하되 **라벨은 제안의 실제 효과를 그대로 서술**(예: setMode acceptEdits → "이 세션에서 파일 편집 자동 허용", addRules → "도구 <이름> 계속 허용 (<범위>)"). 일반적인 "항상 허용" 같은 모호한 문구 금지. 체크 시에만 suggestions를 updatedPermissions로 동봉 — CLI가 제안한 것 이상으로 범위를 넓히지 않는다. 큐잉: 요청 여러 개면 순차 표시. Esc는 다이얼로그를 닫지 않음(명시적 선택 강제).
   - **Composer**: textarea 자동 높이, Enter 전송/Shift+Enter 개행, 스트리밍 중 전송 비활성 대신 큐잉 없이 disabled+안내, `/` 입력 시 initInfo.commands 필터 드롭다운(↑↓ Tab/Enter 선택 → `/name ` 삽입, 선택 후 일반 텍스트로 전송), Esc → interrupt 전송(status가 idle 아니면), 중단 버튼도 표시.
   - **Sidebar**: 상단 [새 세션] — cwd 피커 모달(browse API 트리 탐색+직접 입력+최근 프로젝트 목록), 모델 선택(initInfo.models), 권한 모드 선택(default/acceptEdits/plan/bypassPermissions 경고문구). 아래로 열린 세션 탭들(status 뱃지), 그 아래 "최근 세션"(projects→sessions, 클릭 시 transcript 프리로드 + `start{resumeSessionId}` 전송).
   - **StatusBar**: 좌측 cwd·sessionId 축약, 중앙 status 인디케이터(thinking 애니메이션/도구명/권한대기), 우측 모델 드롭다운(setModel), 권한모드 토글(setPermissionMode), 턴 비용·누적 토큰, rateLimit 경고, 연결 상태 점, 테마 토글.

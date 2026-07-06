@@ -109,7 +109,7 @@ Node 서버 (ESM, http + ws)
 ## 6. 보안
 
 - 서버는 `127.0.0.1` 바인드 전용.
-- 기동 시 랜덤 토큰 생성 → 브라우저 열 때 URL fragment로 전달, WS 연결 시 검증. (다른 로컬 프로세스/악성 웹사이트의 DNS rebinding·CSRF 차단)
+- 기동 시 랜덤 토큰 생성. 전달 흐름을 명시하면: 서버가 출력하는 URL의 **fragment**(`#token=...`)로 브라우저에 전달 → 클라이언트 JS가 `location.hash`에서 읽어 sessionStorage에 저장 → 이후 WS는 `?token=` 쿼리로, REST는 `x-auth-token` 헤더로 **명시적으로 재전송**하고 서버가 각각 검증한다(fragment 자체는 서버로 전송되지 않으므로). 다른 로컬 프로세스/악성 웹사이트의 DNS rebinding·CSRF 차단 목적.
 - WS/HTTP 모두 Origin 헤더 검증(자기 자신만 허용).
 - fs-api는 디렉터리 나열만 제공(파일 내용 접근은 CLI 도구 경유 + 권한 다이얼로그로 통제).
 
