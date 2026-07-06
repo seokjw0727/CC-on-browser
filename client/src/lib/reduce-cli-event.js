@@ -8,6 +8,7 @@
 //   thinking       { msgId, blockIndex, thinking, streaming, redacted? }
 //   tool_use       { msgId, blockIndex, toolUseId, name, input|null, inputJson,
 //                    result: {content, isError, structured}|null, streaming, parentToolUseId }
+// assistant-text/thinking/tool_use 아이템은 assistant 이벤트로 확정되면 confirmed:true.
 //   notice         { text }           (system/notification)
 //   error          { text }           (result.is_error; store가 직접 추가하기도 함)
 //   raw            { payload }        (미지의 타입 보존)
@@ -213,6 +214,11 @@ function confirmedFields(block) {
   }
 }
 
+// text/thinking 블록의 비교용 본문 (id+content 병합의 "content")
+function itemContent(kind, fields) {
+  return kind === 'assistant-text' ? (fields.text ?? '') : (fields.thinking ?? '');
+}
+
 function confirmBlock(session, block, msgId, blockIndex, parent) {
   const kind =
     block.type === 'text'
@@ -225,29 +231,42 @@ function confirmBlock(session, block, msgId, blockIndex, parent) {
   if (!kind) return append(session, { kind: 'raw', payload: block });
 
   const msgs = session.messages;
+  const confirmed = confirmedFields(block);
+  // msgId 호환: 스트리밍 조립분은 msgId를 모를 수 있음(message_start 미수신)
+  const compat = (m) =>
+    m.kind === kind && (m.msgId == null || msgId == null || m.msgId === msgId);
+
+  // assistant 이벤트는 같은 message id로 블록 단위로 여러 번 올 수 있고, 그때
+  // content 배열 index(항상 0)는 스트리밍 블록 index와 어긋난다 → id+content로 병합.
   let idx = -1;
-  if (kind === 'tool_use' && block.id != null) {
-    idx = findLastIndex(msgs, (m) => m.kind === 'tool_use' && m.toolUseId === block.id);
-  }
-  if (idx < 0) {
-    // 같은 kind + content 블록 index, msgId가 호환(스트리밍분은 msgId를 모를 수 있음)되는
-    // 가장 최근 아이템에 병합. 없으면 새로 추가.
-    idx = findLastIndex(
-      msgs,
-      (m) =>
-        m.kind === kind &&
-        m.blockIndex === blockIndex &&
-        (m.msgId == null || msgId == null || m.msgId === msgId),
-    );
+  if (kind === 'tool_use') {
+    if (block.id != null) {
+      idx = findLastIndex(msgs, (m) => m.kind === 'tool_use' && m.toolUseId === block.id);
+    }
+    if (idx < 0) {
+      idx = findLastIndex(msgs, (m) => compat(m) && !m.confirmed && m.blockIndex === blockIndex);
+    }
+  } else {
+    const text = itemContent(kind, confirmed);
+    // 멱등: 동일 내용으로 이미 확정된 블록(중복 assistant 이벤트)
+    idx = findLastIndex(msgs, (m) => compat(m) && m.confirmed && itemContent(kind, m) === text);
+    // id+content 병합: 미확정 스트리밍 조립분의 내용은 확정 내용의 접두사
+    if (idx < 0) {
+      idx = findLastIndex(msgs, (m) => compat(m) && !m.confirmed && text.startsWith(itemContent(kind, m)));
+    }
+    // 예비: 내용이 어긋난 드문 경우 블록 index로
+    if (idx < 0) {
+      idx = findLastIndex(msgs, (m) => compat(m) && !m.confirmed && m.blockIndex === blockIndex);
+    }
   }
 
-  const confirmed = confirmedFields(block);
   if (idx < 0) {
     return append(session, {
       kind,
       msgId,
       blockIndex,
       streaming: false,
+      confirmed: true,
       parentToolUseId: parent,
       ...(kind === 'tool_use' ? { inputJson: '', result: null } : {}),
       ...confirmed,
@@ -256,7 +275,13 @@ function confirmBlock(session, block, msgId, blockIndex, parent) {
 
   const messages = msgs.slice();
   const prev = messages[idx];
-  messages[idx] = { ...prev, ...confirmed, msgId: msgId ?? prev.msgId, streaming: false };
+  messages[idx] = {
+    ...prev,
+    ...confirmed,
+    msgId: msgId ?? prev.msgId,
+    streaming: false,
+    confirmed: true,
+  };
 
   // streaming.blocks에 남아 있는 해당 uid 매핑 제거
   const streaming = normStreaming(session.streaming);
