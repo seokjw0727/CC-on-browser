@@ -24,6 +24,14 @@ export async function listDirs(absPath) {
     throw new Error(`listDirs requires an absolute path, got: ${String(absPath)}`);
   }
   const resolved = path.resolve(absPath);
+  // UNC/네트워크/디바이스 경로(\\server\share, \\?\..., //server/share) 거부
+  if (
+    absPath.startsWith('\\\\') ||
+    absPath.startsWith('//') ||
+    resolved.startsWith('\\\\')
+  ) {
+    throw new Error(`UNC/network paths are not allowed: ${absPath}`);
+  }
   const parentDir = path.dirname(resolved);
   const parent = parentDir === resolved ? null : parentDir;
   let entries;
@@ -35,8 +43,9 @@ export async function listDirs(absPath) {
     }
     throw err;
   }
+  // 심볼릭 링크는 따라가지 않고(lstat 기준) 이름만 나열. 파일 내용은 반환하지 않음.
   const dirs = entries
-    .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+    .filter((e) => (e.isDirectory() || e.isSymbolicLink()) && !e.name.startsWith('.'))
     .map((e) => e.name)
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   return { path: resolved, parent, dirs };
