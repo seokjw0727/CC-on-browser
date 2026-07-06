@@ -46,3 +46,14 @@ test('accepts Buffer chunks', () => {
   feed(Buffer.from('{"buf":true}\n'));
   assert.deepEqual(out, [{ buf: true }]);
 });
+
+test('handles multi-byte UTF-8 split across Buffer chunks', () => {
+  const out = [];
+  const feed = createJsonlParser((m) => out.push(m));
+  const whole = Buffer.from('{"t":"한글"}\n');
+  // split in the middle of a 3-byte Hangul character
+  const splitAt = whole.indexOf(Buffer.from('한')) + 1;
+  feed(whole.slice(0, splitAt));
+  feed(whole.slice(splitAt));
+  assert.deepEqual(out, [{ t: '한글' }]);
+});
