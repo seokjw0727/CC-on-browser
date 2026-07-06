@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { StoreProvider, useStore, useActiveSession } from './lib/store.jsx';
+import ChatView from './components/ChatView.jsx';
 
 const THEME_KEY = 'ccob-theme';
 
@@ -72,14 +73,7 @@ function Shell() {
       </aside>
 
       <main className="main">
-        <div className="chat-area">
-          {/* Task 7: ChatView */}
-          <div className="placeholder">
-            {active
-              ? `세션 ${active.key} · ${active.status}`
-              : '세션이 없습니다. 사이드바에서 새 세션을 시작하세요.'}
-          </div>
-        </div>
+        <ChatView />
         <div className="composer-area">
           {/* Task 8: Composer */}
           <textarea
