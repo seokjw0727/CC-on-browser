@@ -1,0 +1,303 @@
+# Claude Code on Browser Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 로컬 `claude.exe`(구독 인증)를 stream-json 모드로 구동하는 Node 브리지 서버 + 브라우저 채팅 SPA.
+
+**Architecture:** Node(ESM) 서버가 claude.exe를 자식 프로세스로 spawn하고 stdin/stdout JSONL로 통신, WebSocket으로 브라우저에 중계. 브라우저는 Vite+React SPA. 미문서 CLI 프로토콜 지식은 `server/src/claude-session.js` 한 파일에 격리.
+
+**Tech Stack:** Node 24 (ESM, node:test), ws, Vite + React 18, marked + DOMPurify + highlight.js.
+
+**Note on granularity:** UI 컴포넌트 태스크는 완전한 JSX 대신 정밀한 계약(파일, props, 동작, 수용 기준)으로 기술한다. 프로토콜/서버 코어는 완전한 코드를 제공한다. 구현자는 각 태스크의 Interfaces 블록만으로 이웃 태스크와 맞물릴 수 있어야 한다.
+
+## Global Constraints
+
+- **SDK 금지**: `@anthropic-ai/sdk`, `@anthropic-ai/claude-agent-sdk`, api.anthropic.com 호출 금지. 유일한 AI 접점은 `C:\Users\<user>\.local\bin\claude.exe` 자식 프로세스 (환경변수 `CLAUDE_WEB_CLI_PATH`로 오버라이드 가능).
+- 서버 바인드: `127.0.0.1` 전용. 기본 포트 8787 (`--port`/`PORT`로 변경).
+- 모든 서버 코드 ESM(`"type":"module"`), Node 내장 모듈 + `ws`만 사용.
+- 클라이언트 런타임 의존성: react, react-dom, marked, dompurify, highlight.js만.
+- 테스트는 실제 claude.exe를 호출하지 않는다 (구독 소모 금지). 가짜 CLI(`server/test/fake-cli.mjs`) 사용. 실 CLI 검증은 최종 E2E에서 수동 1회.
+- 커밋 메시지 끝: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`
+
+## 검증된 CLI 프로토콜 (v2.1.201 실측 — 이대로 구현)
+
+spawn: `claude.exe -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio [--model <m>] [--permission-mode <mode>] [--resume <sessionId>]`, cwd = 사용자가 고른 프로젝트 디렉터리. stdio 전부 pipe. 메시지는 한 줄당 JSON 하나(JSONL), `\n` 종결.
+
+**서버 → CLI (stdin):**
+```json
+{"type":"control_request","request_id":"init_1","request":{"subtype":"initialize"}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"..."}]}}
+{"type":"control_response","response":{"subtype":"success","request_id":"<그대로 에코>","response":{"behavior":"allow","updatedInput":{...}}}}
+{"type":"control_response","response":{"subtype":"success","request_id":"<...>","response":{"behavior":"deny","message":"사유"}}}
+{"type":"control_request","request_id":"int_1","request":{"subtype":"interrupt"}}
+{"type":"control_request","request_id":"m_1","request":{"subtype":"set_model","model":"sonnet"}}
+{"type":"control_request","request_id":"pm_1","request":{"subtype":"set_permission_mode","mode":"acceptEdits"}}
+```
+(interrupt/set_model/set_permission_mode 서브타입은 SDK 관례 — E2E에서 확인, 실패 시 응답 error를 UI에 표출)
+
+**CLI → 서버 (stdout), type별:**
+- `control_response`: initialize 응답. `response.response`에 `commands[]`, `models[]`(value/displayName/description), `account{email,subscriptionType}`, `output_style`.
+- `control_request`: `request.subtype==="can_use_tool"`, `request`에 `tool_name`, `display_name`, `input`, `description?`, `permission_suggestions?[]`, `tool_use_id`. 최상위 `request_id`를 에코해 응답.
+- `system`: subtype `init`(session_id, cwd, tools[], model...), `status`, `thinking_tokens`(estimated_tokens), `hook_started`/`hook_response`, `notification`.
+- `stream_event`: `event`가 Anthropic 스트림 이벤트(`content_block_start`/`content_block_delta`(delta.type: text_delta|thinking_delta|input_json_delta)/`content_block_stop`/`message_start`/`message_delta`). `parent_tool_use_id` 있을 수 있음(서브에이전트).
+- `assistant`: 완성된 content block 배열(`thinking`|`text`|`tool_use`). 같은 message id로 여러 번 올 수 있음(블록 단위 — id+content로 병합).
+- `user`: `message.content[]`에 `tool_result`(tool_use_id, content, is_error) — 도구 실행 결과. `tool_use_result`에 구조화 결과.
+- `rate_limit_event`: `rate_limit_info{status,resetsAt,rateLimitType}`.
+- `result`: 턴 종료. `subtype:"success"|...`, `result`(최종 텍스트), `session_id`, `total_cost_usd`, `usage{input_tokens,output_tokens,...}`, `num_turns`, `duration_ms`, `is_error`.
+- 멀티턴: result 후 같은 stdin에 다음 user 메시지. 세션 종료는 stdin.end().
+
+## WS 프로토콜 (서버 ↔ 브라우저, 이 스키마가 계약)
+
+연결: `ws://127.0.0.1:<port>/ws?token=<token>`. token 불일치/Origin 불일치 시 즉시 close.
+
+**클라이언트 → 서버:**
+```json
+{"type":"start","startId":"cl_1","cwd":"C:\\path","model":"opus","permissionMode":"default","resumeSessionId":null}
+{"type":"send","key":"s_1","text":"사용자 입력"}
+{"type":"permission","key":"s_1","requestId":"<uuid>","behavior":"allow","updatedInput":{},"message":null}
+{"type":"interrupt","key":"s_1"}
+{"type":"setModel","key":"s_1","model":"sonnet"}
+{"type":"setPermissionMode","key":"s_1","mode":"acceptEdits"}
+{"type":"attach","key":"s_1","afterSeq":42}
+{"type":"stop","key":"s_1"}
+```
+
+**서버 → 클라이언트:**
+```json
+{"type":"started","startId":"cl_1","key":"s_1","initInfo":{"commands":[],"models":[],"account":{},"output_style":"default"}}
+{"type":"event","key":"s_1","seq":1,"payload":{"...CLI stdout 메시지 원본..."}}
+{"type":"permission_request","key":"s_1","requestId":"<uuid>","toolName":"Write","displayName":"Write","input":{},"description":"...","suggestions":[],"toolUseId":"..."}
+{"type":"permission_resolved","key":"s_1","requestId":"<uuid>"}
+{"type":"exit","key":"s_1","code":0}
+{"type":"error","key":"s_1","message":"...","startId":null}
+```
+`seq`는 세션별 단조 증가. 서버는 세션당 최근 1000개 이벤트 링버퍼 유지, `attach.afterSeq` 이후 리플레이.
+
+**REST (헤더 `x-auth-token` 필수):**
+- `GET /api/bootstrap` → `{claudeVersion, defaultCwd, port}`
+- `GET /api/projects` → `[{dirName, cwd, sessionCount, lastModified}]` (~/.claude/projects 스캔; cwd는 최신 세션 JSONL 첫 줄의 cwd 필드에서)
+- `GET /api/sessions?dir=<dirName>` → `[{sessionId, title, mtime, fileSize}]` (title = 첫 user 텍스트 80자)
+- `GET /api/transcript?dir=<dirName>&sessionId=<id>` → `{messages:[CLI형식 배열]}` (재개 시 과거 대화 프리로드)
+- `GET /api/browse?path=<abs|빈값>` → `{path, parent, dirs:[이름]}` (빈값이면 드라이브 목록 `["C:\\", ...]`)
+
+---
+
+### Task 1: 저장소 스캐폴드
+
+**Files:**
+- Create: `package.json`, `.gitignore`, `server/package.json`, `client/package.json`(vite로 생성), `client/vite.config.js`
+- Create: `server/src/`, `server/test/` 디렉터리
+
+**Interfaces:**
+- Produces: npm 스크립트 — 루트에서 `npm run build`(client 빌드), `npm start`(server 기동), `npm test`(server 테스트), `npm run dev:client`, `npm run install:all`.
+
+- [ ] **Step 1:** 루트 `package.json`:
+```json
+{
+  "name": "claude-code-on-browser",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "install:all": "npm install --prefix server && npm install --prefix client",
+    "build": "npm run build --prefix client",
+    "start": "node server/src/server.js",
+    "test": "node --test server/test/",
+    "dev:client": "npm run dev --prefix client"
+  }
+}
+```
+- [ ] **Step 2:** `.gitignore`: `node_modules/`, `client/dist/`, `*.local`
+- [ ] **Step 3:** `server/package.json`: `{"name":"server","private":true,"type":"module","dependencies":{"ws":"^8"}}` 후 `npm install --prefix server`
+- [ ] **Step 4:** `npm create vite@latest client -- --template react` 상당의 최소 구조를 직접 생성(client/package.json: react, react-dom, marked, dompurify, highlight.js, devDeps: vite, @vitejs/plugin-react). `client/vite.config.js`에 dev 프록시: `/api`→`http://127.0.0.1:8787`, `/ws`→ws 프록시. `npm install --prefix client`
+- [ ] **Step 5:** `npm run build`가 성공하는 빈 App 확인 후 커밋 `chore: scaffold server+client workspaces`
+
+### Task 2: `server/src/jsonl.js` — JSONL 스트림 파서
+
+**Files:**
+- Create: `server/src/jsonl.js`, Test: `server/test/jsonl.test.js`
+
+**Interfaces:**
+- Produces: `createJsonlParser(onMessage: (obj)=>void, onRaw?: (line)=>void) => (chunk: Buffer|string) => void`. 불완전 라인은 버퍼링, JSON 파싱 실패 라인은 onRaw로.
+
+- [ ] **Step 1: 실패 테스트 작성** — 케이스: (a) 한 chunk에 두 메시지, (b) 메시지가 chunk 경계에서 쪼개짐, (c) 비JSON 라인은 onRaw, (d) 빈 라인 무시, (e) CRLF 허용.
+```js
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createJsonlParser } from '../src/jsonl.js';
+
+test('parses split chunks', () => {
+  const out = [];
+  const feed = createJsonlParser((m) => out.push(m));
+  feed('{"a":1}\n{"b"');
+  feed(':2}\r\n\n');
+  assert.deepEqual(out, [{ a: 1 }, { b: 2 }]);
+});
+test('non-json goes to onRaw', () => {
+  const out = [], raw = [];
+  const feed = createJsonlParser((m) => out.push(m), (l) => raw.push(l));
+  feed('oops\n{"ok":true}\n');
+  assert.deepEqual(out, [{ ok: true }]);
+  assert.deepEqual(raw, ['oops']);
+});
+```
+- [ ] **Step 2:** `node --test server/test/jsonl.test.js` → FAIL 확인
+- [ ] **Step 3:** 구현:
+```js
+export function createJsonlParser(onMessage, onRaw = () => {}) {
+  let buf = '';
+  return (chunk) => {
+    buf += chunk.toString();
+    let idx;
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, idx).replace(/\r$/, '').trim();
+      buf = buf.slice(idx + 1);
+      if (!line) continue;
+      try { onMessage(JSON.parse(line)); } catch { onRaw(line); }
+    }
+  };
+}
+```
+- [ ] **Step 4:** 테스트 PASS 확인 → 커밋 `feat(server): jsonl stream parser`
+
+### Task 3: 가짜 CLI + `server/src/claude-session.js`
+
+**Files:**
+- Create: `server/test/fake-cli.mjs`, `server/src/claude-session.js`, Test: `server/test/claude-session.test.js`
+
+**Interfaces:**
+- Consumes: Task 2의 `createJsonlParser`.
+- Produces:
+```js
+class ClaudeSession extends EventEmitter {
+  constructor(opts: { cliPath: string, cliArgsPrefix?: string[], cwd: string,
+                      model?: string, permissionMode?: string, resumeSessionId?: string })
+  async start(): Promise<initInfo>   // spawn + initialize 왕복, 10s 타임아웃
+  sendUserText(text: string): void
+  respondPermission(requestId: string, result: object): boolean // pending에 없으면 false
+  async interrupt(): Promise<void>
+  async setModel(model: string): Promise<void>
+  async setPermissionMode(mode: string): Promise<void>
+  stop(): void                        // stdin.end() 후 5s 내 미종료 시 kill
+  sessionId: string|null              // system/init 수신 시 세팅
+  // emits: 'event'(cliMessage), 'permission_request'({requestId,toolName,displayName,input,description,suggestions,toolUseId}),
+  //        'exit'(code), 'raw'(line)
+}
+```
+- can_use_tool 수신 시 pending map에 등록하고 'permission_request' emit; respondPermission이 control_response를 stdin에 기록.
+- 서버가 보내는 control_request(interrupt 등)는 request_id로 Promise를 pending에 두고 CLI의 control_response(success/error)로 resolve/reject (30s 타임아웃).
+
+- [ ] **Step 1:** `fake-cli.mjs` — 프로토콜 모사. stdin JSONL 읽고: initialize→고정 initInfo 응답; user 메시지 N번째에 따라 시나리오(환경변수 `FAKE_SCENARIO`): `echo`(text_delta 3개→assistant→result), `permission`(can_use_tool 발행→allow면 tool_result user 메시지→result, deny면 바로 result), `crash`(user 수신 후 exit 3). 모든 출력 한 줄 JSON. 실측 형식(위 프로토콜 절)과 필드 동일하게.
+- [ ] **Step 2: 실패 테스트 작성** — (a) start()가 initInfo 반환+system/init 후 sessionId 세팅, (b) echo 시나리오: 'event' 순서에 stream_event×3, assistant, result 포함, (c) permission 시나리오: permission_request emit → respondPermission(allow) → tool_result 이벤트 → result, (d) deny → result의 도달, (e) crash: 'exit' emit + start 이후 sendUserText가 throw하지 않음, (f) 멀티턴: result 후 두 번째 sendUserText → 두 번째 result.
+- [ ] **Step 3:** FAIL 확인 (`node --test server/test/claude-session.test.js`)
+- [ ] **Step 4:** `claude-session.js` 구현. spawn 인자: `[...cliArgsPrefix, '-p','--input-format','stream-json','--output-format','stream-json','--verbose','--include-partial-messages','--permission-prompt-tool','stdio', ...(model?['--model',model]:[]), ...(permissionMode?['--permission-mode',permissionMode]:[]), ...(resumeSessionId?['--resume',resumeSessionId]:[])]`. 테스트에서는 `cliPath='node', cliArgsPrefix=[fakeCliPath]`. 실 서버에서는 `cliPath=CLAUDE_WEB_CLI_PATH || 'C:\\Users\\<user>\\.local\\bin\\claude.exe', cliArgsPrefix=[]`.
+- [ ] **Step 5:** PASS 확인 → 커밋 `feat(server): claude session bridge with permission routing`
+
+### Task 4: `server/src/history.js` + `server/src/fs-api.js`
+
+**Files:**
+- Create: `server/src/history.js`, `server/src/fs-api.js`, Test: `server/test/history.test.js`, `server/test/fs-api.test.js`
+
+**Interfaces:**
+- Produces:
+```js
+// history.js — projectsRoot 주입 가능(기본 path.join(os.homedir(),'.claude','projects'))
+listProjects(projectsRoot?) => Promise<[{dirName, cwd|null, sessionCount, lastModified}]>
+listSessions(projectsRoot, dirName) => Promise<[{sessionId, title, mtime, fileSize}]>
+loadTranscript(projectsRoot, dirName, sessionId) => Promise<{messages: object[]}>
+// 렌더 가능 타입만 필터: assistant, user, result. system/init은 첫 1개 유지.
+// fs-api.js
+listDirs(absPath|'' ) => Promise<{path, parent|null, dirs: string[]}> // ''→드라이브 나열, 숨김폴더 제외, 접근불가 EPERM은 빈 배열
+```
+- 경로 검증: dirName/sessionId에 `..`,`/`,`\` 포함 시 throw (경로 탈출 방지).
+
+- [ ] **Step 1: 실패 테스트** — 임시 디렉터리에 가짜 `projects/<dir>/<uuid>.jsonl` 2개 생성(첫 줄에 `{"type":"user","cwd":"C:\\fake","message":{"role":"user","content":[{"type":"text","text":"제목이 될 텍스트"}]}}` 포함), listProjects/listSessions/loadTranscript 검증 + 경로 탈출 시 reject.
+- [ ] **Step 2:** FAIL 확인 → 구현 → PASS → 커밋 `feat(server): session history + directory browse APIs`
+
+### Task 5: `server/src/session-hub.js` + `server/src/server.js`
+
+**Files:**
+- Create: `server/src/session-hub.js`, `server/src/server.js`, Test: `server/test/server.integration.test.js`
+
+**Interfaces:**
+- Consumes: Task 2–4 전부.
+- Produces: `startServer({port, host:'127.0.0.1', token, cliPath, cliArgsPrefix, projectsRoot, staticDir}) => Promise<{server, port, token, close()}>`. WS/REST 스키마는 상단 "WS 프로토콜" 절 그대로. SessionHub: `Map<key, {session, ring: [{seq,payload}], nextSeq, pendingPermissions: Map}>`; key는 `s_`+증가값. 이벤트마다 ring push(1000 초과 시 shift) 후 접속 중 모든 소켓에 브로드캐스트.
+- 인증: WS는 `?token=`, REST는 `x-auth-token`. Origin 헤더가 존재하면 `http://127.0.0.1:<port>`/`http://localhost:<port>`만 허용. 실패 시 401/즉시 close.
+- `server.js`를 직접 실행하면(import.meta.url 비교) 토큰 생성(crypto.randomBytes(16).hex) 후 `http://127.0.0.1:<port>/#token=<token>` 콘솔 출력, staticDir=client/dist 서빙(SPA fallback → index.html).
+
+- [ ] **Step 1: 실패 통합 테스트** — startServer를 fake-cli로 기동, `ws` 클라이언트로: (a) 잘못된 토큰 → close, (b) start→started(initInfo 포함), (c) send→event들 수신(seq 단조 증가)→result, (d) permission 시나리오 왕복, (e) 재접속 후 attach(afterSeq)로 리플레이, (f) REST /api/projects가 임시 projectsRoot 내용 반환, (g) Origin 위조 시 거부.
+- [ ] **Step 2:** FAIL → 구현 → PASS → 커밋 `feat(server): ws hub + http server with auth`
+
+### Task 6: 클라이언트 기반 — 테마/레이아웃/WS 스토어
+
+**Files:**
+- Create: `client/src/main.jsx`, `client/src/App.jsx`, `client/src/theme.css`, `client/src/lib/ws.js`, `client/src/lib/store.jsx`, `client/index.html`
+
+**Interfaces:**
+- Produces:
+  - `lib/ws.js`: `connect({token, onMessage, onStatus}) => {send(obj), close()}` — 자동 재접속(1s→5s 백오프), 재접속 시 각 세션에 attach 재전송은 store가 담당.
+  - `lib/store.jsx`: React context + useReducer. 상태: `{conn:'connecting|open|closed', sessions: Map<key,SessionState>, activeKey, projects, initInfo}`. `SessionState = {key, cwd, sessionId, model, permissionMode, messages:[], streaming:{...}, pendingPermissions:[], usage:{cost,inTok,outTok}, rateLimit, status:'idle|thinking|tool|awaiting-permission|exited', lastSeq}`. 액션 디스패처가 WS 수신 메시지(`event` payload의 CLI 타입 포함)를 SessionState로 환원. **CLI 이벤트→상태 환원 로직은 `lib/reduce-cli-event.js`로 분리** (Task 7에서 구현, 여기선 파일 스텁+통과 위임만).
+  - `App.jsx` 레이아웃: 좌측 Sidebar(260px, 접기 가능), 중앙 ChatView+Composer, 상단 StatusBar. CSS 변수 기반 다크(기본)/라이트 테마 토글. 토큰은 `location.hash`에서 파싱해 sessionStorage 저장.
+- 수용 기준: `npm run build` 성공, dev 서버에서 빈 셸 렌더 + WS 연결 상태 표시.
+
+- [ ] **Step 1:** theme.css — CSS 변수(배경/서피스/텍스트/액센트/성공/위험/보더, 다크·라이트 두 세트), 시스템 폰트 스택, 코드용 모노 폰트.
+- [ ] **Step 2:** ws.js + store.jsx + App 셸 구현, 빌드 확인 → 커밋 `feat(client): app shell, theme, ws store`
+
+### Task 7: 채팅 렌더링 — 스트리밍/마크다운/도구 카드
+
+**Files:**
+- Create: `client/src/lib/reduce-cli-event.js`, `client/src/lib/markdown.js`, `client/src/components/ChatView.jsx`, `client/src/components/Message.jsx`, `client/src/components/ToolCard.jsx`, `client/src/components/ThinkingBlock.jsx`
+
+**Interfaces:**
+- Consumes: store의 SessionState/dispatch, WS `event` payload(상단 CLI 프로토콜 절의 메시지 형식).
+- Produces: `reduceCliEvent(sessionState, payload) => sessionState` 순수 함수 —
+  - `stream_event.content_block_start/delta/stop`으로 진행 중 assistant 메시지 조립(text_delta는 text에, thinking_delta는 thinking에 append; input_json_delta는 tool_use input 문자열 누적).
+  - `assistant` 도착 시 스트리밍 조립분을 확정 블록으로 교체(message id 기준 병합).
+  - `user`의 `tool_result`는 tool_use_id로 기존 ToolCard에 결과 연결.
+  - `system/init`→sessionId·model 저장, `system/status`→status, `thinking_tokens`→진행 표시, `result`→usage(cost,tokens) 갱신+status idle, `rate_limit_event`→rateLimit.
+  - 미지의 타입은 `messages`에 `{kind:'raw', payload}`로 보존.
+- `markdown.js`: `render(md) => sanitizedHtml` (marked + DOMPurify + highlight.js; 링크는 target=_blank rel=noopener).
+- UI 동작: 자동 스크롤(사용자가 위로 스크롤하면 고정 해제, "↓ 최신으로" 버튼), ThinkingBlock은 기본 접힘(스트리밍 중엔 펄스 표시), ToolCard는 도구별 렌더 — Bash: 명령(코드)+결과(접기, 20줄 초과 시), Edit: old/new를 removed/added 색으로, Write: 파일경로+내용 코드블록, Read/Grep/Glob: 입력 요약+결과 접힘, TodoWrite/Task 등 기타: 입력 JSON 접힘. is_error면 위험색 테두리.
+- 수용 기준: fake 데이터로 렌더 확인용 최소 스토리(개발 중 임시 페이지) 또는 dev 서버+fake-cli로 실제 스트림 렌더.
+
+- [ ] **Step 1:** `reduce-cli-event.js` 구현 (위 명세 전부; 이 파일은 순수 함수로 작성해 추후 테스트 가능하게)
+- [ ] **Step 2:** markdown.js + 컴포넌트 구현, dev로 시각 확인 → 커밋 `feat(client): streaming chat rendering + tool cards`
+
+### Task 8: 상호작용 — 권한 다이얼로그/컴포저/사이드바/상태바
+
+**Files:**
+- Create: `client/src/components/PermissionDialog.jsx`, `client/src/components/Composer.jsx`, `client/src/components/Sidebar.jsx`, `client/src/components/StatusBar.jsx`, `client/src/lib/api.js`
+
+**Interfaces:**
+- Consumes: store, WS send 함수, REST(`lib/api.js`: bootstrap/projects/sessions/transcript/browse — `x-auth-token` 헤더).
+- Produces/동작:
+  - **PermissionDialog**: `permission_request` 수신 시 모달. 도구명·description·입력 렌더(ToolCard와 동일 렌더러 재사용). 버튼: [허용] `{"behavior":"allow","updatedInput":<원본 input>}`, [거부] 사유 입력란과 함께 `{"behavior":"deny","message":<사유||'사용자가 거부'>}`. suggestions 있으면 "이 세션에서 계속 허용" 체크박스(적용 시 suggestions를 updatedPermissions로 동봉). 큐잉: 요청 여러 개면 순차 표시. Esc는 다이얼로그를 닫지 않음(명시적 선택 강제).
+  - **Composer**: textarea 자동 높이, Enter 전송/Shift+Enter 개행, 스트리밍 중 전송 비활성 대신 큐잉 없이 disabled+안내, `/` 입력 시 initInfo.commands 필터 드롭다운(↑↓ Tab/Enter 선택 → `/name ` 삽입, 선택 후 일반 텍스트로 전송), Esc → interrupt 전송(status가 idle 아니면), 중단 버튼도 표시.
+  - **Sidebar**: 상단 [새 세션] — cwd 피커 모달(browse API 트리 탐색+직접 입력+최근 프로젝트 목록), 모델 선택(initInfo.models), 권한 모드 선택(default/acceptEdits/plan/bypassPermissions 경고문구). 아래로 열린 세션 탭들(status 뱃지), 그 아래 "최근 세션"(projects→sessions, 클릭 시 transcript 프리로드 + `start{resumeSessionId}` 전송).
+  - **StatusBar**: 좌측 cwd·sessionId 축약, 중앙 status 인디케이터(thinking 애니메이션/도구명/권한대기), 우측 모델 드롭다운(setModel), 권한모드 토글(setPermissionMode), 턴 비용·누적 토큰, rateLimit 경고, 연결 상태 점, 테마 토글.
+- 수용 기준: fake-cli 시나리오(echo/permission)로 전 플로우가 브라우저에서 동작.
+
+- [ ] **Step 1:** api.js + Sidebar/cwd 피커 → 커밋
+- [ ] **Step 2:** PermissionDialog + Composer + StatusBar → 커밋 `feat(client): permission dialog, composer, sidebar, statusbar`
+
+### Task 9: 통합 — 정적 서빙 + fake-cli 스모크 + 실 CLI E2E
+
+**Files:**
+- Modify: `server/src/server.js`(필요 시), Create: `scripts/dev-fake.mjs`(fake-cli로 전체 스택 기동)
+
+**Interfaces:**
+- Consumes: 전 태스크.
+
+- [ ] **Step 1:** `npm run build` 후 `npm start` → 브라우저(chrome-devtools MCP, Brave)에서 접속. fake-cli 모드(`scripts/dev-fake.mjs`: CLAUDE_WEB_CLI_PATH=node + prefix)로 echo/permission 시나리오 화면 확인, 스크린샷.
+- [ ] **Step 2:** 실 CLI로 1턴 (간단한 프롬프트 + Write 권한 다이얼로그 1회 + interrupt 1회) 확인, 스크린샷. 문제 발견 시 systematic-debugging으로 수정.
+- [ ] **Step 3:** 커밋 `feat: end-to-end integration`
+
+### Task 10: README + 최종 리뷰
+
+- [ ] **Step 1:** `README.md`: 요구사항(claude CLI 로그인 완료), 설치(`npm run install:all`), 빌드/실행, 보안 주의(로컬 전용, 토큰 URL), 아키텍처 개요 다이어그램, 제한 사항(§8 YAGNI 목록), 프로토콜 미문서 경고.
+- [ ] **Step 2:** /code-review 수준의 자체 리뷰(워크플로 다중 에이전트) → 발견 수정 → 커밋 `docs: README` / `fix: review findings`
+
+## Self-Review 결과
+
+- 스펙 커버리지: §4 모듈 전부 태스크 1–8에 매핑, §5 에러 처리(exit 전파=T3/T5, 리플레이=T5, raw 보존=T2/T7), §6 보안=T5, §7 테스트=T2–T5/T9. 누락 없음.
+- 타입 일관성: WS 스키마·ClaudeSession 시그니처를 상단 계약 절로 단일화, 각 태스크는 이를 참조.
+- 플레이스홀더: UI 태스크는 의도적 계약 기술(문서 상단 Note 참조) — 동작·수용 기준 명시로 대체.
