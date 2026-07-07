@@ -17,7 +17,7 @@
   /* Text */
   --text: #efece6;
   --text-dim: #a8a196;
-  --text-faint: #726c62;
+  --text-faint: #928b7f; /* AA 대비 확보 (다크 배경 위 소형 텍스트) */
 
   /* Borders */
   --border: #383430;
@@ -74,7 +74,7 @@
 
   --text: #2a2621;
   --text-dim: #6c655a;
-  --text-faint: #9c9488;
+  --text-faint: #726b60; /* AA 대비 확보 (라이트 배경 위 소형 텍스트) */
 
   --border: #e2dacd;
   --border-soft: rgba(0, 0, 0, 0.07);
@@ -180,7 +180,7 @@ select:focus {
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent-line);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -337,11 +337,6 @@ select:focus {
   color: var(--text);
   border-color: var(--border-strong);
 }
-.pill.accent {
-  color: var(--accent);
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-}
 .pill .pill-ico {
   opacity: 0.75;
   flex: none;
@@ -366,16 +361,6 @@ select:focus {
 }
 .btn-primary:active:not(:disabled) {
   background: var(--accent-press);
-}
-
-.btn-ghost {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  padding: 7px 14px;
-}
-.btn-ghost:hover:not(:disabled) {
-  border-color: var(--border-strong);
 }
 
 .btn-danger {

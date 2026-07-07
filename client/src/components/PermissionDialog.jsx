@@ -186,6 +186,7 @@ export default function PermissionDialog() {
         <div className="perm-deny-row">
           <input
             type="text"
+            aria-label="거부 사유 (선택)"
             placeholder="거부 사유 (선택)"
             value={reason}
             onChange={(e) => setReason(e.target.value)}

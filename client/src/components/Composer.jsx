@@ -22,7 +22,7 @@ const CONN_LABEL = { connecting: '연결 중', open: '연결됨', closed: '연�
 function shortPath(p) {
   if (!p) return '';
   const parts = String(p).split(/[\\/]/).filter(Boolean);
-  return parts.length <= 2 ? p : `…\\${parts.slice(-1).join('\\')}`;
+  return parts.length <= 2 ? p : `…\\${parts.slice(-2).join('\\')}`;
 }
 function fmtCost(c) {
   return typeof c === 'number' ? `$${c.toFixed(4)}` : '$0.0000';
@@ -116,14 +116,16 @@ export default function Composer({ theme, onToggleTheme }) {
     if (busy) send({ type: 'interrupt', key: session.key });
   };
 
+  // 낙관적 UI 갱신은 실제 전송이 성공했을 때만 — 끊긴 상태에서 바꾸면
+  // CLI에 전달되지 않는데 UI만 바뀌어 모델/권한모드가 desync되는 것을 막는다.
   const changeModel = (model) => {
     if (!session || !model) return;
-    send({ type: 'setModel', key: session.key, model });
+    if (!send({ type: 'setModel', key: session.key, model })) return;
     dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, model }) });
   };
   const changeMode = (mode) => {
     if (!session || !mode) return;
-    send({ type: 'setPermissionMode', key: session.key, mode });
+    if (!send({ type: 'setPermissionMode', key: session.key, mode })) return;
     dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, permissionMode: mode }) });
   };
 
@@ -173,10 +175,11 @@ export default function Composer({ theme, onToggleTheme }) {
     <div className="composer-dock">
       <div className="composer-shell">
         {dropdownOpen && (
-          <div className="cmd-dropdown" role="listbox">
+          <div className="cmd-dropdown" role="listbox" id="cmd-listbox" aria-label="슬래시 커맨드">
             {filtered.map((c, i) => (
               <div
                 key={c.name}
+                id={`cmd-opt-${i}`}
                 role="option"
                 aria-selected={i === selIdx}
                 className={`cmd-item${i === selIdx ? ' sel' : ''}`}
@@ -206,11 +209,13 @@ export default function Composer({ theme, onToggleTheme }) {
           </button>
 
           {session && (
-            <label className="pill-select-wrap" title="권한 모드 (setPermissionMode)">
+            <span className="pill-select-wrap">
               <select
+                aria-label="권한 모드"
                 className={`pill-select${session.permissionMode === 'bypassPermissions' ? ' danger' : ''}`}
                 value={session.permissionMode || 'default'}
-                disabled={!live}
+                disabled={!live || state.conn !== 'open'}
+                title="권한 모드 (setPermissionMode)"
                 onChange={(e) => changeMode(e.target.value)}
               >
                 {MODES.map((m) => (
@@ -219,7 +224,7 @@ export default function Composer({ theme, onToggleTheme }) {
                   </option>
                 ))}
               </select>
-            </label>
+            </span>
           )}
         </div>
 
@@ -231,6 +236,11 @@ export default function Composer({ theme, onToggleTheme }) {
             value={text}
             placeholder={placeholder}
             disabled={!session || exited}
+            aria-label="메시지 입력"
+            aria-autocomplete="list"
+            aria-expanded={dropdownOpen}
+            aria-controls={dropdownOpen ? 'cmd-listbox' : undefined}
+            aria-activedescendant={dropdownOpen ? `cmd-opt-${selIdx}` : undefined}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
           />
@@ -240,11 +250,13 @@ export default function Composer({ theme, onToggleTheme }) {
         <div className="composer-foot">
           <div className="foot-left">
             {session && models.length > 0 && (
-              <label className="pill-select-wrap" title="모델 (setModel)">
+              <span className="pill-select-wrap">
                 <select
+                  aria-label="모델"
                   className="pill-select"
                   value={modelInList ? modelValue : ''}
-                  disabled={!live}
+                  disabled={!live || state.conn !== 'open'}
+                  title="모델 (setModel)"
                   onChange={(e) => changeModel(e.target.value)}
                 >
                   {!modelInList && (
@@ -258,7 +270,7 @@ export default function Composer({ theme, onToggleTheme }) {
                     </option>
                   ))}
                 </select>
-              </label>
+              </span>
             )}
             <span className="foot-hint faint">Enter 전송 · Shift+Enter 개행 · / 커맨드</span>
           </div>

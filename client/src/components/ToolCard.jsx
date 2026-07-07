@@ -1,6 +1,8 @@
 // 도구 호출 카드 — 도구별 입력 렌더 + 결과(접기) 연결.
 // item: {name, input|null, inputJson, result:{content,isError,structured}|null,
 //        streaming, parentToolUseId}
+// chat.css를 직접 import — PermissionDialog가 ChatView 없이 ToolCard를 써도 스타일 보장.
+import './chat.css';
 
 function textOfResult(result) {
   if (!result) return '';

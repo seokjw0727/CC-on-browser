@@ -90,12 +90,21 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose }) {
   };
 
   return (
-    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div
+      className="modal-overlay"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          onClose();
+        }
+      }}
+    >
       <div className="modal" role="dialog" aria-modal="true" aria-label="새 세션">
         <div className="modal-title">
           새 세션
           <span className="spacer" />
-          <button type="button" className="icon-btn" onClick={onClose} title="닫기">
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="닫기" title="닫기">
             ✕
           </button>
         </div>
@@ -106,6 +115,8 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose }) {
             <input
               type="text"
               value={cwd}
+              autoFocus
+              aria-label="작업 디렉터리 경로"
               placeholder="C:\\path\\to\\project"
               onChange={(e) => setCwd(e.target.value)}
               onKeyDown={(e) => {
@@ -334,7 +345,8 @@ export default function Sidebar({ onCollapse }) {
   const isEmpty = openSessions.length === 0 && state.projects.length === 0;
 
   return (
-    <aside className="sidebar">
+    <>
+      <aside className="sidebar">
       <div className="sidebar-head">
         <div className="brand">
           <Sparkle size={20} />
@@ -396,7 +408,13 @@ export default function Sidebar({ onCollapse }) {
         <div className="sidebar-h">
           최근 세션
           <span className="spacer" />
-          <button type="button" className="icon-btn" onClick={refreshProjects} title="새로고침">
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={refreshProjects}
+            aria-label="최근 세션 새로고침"
+            title="새로고침"
+          >
             ↻
           </button>
         </div>
@@ -468,7 +486,10 @@ export default function Sidebar({ onCollapse }) {
           {planLabel(account) && <span className="account-plan dim">{planLabel(account)}</span>}
         </span>
       </div>
+      </aside>
 
+      {/* 모달은 aside 밖에 렌더 — 사이드바 접힘(.sidebar{display:none}) 시에도
+          컴포저 레포 pill로 열 수 있어야 하므로 display:none 서브트리를 피한다. */}
       {modalOpen && (
         <NewSessionModal
           initInfo={state.initInfo}
@@ -481,6 +502,6 @@ export default function Sidebar({ onCollapse }) {
           }}
         />
       )}
-    </aside>
+    </>
   );
 }
