@@ -7,6 +7,16 @@ CLI 기반 Claude Code를 브라우저에서 쓰는 **로컬 전용** 웹 앱.
 로컬에 설치된 `claude` CLI를 자식 프로세스로 구동합니다. 인증과 과금은 전적으로 사용자의
 Claude 구독(예: Claude Max)을 따르며, API 키가 필요 없습니다.
 
+## 무엇을 제공하나요
+
+- **스트리밍 마크다운 채팅** — 부분 메시지(`--include-partial-messages`)를 실시간 렌더. 코드 하이라이트(highlight.js) + XSS 정화(DOMPurify).
+- **도구 실행 카드** — Bash·Edit·Write·Read·Grep 등 도구 호출을 입력/결과 카드로, 긴 결과는 접기.
+- **사고(thinking) 블록** — 확장 사고 스트림을 별도 블록으로 표시.
+- **권한 다이얼로그** — `can_use_tool` 요청을 모달로 띄워 허용/거부. 제안(suggestion)은 "항상 허용" 같은 모호한 문구 대신 실제 효과를 그대로 서술.
+- **세션 재개** — 과거 프로젝트·세션 목록에서 트랜스크립트를 불러와 이어가기(`--resume`).
+- **런타임 컨트롤** — 모델 전환, 권한 모드(매번 확인 / 편집 수락 / 플랜 / 전체 허용) 전환, `/` 슬래시 커맨드 자동완성, 턴 중단(Esc).
+- **컴포저 중심 UI** — 상단 바 없이 입력창 한 곳에 레포·권한모드·모델·전송·사용량을 접어 넣은 레이아웃. 라이트/다크 테마, 외부 폰트·이미지 의존 0(브랜드 자산은 자체 내장 SVG — 로컬 CSP 안전).
+
 ## 요구사항
 
 - Windows / macOS / Linux + Node.js 20 이상
@@ -68,6 +78,25 @@ Node 서버 (server/src/server.js — http + ws)
   허용/거부를 결정해 CLI에 회신합니다.
 - 스폰된 CLI는 사용자의 훅·스킬·설정을 그대로 로드합니다 — 브라우저 UI는 실제 CLI 환경의 전면부입니다.
 - 미문서 CLI 프로토콜 지식은 `server/src/claude-session.js` 한 모듈에 격리돼 있습니다.
+
+## 프로젝트 구조
+
+```
+server/src/
+  server.js          HTTP(REST + 정적 서빙) + WebSocket 허브. 127.0.0.1 전용, 토큰·Origin 인증
+  session-hub.js     세션 레지스트리 — 키↔ClaudeSession, 이벤트 브로드캐스트/리플레이 중계
+  claude-session.js  CLI 자식 프로세스 1개 래핑 — stream-json 송수신, 미문서 프로토콜 격리
+  history.js         ~/.claude 프로젝트·세션·트랜스크립트 읽기 (세션 재개용)
+  fs-api.js          디렉터리 나열(/api/browse) — 파일 내용은 미제공
+  jsonl.js           라인 단위 JSON 파서
+client/src/
+  App.jsx            셸 레이아웃·테마 소유
+  lib/               store.jsx(상태) · ws.js(자동 재접속) · reduce-cli-event.js(CLI 이벤트→상태) · markdown.js · api.js
+  components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · Brand
+scripts/dev-fake.mjs 구독 미소모 데모 런처(fake CLI)
+server/test/         fake CLI 기반 통합·단위 테스트 (실제 claude 미실행)
+docs/superpowers/    스펙·플랜 문서
+```
 
 ## 보안 주의
 

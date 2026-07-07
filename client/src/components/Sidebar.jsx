@@ -10,6 +10,7 @@ import {
 } from '../lib/api.js';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
 import { Sparkle, Mascot } from './Brand.jsx';
+import { useFocusTrap } from '../lib/useFocusTrap.js';
 import './interact.css';
 
 const STATUS_BADGE = {
@@ -49,6 +50,9 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose }) {
   const [mode, setMode] = useState('default');
   const [browse, setBrowse] = useState(null); // {path, parent, dirs}
   const [error, setError] = useState(null);
+  // 포커스 트랩 — 모달이 열린 동안 Tab을 안에 가두고, 닫히면 여는 버튼으로 복원.
+  const cwdRef = useRef(null);
+  const dialogRef = useFocusTrap(true, cwdRef);
 
   const navigate = async (target) => {
     try {
@@ -100,7 +104,7 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose }) {
         }
       }}
     >
-      <div className="modal" role="dialog" aria-modal="true" aria-label="새 세션">
+      <div ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-label="새 세션">
         <div className="modal-title">
           새 세션
           <span className="spacer" />
@@ -113,9 +117,9 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose }) {
           <span className="dim">작업 디렉터리 (cwd)</span>
           <div className="cwd-path-row">
             <input
+              ref={cwdRef}
               type="text"
               value={cwd}
-              autoFocus
               aria-label="작업 디렉터리 경로"
               placeholder="C:\\path\\to\\project"
               onChange={(e) => setCwd(e.target.value)}

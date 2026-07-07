@@ -1,8 +1,9 @@
 // 권한 다이얼로그 — permission_request 큐를 순차 표시하는 모달.
 // Esc로 닫히지 않음(명시적 허용/거부 강제). 입력 렌더는 ToolCard 재사용.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
 import ToolCard from './ToolCard.jsx';
+import { useFocusTrap } from '../lib/useFocusTrap.js';
 import './interact.css';
 
 // suggestion 라벨: 제안의 실제 효과를 그대로 서술한다.
@@ -78,6 +79,9 @@ export default function PermissionDialog() {
   const [reason, setReason] = useState('');
   const [checked, setChecked] = useState(() => new Set());
   const [submitted, setSubmitted] = useState(false);
+  // 포커스 트랩 — 열려 있는 동안 Tab이 배경(컴포저/사이드바)으로 새지 않게 가둔다.
+  const allowRef = useRef(null);
+  const dialogRef = useFocusTrap(!!req, allowRef);
 
   // 다음 요청으로 넘어가면 입력 초기화
   useEffect(() => {
@@ -143,6 +147,7 @@ export default function PermissionDialog() {
       }}
     >
       <div
+        ref={dialogRef}
         className="modal perm-dialog"
         role="dialog"
         aria-modal="true"
@@ -204,11 +209,11 @@ export default function PermissionDialog() {
             거부
           </button>
           <button
+            ref={allowRef}
             type="button"
             className="btn-primary"
             disabled={submitted}
             onClick={allow}
-            autoFocus
           >
             허용
           </button>

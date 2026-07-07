@@ -237,6 +237,8 @@ export default function Composer({ theme, onToggleTheme }) {
             placeholder={placeholder}
             disabled={!session || exited}
             aria-label="메시지 입력"
+            role="combobox"
+            aria-multiline="true"
             aria-autocomplete="list"
             aria-expanded={dropdownOpen}
             aria-controls={dropdownOpen ? 'cmd-listbox' : undefined}

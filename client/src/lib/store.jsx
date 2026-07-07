@@ -134,9 +134,12 @@ function handleServerMessage(state, msg) {
       });
 
     case 'exit':
+      // 프로세스가 죽으면 대기 중이던 권한 요청은 더 이상 응답할 수 없고(서버도
+      // 이미 정리함), 답할 수 없는 권한 모달이 화면에 고착되므로 함께 비운다.
       return updateSession(state, msg.key, (s) => ({
         ...s,
         status: 'exited',
+        pendingPermissions: [],
       }));
 
     case 'error': {

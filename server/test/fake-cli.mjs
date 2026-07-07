@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // 가짜 claude CLI — stream-json 프로토콜 모사 (계획서 "검증된 CLI 프로토콜" 절과 필드 동일).
-// 시나리오는 환경변수 FAKE_SCENARIO로 선택: echo(기본) | permission | crash
+// 시나리오는 환경변수 FAKE_SCENARIO로 선택:
+//   echo(기본) | permission | crash | permission-crash(권한 요청 후 응답 전에 프로세스 사망)
 import { createJsonlParser } from '../src/jsonl.js';
 
 const scenario = process.env.FAKE_SCENARIO || 'echo';
@@ -111,7 +112,7 @@ function handle(msg) {
     if (scenario === 'crash') {
       process.exit(3);
     }
-    if (scenario === 'permission') {
+    if (scenario === 'permission' || scenario === 'permission-crash') {
       permCounter += 1;
       const requestId = `perm_${permCounter}`;
       const toolUseId = `toolu_${permCounter}`;
@@ -136,6 +137,11 @@ function handle(msg) {
           tool_use_id: toolUseId,
         },
       });
+      // permission-crash: 권한 응답이 오기 전에 프로세스가 죽는 상황(크래시) 재현.
+      // 기본 250ms(테스트 신속), FAKE_CRASH_DELAY_MS로 조정 가능(수동 재현/관찰용).
+      if (scenario === 'permission-crash') {
+        setTimeout(() => process.exit(3), Number(process.env.FAKE_CRASH_DELAY_MS) || 250);
+      }
       return;
     }
     // echo 시나리오: text_delta ×3 → assistant → result
