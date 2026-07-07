@@ -344,6 +344,7 @@ export default function Sidebar() {
                     <button
                       type="button"
                       className="session-stop"
+                      aria-label="세션 종료"
                       title="세션 종료 (CLI 프로세스 정지)"
                       onClick={() => stopSession(s.key)}
                     >
