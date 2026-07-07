@@ -327,28 +327,30 @@ export default function Sidebar() {
             {openSessions.map((s) => {
               const badge = STATUS_BADGE[s.status] ?? { label: s.status, cls: '' };
               return (
-                <button
+                <div
                   key={s.key}
-                  type="button"
-                  className={`session-tab${state.activeKey === s.key ? ' active' : ''}`}
-                  onClick={() => dispatch({ type: 'set-active', key: s.key })}
-                  title={s.cwd || s.key}
+                  className={`session-tab-row${state.activeKey === s.key ? ' active' : ''}`}
                 >
-                  <span className="truncate">{shortPath(s.cwd) || s.key}</span>
-                  <span className={`badge ${badge.cls}`}>{badge.label}</span>
+                  <button
+                    type="button"
+                    className="session-tab"
+                    onClick={() => dispatch({ type: 'set-active', key: s.key })}
+                    title={s.cwd || s.key}
+                  >
+                    <span className="truncate">{shortPath(s.cwd) || s.key}</span>
+                    <span className={`badge ${badge.cls}`}>{badge.label}</span>
+                  </button>
                   {s.status !== 'exited' && (
-                    <span
-                      role="button"
-                      tabIndex={0}
+                    <button
+                      type="button"
                       className="session-stop"
                       title="세션 종료 (CLI 프로세스 정지)"
-                      onClick={(e) => { e.stopPropagation(); stopSession(s.key); }}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); stopSession(s.key); } }}
+                      onClick={() => stopSession(s.key)}
                     >
                       ✕
-                    </span>
+                    </button>
                   )}
-                </button>
+                </div>
               );
             })}
           </>
