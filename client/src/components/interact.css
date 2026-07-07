@@ -264,6 +264,27 @@
   opacity: 0.6;
 }
 
+.session-stop {
+  flex: none;
+  cursor: pointer;
+  color: var(--text-dim);
+  border-radius: 4px;
+  padding: 0 4px;
+  line-height: 1.4;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s;
+}
+
+.session-tab:hover .session-stop,
+.session-tab.active .session-stop,
+.session-stop:focus-visible {
+  opacity: 1;
+}
+
+.session-stop:hover {
+  color: var(--danger);
+}
+
 .proj-item {
   border-radius: var(--radius);
 }

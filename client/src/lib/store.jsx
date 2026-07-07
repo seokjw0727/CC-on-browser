@@ -237,6 +237,8 @@ export function StoreProvider({ children }) {
         }
         return startId;
       },
+      /** Stop a session's CLI process (client->server contract 'stop'). Server replies with exit. */
+      stopSession: (key) => (wsRef.current ? wsRef.current.send({ type: 'stop', key }) : false),
     }),
     [],
   );

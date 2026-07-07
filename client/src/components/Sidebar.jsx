@@ -218,7 +218,7 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose }) {
 
 // ----- 사이드바 본체 -----
 export default function Sidebar() {
-  const { state, dispatch, startSession } = useStore();
+  const { state, dispatch, startSession, stopSession } = useStore();
   const [modalOpen, setModalOpen] = useState(false);
   const [defaultCwd, setDefaultCwd] = useState('');
   const [expanded, setExpanded] = useState({}); // dirName -> sessions[]|'loading'
@@ -336,6 +336,18 @@ export default function Sidebar() {
                 >
                   <span className="truncate">{shortPath(s.cwd) || s.key}</span>
                   <span className={`badge ${badge.cls}`}>{badge.label}</span>
+                  {s.status !== 'exited' && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      className="session-stop"
+                      title="세션 종료 (CLI 프로세스 정지)"
+                      onClick={(e) => { e.stopPropagation(); stopSession(s.key); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); stopSession(s.key); } }}
+                    >
+                      ✕
+                    </span>
+                  )}
                 </button>
               );
             })}

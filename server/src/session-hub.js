@@ -4,21 +4,26 @@ import { EventEmitter } from 'node:events';
 import { ClaudeSession } from './claude-session.js';
 
 const RING_LIMIT = 1000;
+// 종료된 세션 엔트리는 재접속 리플레이(attachReplay)를 위해 잠시 유지한 뒤 소거한다.
+// 그렇지 않으면 세션을 반복 생성/종료하는 장기 구동에서 링버퍼가 무한 누적된다.
+const EXITED_RETENTION_MS = 30 * 60_000;
 
 export class SessionHub extends EventEmitter {
   #cliPath;
   #cliArgsPrefix;
   #ringLimit;
+  #exitedRetentionMs;
   /** @type {Map<string, {key, session, ring: {seq,payload}[], nextSeq, pendingPermissions: Map, exited, exitCode}>} */
   #sessions = new Map();
   #nextKey = 0;
 
-  constructor({ cliPath, cliArgsPrefix = [], ringLimit = RING_LIMIT } = {}) {
+  constructor({ cliPath, cliArgsPrefix = [], ringLimit = RING_LIMIT, exitedRetentionMs = EXITED_RETENTION_MS } = {}) {
     super();
     if (!cliPath) throw new TypeError('cliPath is required');
     this.#cliPath = cliPath;
     this.#cliArgsPrefix = cliArgsPrefix;
     this.#ringLimit = ringLimit;
+    this.#exitedRetentionMs = exitedRetentionMs;
   }
 
   /** 새 CLI 세션을 spawn하고 initialize 왕복까지 마친 뒤 { key, initInfo } 반환. */
@@ -53,6 +58,15 @@ export class SessionHub extends EventEmitter {
       entry.exitCode = code;
       entry.pendingPermissions.clear();
       this.emit('broadcast', { type: 'exit', key, code });
+      // 유예 창(리플레이 계약) 후 엔트리 소거 → 링버퍼 무한 누적 방지.
+      // 소거 후 attach는 'unknown session key'로 떨어지고, 클라이언트는
+      // /api/transcript + resumeSessionId로 복구할 수 있어 계약을 깨지 않는다.
+      if (this.#exitedRetentionMs >= 0 && this.#exitedRetentionMs !== Infinity) {
+        entry.cleanupTimer = setTimeout(() => {
+          if (this.#sessions.get(key) === entry) this.#sessions.delete(key);
+        }, this.#exitedRetentionMs);
+        entry.cleanupTimer.unref?.();
+      }
     });
 
     this.#sessions.set(key, entry);
@@ -83,8 +97,9 @@ export class SessionHub extends EventEmitter {
     return this.#sessions.has(key);
   }
 
+  /** 사용자 텍스트 전송. 세션이 종료/중단되어 쓸 수 없으면 false. */
   sendText(key, text) {
-    this.#require(key).session.sendUserText(String(text ?? ''));
+    return this.#require(key).session.sendUserText(String(text ?? ''));
   }
 
   /**
@@ -142,6 +157,9 @@ export class SessionHub extends EventEmitter {
   }
 
   stopAll() {
-    for (const entry of this.#sessions.values()) entry.session.stop();
+    for (const entry of this.#sessions.values()) {
+      if (entry.cleanupTimer) clearTimeout(entry.cleanupTimer);
+      entry.session.stop();
+    }
   }
 }

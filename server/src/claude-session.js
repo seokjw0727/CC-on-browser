@@ -88,7 +88,7 @@ export class ClaudeSession extends EventEmitter {
   }
 
   sendUserText(text) {
-    this.#write({
+    return this.#write({
       type: 'user',
       message: { role: 'user', content: [{ type: 'text', text }] },
     });

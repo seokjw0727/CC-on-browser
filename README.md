@@ -27,8 +27,11 @@ npm start             # 서버 기동 (기본 포트 8787, PORT 또는 --port �
 Claude Code on Browser: http://127.0.0.1:8787/#token=<랜덤토큰>
 ```
 
-이 URL(토큰 포함)로 브라우저에서 접속하세요. `claude` 실행 파일 경로가 PATH에 없다면
-`CLAUDE_WEB_CLI_PATH` 환경변수로 지정할 수 있습니다.
+이 URL(토큰 포함)로 브라우저에서 접속하세요.
+
+**CLI 경로 해석 순서**: `CLAUDE_WEB_CLI_PATH` 환경변수(설정 시) → 개발 기본 경로(존재할 때만) →
+OS `PATH`의 `claude`(Windows는 `claude.exe`). 따라서 `claude`가 PATH에 있으면 대개 추가 설정이
+필요 없고, 특이한 위치에 설치했다면 `CLAUDE_WEB_CLI_PATH`로 절대 경로를 지정하세요.
 
 ### 구독 소모 없는 데모 (fake CLI)
 

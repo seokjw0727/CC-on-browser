@@ -293,6 +293,50 @@ test('unknown session key yields error message', async () => {
   client.close();
 });
 
+test('send to an exited session yields an error (not silent drop)', async () => {
+  process.env.FAKE_SCENARIO = 'crash';
+  const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
+  client.send({ type: 'start', startId: 'cl_dead', cwd: tmpRoot });
+  const started = await client.next((m) => m.type === 'started' && m.startId === 'cl_dead');
+  client.send({ type: 'send', key: started.key, text: 'boom' });
+  await client.next((m) => m.type === 'exit' && m.key === started.key);
+  // 세션이 죽은 뒤 send는 조용히 유실되지 않고 error로 응답해야 한다.
+  client.send({ type: 'send', key: started.key, text: 'after death' });
+  const err = await client.next((m) => m.type === 'error' && m.key === started.key);
+  assert.match(err.message, /not running/);
+  client.close();
+});
+
+test('exited session entry is cleaned up after retention window', async () => {
+  process.env.FAKE_SCENARIO = 'crash';
+  // 짧은 retention으로 전용 서버 기동 → 종료 후 엔트리 소거 검증.
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    exitedRetentionMs: 150,
+  });
+  try {
+    const client = await TestClient.connect(`ws://127.0.0.1:${h.port}/ws?token=${TOKEN}`);
+    client.send({ type: 'start', startId: 'cl_ttl', cwd: tmpRoot });
+    const started = await client.next((m) => m.type === 'started' && m.startId === 'cl_ttl');
+    client.send({ type: 'send', key: started.key, text: 'boom' });
+    await client.next((m) => m.type === 'exit' && m.key === started.key);
+    // retention 창 경과 대기
+    await new Promise((r) => setTimeout(r, 350));
+    // 소거되었으면 attach는 'unknown session key' error로 떨어진다.
+    client.send({ type: 'attach', key: started.key, afterSeq: 0 });
+    const err = await client.next((m) => m.type === 'error' && m.key === started.key);
+    assert.match(err.message, /unknown session key/);
+    client.close();
+  } finally {
+    await h.close();
+  }
+});
+
 test('(f) REST auth + /api/projects/sessions/transcript/browse/bootstrap', async () => {
   // 인증 실패
   assert.equal((await fetch(`${base}/api/projects`)).status, 401);

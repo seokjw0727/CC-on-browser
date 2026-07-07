@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
@@ -37,11 +38,12 @@ export async function startServer({
   cliArgsPrefix = [],
   projectsRoot,
   staticDir,
+  exitedRetentionMs,
 } = {}) {
   if (!token) throw new TypeError('token is required');
   if (!cliPath) throw new TypeError('cliPath is required');
 
-  const hub = new SessionHub({ cliPath, cliArgsPrefix });
+  const hub = new SessionHub({ cliPath, cliArgsPrefix, exitedRetentionMs });
   /** @type {Set<import('ws').WebSocket>} */
   const sockets = new Set();
   let boundPort = null;
@@ -139,9 +141,11 @@ export async function startServer({
           }
           return;
         }
-        case 'send':
-          hub.sendText(key, msg.text);
+        case 'send': {
+          const ok = hub.sendText(key, msg.text);
+          if (!ok) sendError(ws, { key, message: 'session is not running' });
           return;
+        }
         case 'permission': {
           const ok = hub.respondPermission(key, msg.requestId, {
             behavior: msg.behavior,
@@ -364,7 +368,12 @@ if (isMain) {
     ? Number(args[portIdx + 1])
     : (Number(process.env.PORT) || 8787);
   const token = crypto.randomBytes(16).toString('hex');
-  const cliPath = process.env.CLAUDE_WEB_CLI_PATH || DEFAULT_CLI_PATH;
+  // 우선순위: 명시적 env 오버라이드 → 개발 기본 경로(존재할 때만) → PATH의 bare 이름.
+  // bare 이름은 Node spawn이 OS PATH에서 해석하므로 macOS/Linux나 다른 설치 위치에서도 동작.
+  const cliPath = process.env.CLAUDE_WEB_CLI_PATH
+    || (existsSync(DEFAULT_CLI_PATH)
+      ? DEFAULT_CLI_PATH
+      : (process.platform === 'win32' ? 'claude.exe' : 'claude'));
   const here = path.dirname(fileURLToPath(import.meta.url));
   const staticDir = path.resolve(here, '..', '..', 'client', 'dist');
 
