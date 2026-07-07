@@ -56,6 +56,7 @@ function createInitialState() {
     initInfo: null,
     pendingStarts: new Map(), // startId -> {cwd, model, permissionMode, resumeSessionId}
     lastError: null,
+    newSessionOpen: false, // 새 세션(레포 선택) 모달 표시 여부 — Sidebar/Composer 공용
   };
 }
 
@@ -172,6 +173,10 @@ export function reducer(state, action) {
     }
     case 'set-active':
       return { ...state, activeKey: action.key };
+    case 'open-new-session':
+      return { ...state, newSessionOpen: true };
+    case 'close-new-session':
+      return { ...state, newSessionOpen: false };
     case 'set-projects':
       return { ...state, projects: action.projects };
     case 'update-session':

@@ -1,4 +1,4 @@
-// 사이드바 — [새 세션](cwd 피커 모달) / 열린 세션 탭(status 뱃지) / 최근 세션(재개).
+// 사이드바 — wordmark / [새 세션](cwd 피커 모달) / 열린 세션 탭 / 최근 세션(재개) / 계정 칩.
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../lib/store.jsx';
 import {
@@ -9,6 +9,7 @@ import {
   fetchTranscript,
 } from '../lib/api.js';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
+import { Sparkle, Mascot } from './Brand.jsx';
 import './interact.css';
 
 const STATUS_BADGE = {
@@ -216,10 +217,26 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose }) {
   );
 }
 
+// account.email → 표시 이름. subscriptionType → 짧은 플랜명.
+function accountName(account) {
+  const email = account?.email;
+  if (!email) return '사용자';
+  const local = String(email).split('@')[0] || email;
+  const base = local.replace(/[._-].*$/, '').replace(/\d+$/, '') || local;
+  return base.charAt(0).toUpperCase() + base.slice(1);
+}
+function planLabel(account) {
+  const t = account?.subscriptionType;
+  if (!t) return '';
+  return String(t).replace(/^claude\s+/i, '');
+}
+
 // ----- 사이드바 본체 -----
-export default function Sidebar() {
+export default function Sidebar({ onCollapse }) {
   const { state, dispatch, startSession, stopSession } = useStore();
-  const [modalOpen, setModalOpen] = useState(false);
+  const modalOpen = state.newSessionOpen;
+  const openModal = () => dispatch({ type: 'open-new-session' });
+  const closeModal = () => dispatch({ type: 'close-new-session' });
   const [defaultCwd, setDefaultCwd] = useState('');
   const [expanded, setExpanded] = useState({}); // dirName -> sessions[]|'loading'
   const [error, setError] = useState(null);
@@ -313,12 +330,31 @@ export default function Sidebar() {
   };
 
   const openSessions = [...state.sessions.values()];
+  const account = state.initInfo?.account;
+  const isEmpty = openSessions.length === 0 && state.projects.length === 0;
 
   return (
     <aside className="sidebar">
+      <div className="sidebar-head">
+        <div className="brand">
+          <Sparkle size={20} />
+          <span className="brand-word">Claude Code</span>
+          <span className="brand-badge">브라우저</span>
+        </div>
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={onCollapse}
+          title="사이드바 접기"
+          aria-label="사이드바 접기"
+        >
+          ⟨
+        </button>
+      </div>
+
       <div className="sidebar-inner">
-        <button type="button" className="new-session-btn" onClick={() => setModalOpen(true)}>
-          + 새 세션
+        <button type="button" className="new-session-btn" onClick={openModal}>
+          <span className="ns-plus" aria-hidden="true">+</span> 새 세션
         </button>
 
         {openSessions.length > 0 && (
@@ -412,6 +448,25 @@ export default function Sidebar() {
         ))}
 
         {error && <div className="sidebar-error">{error}</div>}
+
+        {openSessions.length === 0 && (
+          <div className="sidebar-empty">
+            <Mascot scale={5} className="empty-mascot" />
+            <span className="dim">
+              {isEmpty
+                ? '시작한 세션이 여기에 표시됩니다'
+                : '위에서 세션을 재개하거나 새 세션을 시작하세요'}
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="account-chip" title={account?.email || '계정'}>
+        <span className="avatar">{accountName(account).charAt(0)}</span>
+        <span className="account-text">
+          <span className="account-name truncate">{accountName(account)}</span>
+          {planLabel(account) && <span className="account-plan dim">{planLabel(account)}</span>}
+        </span>
       </div>
 
       {modalOpen && (
@@ -419,9 +474,9 @@ export default function Sidebar() {
           initInfo={state.initInfo}
           projects={state.projects}
           defaultCwd={defaultCwd}
-          onClose={() => setModalOpen(false)}
+          onClose={closeModal}
           onStart={(opts) => {
-            setModalOpen(false);
+            closeModal();
             startSession(opts);
           }}
         />

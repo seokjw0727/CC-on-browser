@@ -1,12 +1,12 @@
-// App shell: StatusBar (top) + Sidebar (left, collapsible) + ChatView/Composer (center)
-// + PermissionDialog (modal). 각 컴포넌트는 store를 통해 상태를 공유한다.
+// App shell: Sidebar (left, collapsible) + main (ChatView + Composer).
+// No persistent top bar — session/model/permission/usage controls live in
+// the composer (reference-faithful). PermissionDialog is a modal.
 
 import { useEffect, useState } from 'react';
 import { StoreProvider } from './lib/store.jsx';
 import ChatView from './components/ChatView.jsx';
 import Composer from './components/Composer.jsx';
 import Sidebar from './components/Sidebar.jsx';
-import StatusBar from './components/StatusBar.jsx';
 import PermissionDialog from './components/PermissionDialog.jsx';
 
 const THEME_KEY = 'ccob-theme';
@@ -16,6 +16,7 @@ function Shell() {
     () => localStorage.getItem(THEME_KEY) || 'dark',
   );
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -24,17 +25,22 @@ function Shell() {
 
   return (
     <div className={`app${sidebarOpen ? '' : ' sidebar-collapsed'}`}>
-      <StatusBar
-        theme={theme}
-        onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
-        onToggleSidebar={() => setSidebarOpen((v) => !v)}
-      />
-
-      <Sidebar />
+      <Sidebar onCollapse={() => setSidebarOpen(false)} />
 
       <main className="main">
+        {!sidebarOpen && (
+          <button
+            type="button"
+            className="sidebar-reopen"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="사이드바 열기"
+            title="사이드바 열기"
+          >
+            ☰
+          </button>
+        )}
         <ChatView />
-        <Composer />
+        <Composer theme={theme} onToggleTheme={toggleTheme} />
       </main>
 
       <PermissionDialog />

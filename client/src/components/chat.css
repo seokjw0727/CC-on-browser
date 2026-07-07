@@ -8,23 +8,46 @@
   flex-direction: column;
 }
 
-.chat-view > .placeholder {
-  flex: 1;
-}
-
 .chat-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 16px;
+  padding: 28px 24px 12px;
+  display: flex;
+  flex-direction: column;
 }
 
 .msg-list {
-  max-width: 860px;
+  width: 100%;
+  max-width: var(--composer-max);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 18px;
+}
+
+/* ----- 그리팅(빈 상태) ----- */
+.greeting {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 560px;
+  padding: 40px 16px;
+  text-align: center;
+}
+.greeting-title {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 1.3;
+  margin: 0;
+  color: var(--text);
+}
+.greeting-sub {
+  margin: 0;
+  font-size: 14px;
 }
 
 .jump-latest {
@@ -33,19 +56,25 @@
   left: 50%;
   transform: translateX(-50%);
   border-radius: 999px;
-  padding: 4px 14px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  padding: 5px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  box-shadow: var(--shadow-2);
+}
+.jump-latest:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
 }
 
-/* ----- 사용자 메시지 ----- */
+/* ----- 사용자 메시지 (오른쪽 정렬 소프트 버블) ----- */
 .msg-user {
   align-self: flex-end;
-  max-width: 85%;
+  max-width: 82%;
   background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--radius);
-  padding: 8px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-lg) var(--r-lg) 4px var(--r-lg);
+  padding: 10px 14px;
 }
 
 .msg-user .user-text {
@@ -154,31 +183,7 @@
   }
 }
 
-.pulse-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-dim);
-  flex: none;
-}
-
-.pulse-dot.on {
-  background: var(--accent);
-  animation: ccob-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes ccob-pulse {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(0.85);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.15);
-  }
-}
+/* .pulse-dot 는 theme.css 에 정의됨 (중복 제거) */
 
 .status-line {
   display: flex;
@@ -191,7 +196,7 @@
 /* ----- 사고 과정 블록 ----- */
 .thinking-block {
   border: 1px dashed var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--surface);
 }
 
@@ -233,22 +238,22 @@
 /* ----- 도구 카드 ----- */
 .tool-card {
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--r-md);
   background: var(--surface);
   overflow: hidden;
 }
 
 .tool-card.error {
-  border-color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
 }
 
 .tool-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 7px 11px;
   background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .tool-name {

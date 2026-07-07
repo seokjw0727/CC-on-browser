@@ -1,14 +1,45 @@
-// 컴포저 — 자동 높이 textarea, Enter 전송/Shift+Enter 개행,
-// `/` 커맨드 드롭다운(initInfo.commands), Esc/버튼으로 interrupt.
-// 스트리밍 중에는 큐잉 없이 전송만 비활성(+안내), 입력 자체는 가능.
+// 컴포저(레퍼런스 충실) — 상단 pill 행(레포·권한모드), 입력, 하단 컨트롤(모델·전송),
+// 그 아래 마이크로 메타(비용·토큰·rate limit·연결·테마). 상단 바를 대체한다.
+// Enter 전송/Shift+Enter 개행, `/` 커맨드 드롭다운, Esc/버튼 interrupt.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
+import { Mascot } from './Brand.jsx';
 import './interact.css';
 
 const MAX_HEIGHT_PX = 200;
 
-export default function Composer() {
+const MODE_LABEL = {
+  default: '매번 확인',
+  acceptEdits: '편집 수락',
+  plan: '플랜 모드',
+  bypassPermissions: '전체 허용',
+};
+const MODES = ['default', 'acceptEdits', 'plan', 'bypassPermissions'];
+
+const CONN_LABEL = { connecting: '연결 중', open: '연결됨', closed: '연결 끊김' };
+
+function shortPath(p) {
+  if (!p) return '';
+  const parts = String(p).split(/[\\/]/).filter(Boolean);
+  return parts.length <= 2 ? p : `…\\${parts.slice(-1).join('\\')}`;
+}
+function fmtCost(c) {
+  return typeof c === 'number' ? `$${c.toFixed(4)}` : '$0.0000';
+}
+function fmtResetsAt(resetsAt) {
+  if (resetsAt == null) return null;
+  const n = Number(resetsAt);
+  if (!Number.isFinite(n)) return String(resetsAt);
+  const ms = n > 1e12 ? n : n * 1000;
+  try {
+    return new Date(ms).toLocaleTimeString();
+  } catch {
+    return String(resetsAt);
+  }
+}
+
+export default function Composer({ theme, onToggleTheme }) {
   const { state, dispatch, send } = useStore();
   const session = useActiveSession();
   const [text, setText] = useState('');
@@ -16,11 +47,17 @@ export default function Composer() {
   const [cmdDismissed, setCmdDismissed] = useState(false);
   const taRef = useRef(null);
 
-  const busy =
-    !!session && session.status !== 'idle' && session.status !== 'exited';
+  const busy = !!session && session.status !== 'idle' && session.status !== 'exited';
   const exited = session?.status === 'exited';
+  const live = !!session && session.status !== 'exited';
   const canSend =
     !!session && session.status === 'idle' && state.conn === 'open' && text.trim() !== '';
+
+  const models = Array.isArray(state.initInfo?.models) ? state.initInfo.models : [];
+  const modelValue = session?.model ?? '';
+  const modelInList = models.some((m) => m.value === modelValue);
+  const rl = session?.rateLimit;
+  const rlWarn = rl && rl.status && rl.status !== 'allowed';
 
   // ----- `/` 커맨드 드롭다운 -----
   const commands = useMemo(() => {
@@ -29,15 +66,12 @@ export default function Composer() {
     return list
       .map((c) => (typeof c === 'string' ? { name: c, description: '' } : c))
       .filter((c) => c && typeof c.name === 'string')
-      // CLI가 이름을 "/name" 형태로 줄 수도 있으므로 선행 슬래시 제거
       .map((c) => ({ ...c, name: c.name.replace(/^\//, '') }));
   }, [state.initInfo]);
 
   const cmdMatch = /^\/([\w:.-]*)$/.exec(text);
   const filtered = cmdMatch
-    ? commands.filter((c) =>
-        c.name.toLowerCase().startsWith(cmdMatch[1].toLowerCase()),
-      )
+    ? commands.filter((c) => c.name.toLowerCase().startsWith(cmdMatch[1].toLowerCase()))
     : [];
   const dropdownOpen = !cmdDismissed && !!cmdMatch && filtered.length > 0;
 
@@ -46,7 +80,6 @@ export default function Composer() {
     setSelIdx(0);
   }, [text]);
 
-  // ----- textarea 자동 높이 -----
   useEffect(() => {
     const el = taRef.current;
     if (!el) return;
@@ -56,7 +89,7 @@ export default function Composer() {
 
   const pickCommand = (cmd) => {
     if (!cmd) return;
-    setText(`/${cmd.name} `); // 선택 후 일반 텍스트로 이어서 작성/전송
+    setText(`/${cmd.name} `);
     taRef.current?.focus();
   };
 
@@ -65,7 +98,6 @@ export default function Composer() {
     const t = text;
     const ok = send({ type: 'send', key: session.key, text: t });
     if (!ok) return;
-    // CLI는 사용자 텍스트를 되돌려주지 않으므로 로컬에서 즉시 반영
     dispatch({
       type: 'update-session',
       key: session.key,
@@ -81,9 +113,18 @@ export default function Composer() {
   };
 
   const doInterrupt = () => {
-    if (session && session.status !== 'idle' && session.status !== 'exited') {
-      send({ type: 'interrupt', key: session.key });
-    }
+    if (busy) send({ type: 'interrupt', key: session.key });
+  };
+
+  const changeModel = (model) => {
+    if (!session || !model) return;
+    send({ type: 'setModel', key: session.key, model });
+    dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, model }) });
+  };
+  const changeMode = (mode) => {
+    if (!session || !mode) return;
+    send({ type: 'setPermissionMode', key: session.key, mode });
+    dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, permissionMode: mode }) });
   };
 
   const onKeyDown = (e) => {
@@ -121,14 +162,16 @@ export default function Composer() {
   };
 
   const placeholder = !session
-    ? '사이드바에서 새 세션을 시작하세요'
+    ? '레포를 선택하면 대화를 시작할 수 있습니다'
     : exited
       ? '세션이 종료되었습니다'
-      : '메시지 입력 — Enter 전송, Shift+Enter 개행, / 커맨드';
+      : '작업을 설명하거나 질문하세요';
+
+  const repoLabel = session ? shortPath(session.cwd) || session.key : '레포 선택...';
 
   return (
-    <div className="composer-area">
-      <div className="composer">
+    <div className="composer-dock">
+      <div className="composer-shell">
         {dropdownOpen && (
           <div className="cmd-dropdown" role="listbox">
             {filtered.map((c, i) => (
@@ -138,7 +181,6 @@ export default function Composer() {
                 aria-selected={i === selIdx}
                 className={`cmd-item${i === selIdx ? ' sel' : ''}`}
                 onMouseEnter={() => setSelIdx(i)}
-                // onMouseDown: textarea blur 전에 선택 처리
                 onMouseDown={(e) => {
                   e.preventDefault();
                   pickCommand(c);
@@ -151,52 +193,147 @@ export default function Composer() {
           </div>
         )}
 
-        <div className="composer-row">
+        {/* 상단 pill 행 — 레포(cwd) + 권한 모드 */}
+        <div className="composer-top">
+          <button
+            type="button"
+            className="pill repo-pill"
+            onClick={() => dispatch({ type: 'open-new-session' })}
+            title={session?.cwd || '새 세션 / 레포 선택'}
+          >
+            <span className="pill-ico" aria-hidden="true">☁</span>
+            <span className="truncate">{repoLabel}</span>
+          </button>
+
+          {session && (
+            <label className="pill-select-wrap" title="권한 모드 (setPermissionMode)">
+              <select
+                className={`pill-select${session.permissionMode === 'bypassPermissions' ? ' danger' : ''}`}
+                value={session.permissionMode || 'default'}
+                disabled={!live}
+                onChange={(e) => changeMode(e.target.value)}
+              >
+                {MODES.map((m) => (
+                  <option key={m} value={m}>
+                    {MODE_LABEL[m]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+
+        {/* 입력 */}
+        <div className="composer-input">
           <textarea
             ref={taRef}
-            rows={2}
+            rows={1}
             value={text}
             placeholder={placeholder}
             disabled={!session || exited}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
           />
+        </div>
+
+        {/* 하단 컨트롤 — 모델 + 전송/중단 */}
+        <div className="composer-foot">
+          <div className="foot-left">
+            {session && models.length > 0 && (
+              <label className="pill-select-wrap" title="모델 (setModel)">
+                <select
+                  className="pill-select"
+                  value={modelInList ? modelValue : ''}
+                  disabled={!live}
+                  onChange={(e) => changeModel(e.target.value)}
+                >
+                  {!modelInList && (
+                    <option value="" disabled>
+                      {modelValue || '모델'}
+                    </option>
+                  )}
+                  {models.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.displayName || m.value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <span className="foot-hint faint">Enter 전송 · Shift+Enter 개행 · / 커맨드</span>
+          </div>
+
+          <span className="spacer" />
+
           {busy ? (
             <button
               type="button"
-              className="btn-danger"
+              className="send-btn interrupt"
               onClick={doInterrupt}
               title="현재 턴 중단 (Esc)"
+              aria-label="중단"
             >
-              ■ 중단
+              ■
             </button>
           ) : (
             <button
               type="button"
-              className="btn-primary"
+              className="send-btn"
               disabled={!canSend}
               onClick={doSend}
               title="전송 (Enter)"
+              aria-label="전송"
             >
-              전송
+              ↑
             </button>
           )}
         </div>
-
-        <div className="composer-hint dim">
-          {busy && (
-            <span>
-              응답 생성 중 — 완료 후 전송할 수 있습니다. Esc 또는 [중단]으로 멈출 수
-              있습니다.
-            </span>
-          )}
-          {session && state.conn !== 'open' && (
-            <span style={{ color: 'var(--danger)' }}>
-              서버 연결이 끊겼습니다 — 재접속 중…
-            </span>
-          )}
-        </div>
       </div>
+
+      {/* 마이크로 메타 — 비용·토큰·rate limit·연결·테마 */}
+      <div className="composer-meta">
+        {session && (
+          <span
+            className="meta-item"
+            title={`누적 비용 ${fmtCost(session.usage.cost)} · 입력 ${session.usage.inTok} · 출력 ${session.usage.outTok} tok`}
+          >
+            {fmtCost(session.usage.cost)} · ↑{session.usage.inTok} ↓{session.usage.outTok}
+          </span>
+        )}
+        {rlWarn && (
+          <span className="meta-item warn" title={`rate limit: ${rl.status}${rl.rateLimitType ? ` (${rl.rateLimitType})` : ''}`}>
+            ⏳ {rl.status}
+            {fmtResetsAt(rl.resetsAt) ? ` · ${fmtResetsAt(rl.resetsAt)} 해제` : ''}
+          </span>
+        )}
+        {busy && <span className="meta-item accent">응답 생성 중 — Esc로 중단</span>}
+        {session && state.conn !== 'open' && (
+          <span className="meta-item danger">연결 끊김 — 재접속 중…</span>
+        )}
+        <span className="spacer" />
+        {state.lastError && (
+          <span className="meta-item danger" title={state.lastError}>
+            {state.lastError}
+            <button type="button" className="meta-x" onClick={() => dispatch({ type: 'clear-error' })} aria-label="오류 지우기">
+              ✕
+            </button>
+          </span>
+        )}
+        <span className="meta-item" title={`WebSocket: ${state.conn}`}>
+          <span className={`conn-dot ${state.conn}`} /> {CONN_LABEL[state.conn] ?? state.conn}
+        </span>
+        <button
+          type="button"
+          className="meta-theme"
+          onClick={onToggleTheme}
+          title="테마 전환"
+          aria-label="테마 전환"
+        >
+          {theme === 'dark' ? '☀' : '☾'}
+        </button>
+      </div>
+
+      <Mascot className="composer-mascot" scale={4} />
     </div>
   );
 }
