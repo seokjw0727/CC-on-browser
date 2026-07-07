@@ -246,6 +246,34 @@ test('(d) permission round-trip: allow -> tool_result -> result; deny -> result'
   client.close();
 });
 
+test('(d2) allow with updatedPermissions is forwarded to CLI', async () => {
+  process.env.FAKE_SCENARIO = 'permission';
+  const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
+  client.send({ type: 'start', startId: 'cl_2p', cwd: tmpRoot });
+  const started = await client.next((m) => m.type === 'started' && m.startId === 'cl_2p');
+  const key = started.key;
+
+  client.send({ type: 'send', key, text: 'do write' });
+  const permReq = await client.next((m) => m.type === 'permission_request' && m.key === key);
+  assert.ok(Array.isArray(permReq.suggestions) && permReq.suggestions.length > 0,
+    'fake-cli must offer at least one permission suggestion');
+
+  client.send({
+    type: 'permission', key, requestId: permReq.requestId,
+    behavior: 'allow', updatedInput: permReq.input,
+    updatedPermissions: permReq.suggestions,
+  });
+  const allowResult = await client.next(
+    (m) => m.type === 'event' && m.key === key && m.payload.type === 'result',
+  );
+  // fake-cli는 수신한 권한 응답을 echo_response로 되돌려준다 (픽스처 전용 필드)
+  const echoed = allowResult.payload.echo_response;
+  assert.ok(echoed, 'fake-cli must echo the received permission response');
+  assert.equal(echoed.behavior, 'allow');
+  assert.deepEqual(echoed.updatedPermissions, permReq.suggestions);
+  client.close();
+});
+
 test('crash scenario propagates exit message', async () => {
   process.env.FAKE_SCENARIO = 'crash';
   const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);

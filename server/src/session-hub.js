@@ -89,14 +89,22 @@ export class SessionHub extends EventEmitter {
 
   /**
    * 권한 요청에 응답. behavior 'allow'|'deny'.
+   * allow 시 updatedPermissions(수락한 permission_suggestions)를 CLI에 그대로 전달 —
+   * "항상 허용" 류 영구 규칙은 CLI가 이 필드를 받아야 저장된다.
    * pending에 없는 requestId면 false.
    */
-  respondPermission(key, requestId, { behavior, updatedInput, message } = {}) {
+  respondPermission(key, requestId, { behavior, updatedInput, updatedPermissions, message } = {}) {
     const entry = this.#require(key);
     const pending = entry.pendingPermissions.get(requestId);
     if (!pending) return false;
     const result = behavior === 'allow'
-      ? { behavior: 'allow', updatedInput: updatedInput ?? pending.input ?? {} }
+      ? {
+        behavior: 'allow',
+        updatedInput: updatedInput ?? pending.input ?? {},
+        ...(Array.isArray(updatedPermissions) && updatedPermissions.length > 0
+          ? { updatedPermissions }
+          : {}),
+      }
       : { behavior: 'deny', message: message || '사용자가 거부했습니다' };
     entry.pendingPermissions.delete(requestId);
     const ok = entry.session.respondPermission(requestId, result);

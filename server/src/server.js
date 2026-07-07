@@ -146,6 +146,7 @@ export async function startServer({
           const ok = hub.respondPermission(key, msg.requestId, {
             behavior: msg.behavior,
             updatedInput: msg.updatedInput,
+            updatedPermissions: msg.updatedPermissions,
             message: msg.message,
           });
           if (!ok) sendError(ws, { key, message: `no pending permission request: ${msg.requestId}` });

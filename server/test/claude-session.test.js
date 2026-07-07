@@ -116,7 +116,9 @@ test('(c) permission allow: permission_request -> respondPermission -> tool_resu
     assert.ok(perm.requestId);
     assert.equal(perm.toolUseId, 'toolu_1');
     assert.deepEqual(perm.input, { file_path: 'C:\\fake\\x.txt', content: 'hi' });
-    assert.deepEqual(perm.suggestions, []);
+    assert.deepEqual(perm.suggestions, [
+      { type: 'addRules', rules: [{ toolName: 'Write' }], behavior: 'allow', destination: 'localSettings' },
+    ]);
 
     // pending에 없는 requestId는 false
     assert.equal(session.respondPermission('nonexistent', { behavior: 'allow' }), false);

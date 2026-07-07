@@ -14,7 +14,7 @@ function out(obj) {
   process.stdout.write(JSON.stringify(obj) + '\n');
 }
 
-function emitResult(text) {
+function emitResult(text, extra = {}) {
   out({
     type: 'result',
     subtype: 'success',
@@ -25,6 +25,7 @@ function emitResult(text) {
     num_turns: userCount,
     duration_ms: 42,
     is_error: false,
+    ...extra,
   });
 }
 
@@ -86,8 +87,8 @@ function handle(msg) {
     const pending = pendingPermissions.get(requestId);
     if (!pending) return;
     pendingPermissions.delete(requestId);
-    const behavior = msg.response?.response?.behavior;
-    if (behavior === 'allow') {
+    const permissionResponse = msg.response?.response;
+    if (permissionResponse?.behavior === 'allow') {
       out({
         type: 'user',
         message: {
@@ -97,9 +98,10 @@ function handle(msg) {
         tool_use_result: { success: true },
         session_id: SESSION_ID,
       });
-      emitResult('permission allowed');
+      // echo_response: 수신한 권한 응답을 그대로 되돌려주는 픽스처 전용 진단 필드
+      emitResult('permission allowed', { echo_response: permissionResponse });
     } else {
-      emitResult('permission denied');
+      emitResult('permission denied', { echo_response: permissionResponse });
     }
     return;
   }
@@ -123,7 +125,14 @@ function handle(msg) {
           display_name: 'Write',
           input: { file_path: 'C:\\fake\\x.txt', content: 'hi' },
           description: 'Write file',
-          permission_suggestions: [],
+          permission_suggestions: [
+            {
+              type: 'addRules',
+              rules: [{ toolName: 'Write' }],
+              behavior: 'allow',
+              destination: 'localSettings',
+            },
+          ],
           tool_use_id: toolUseId,
         },
       });
