@@ -23,6 +23,8 @@ CLI 기반 Claude Code를 브라우저에서 사용할 수 있게 하는 로컬 
    를 보냄. 우리가
    `{"type":"control_response","response":{"subtype":"success","request_id":"<uuid>","response":{"behavior":"allow","updatedInput":{...}}}}`
    로 응답하면 실행됨. (deny는 `{"behavior":"deny","message":"..."}`)
+   allow 응답에 `updatedPermissions`(수락한 permission_suggestions 에코)를 추가로 실을 수 있다 —
+   이는 프로브 실측이 아닌 SDK PermissionResult 관례이며, 실 CLI 수용 여부는 E2E(Task 9 Step 2)에서 확인한다.
 5. **멀티턴**: `result` 수신 후 같은 프로세스 stdin에 다음 user 메시지를 보내면 같은 session_id로 이어짐. 프로세스 재spawn 불필요.
 6. **스트림 이벤트**: `stream_event`(text_delta 등), `system/thinking_tokens`, `system/status`, `rate_limit_event`, tool_result가 담긴 `user` 메시지, 최종 `result`(usage, total_cost_usd, num_turns) 수신.
 7. 스폰된 CLI는 사용자의 훅·스킬·설정을 그대로 로드 → 브라우저 UI는 사용자의 실제 CLI 환경의 전면부가 된다.

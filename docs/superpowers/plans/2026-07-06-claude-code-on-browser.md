@@ -27,13 +27,15 @@ spawn: `claude.exe -p --input-format stream-json --output-format stream-json --v
 ```json
 {"type":"control_request","request_id":"init_1","request":{"subtype":"initialize"}}
 {"type":"user","message":{"role":"user","content":[{"type":"text","text":"..."}]}}
-{"type":"control_response","response":{"subtype":"success","request_id":"<그대로 에코>","response":{"behavior":"allow","updatedInput":{...}}}}
+{"type":"control_response","response":{"subtype":"success","request_id":"<그대로 에코>","response":{"behavior":"allow","updatedInput":{...},"updatedPermissions":[...]}}}
 {"type":"control_response","response":{"subtype":"success","request_id":"<...>","response":{"behavior":"deny","message":"사유"}}}
 {"type":"control_request","request_id":"int_1","request":{"subtype":"interrupt"}}
 {"type":"control_request","request_id":"m_1","request":{"subtype":"set_model","model":"sonnet"}}
 {"type":"control_request","request_id":"pm_1","request":{"subtype":"set_permission_mode","mode":"acceptEdits"}}
 ```
 (interrupt/set_model/set_permission_mode 서브타입은 SDK 관례 — E2E에서 확인 전까지 **선택 기능으로 취급**: control_response가 error이거나 30s 타임아웃이면 해당 기능만 비활성 안내(toast)하고 턴 흐름·세션은 유지한다. 핵심 계약(user 턴, can_use_tool)과 결합하지 않는다.)
+
+(allow 응답의 `updatedPermissions`(수락한 `permission_suggestions` 배열을 그대로 에코 — "항상 허용" 류 영구 규칙 저장용)도 SDK PermissionResult 관례 — 프로브 기록에는 없으며 Task 9 Step 2 실 CLI E2E에서 확인. 미수용이어도 allow/deny 핵심 흐름과 결합하지 않는다.)
 
 **CLI → 서버 (stdout), type별:**
 - `control_response`: initialize 응답. `response.response`에 `commands[]`, `models[]`(value/displayName/description), `account{email,subscriptionType}`, `output_style`.
@@ -54,7 +56,7 @@ spawn: `claude.exe -p --input-format stream-json --output-format stream-json --v
 ```json
 {"type":"start","startId":"cl_1","cwd":"C:\\path","model":"opus","permissionMode":"default","resumeSessionId":null}
 {"type":"send","key":"s_1","text":"사용자 입력"}
-{"type":"permission","key":"s_1","requestId":"<uuid>","behavior":"allow","updatedInput":{},"message":null}
+{"type":"permission","key":"s_1","requestId":"<uuid>","behavior":"allow","updatedInput":{},"updatedPermissions":[],"message":null}
 {"type":"interrupt","key":"s_1"}
 {"type":"setModel","key":"s_1","model":"sonnet"}
 {"type":"setPermissionMode","key":"s_1","mode":"acceptEdits"}
