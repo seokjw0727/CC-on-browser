@@ -9,6 +9,7 @@ import {
   fetchTranscript,
 } from '../lib/api.js';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
+import { buildSessionTree } from '../lib/sessionTree.js';
 import { Sparkle, Mascot } from './Brand.jsx';
 import { useFocusTrap } from '../lib/useFocusTrap.js';
 import './interact.css';
@@ -345,6 +346,108 @@ export default function Sidebar({ onCollapse }) {
   };
 
   const openSessions = [...state.sessions.values()];
+
+  const tree = buildSessionTree({
+    liveSessions: openSessions,
+    projects: state.projects,
+    historyByDir: expanded,
+    activeKey: state.activeKey,
+  });
+
+  // 라이브 세션 행
+  const LiveRow = ({ row, node }) => {
+    const badge = STATUS_BADGE[row.status] ?? { label: row.status, cls: '' };
+    const label = row.sessionId ? row.sessionId.slice(0, 8) : '새 세션';
+    return (
+      <div className={`sess-row live${row.active ? ' active' : ''}`}>
+        <button
+          type="button"
+          className="sess-main"
+          onClick={() => dispatch({ type: 'set-active', key: row.key })}
+          title={node.cwd || node.label}
+        >
+          <span className="sess-dot live" aria-hidden="true" />
+          <span className="truncate">{label}</span>
+          <span className={`badge ${badge.cls}`}>{badge.label}</span>
+        </button>
+        {row.status !== 'exited' && (
+          <button
+            type="button"
+            className="session-stop"
+            aria-label="세션 종료"
+            title="세션 종료 (CLI 프로세스 정지)"
+            onClick={() => stopSession(row.key)}
+          >
+            ✕
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  // 재개 가능 히스토리 행
+  const HistoryRow = ({ h, node }) => (
+    <button
+      type="button"
+      className="sess-row history"
+      disabled={!node.cwd}
+      title={node.cwd ? `재개: ${h.sessionId}` : 'cwd를 알 수 없어 재개할 수 없습니다'}
+      onClick={() =>
+        node.cwd &&
+        resumeSession({ dirName: node.dirName, cwd: node.cwd }, { sessionId: h.sessionId })
+      }
+    >
+      <span className="sess-dot" aria-hidden="true" />
+      <span className="truncate">{h.title || '(제목 없음)'}</span>
+      <span className="rs-meta dim">{fmtTime(h.mtime)}</span>
+    </button>
+  );
+
+  // 디렉토리 그룹(헤더 + 펼침 영역)
+  const DirGroup = ({ node, pinned = false }) => {
+    const open = pinned || !!expanded[node.dirName];
+    return (
+      <div className={`dir-group${node.active ? ' active-dir' : ''}`}>
+        <button
+          type="button"
+          className="dir-head"
+          onClick={() => node.dirName && toggleProject(node.dirName)}
+          disabled={!node.dirName}
+          title={node.cwd || node.label}
+        >
+          {!pinned && (
+            <span className="dir-caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
+          )}
+          <span className="dir-ico" aria-hidden="true">📁</span>
+          <span className="truncate">{node.label}</span>
+          {!open && node.hasLive && (
+            <span className="live-dot" title="열린 세션 있음" aria-hidden="true" />
+          )}
+          <span className="badge">{node.count || node.live.length}</span>
+        </button>
+        <div className="dir-rows" data-open={open ? 'true' : 'false'}>
+          <div className="dir-rows-inner">
+            {node.live.map((row) => (
+              <LiveRow key={row.key} row={row} node={node} />
+            ))}
+            {expanded[node.dirName] === 'loading' && (
+              <div className="dim dir-loading">불러오는 중…</div>
+            )}
+            {node.history.map((h) => (
+              <HistoryRow key={h.sessionId} h={h} node={node} />
+            ))}
+            {open &&
+              node.live.length === 0 &&
+              node.historyLoaded &&
+              node.history.length === 0 && (
+                <div className="dim dir-empty">세션 없음</div>
+              )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const account = state.initInfo?.account;
   const isEmpty = openSessions.length === 0 && state.projects.length === 0;
 
@@ -373,44 +476,15 @@ export default function Sidebar({ onCollapse }) {
           <span className="ns-plus" aria-hidden="true">+</span> 새 세션
         </button>
 
-        {openSessions.length > 0 && (
-          <>
-            <div className="sidebar-h">열린 세션</div>
-            {openSessions.map((s) => {
-              const badge = STATUS_BADGE[s.status] ?? { label: s.status, cls: '' };
-              return (
-                <div
-                  key={s.key}
-                  className={`session-tab-row${state.activeKey === s.key ? ' active' : ''}`}
-                >
-                  <button
-                    type="button"
-                    className="session-tab"
-                    onClick={() => dispatch({ type: 'set-active', key: s.key })}
-                    title={s.cwd || s.key}
-                  >
-                    <span className="truncate">{shortPath(s.cwd) || s.key}</span>
-                    <span className={`badge ${badge.cls}`}>{badge.label}</span>
-                  </button>
-                  {s.status !== 'exited' && (
-                    <button
-                      type="button"
-                      className="session-stop"
-                      aria-label="세션 종료"
-                      title="세션 종료 (CLI 프로세스 정지)"
-                      onClick={() => stopSession(s.key)}
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </>
+        {tree.pinned && (
+          <div className="pin-box">
+            <div className="sidebar-h">현재 세션</div>
+            <DirGroup node={tree.pinned} pinned />
+          </div>
         )}
 
         <div className="sidebar-h">
-          최근 세션
+          다른 프로젝트
           <span className="spacer" />
           <button
             type="button"
@@ -423,50 +497,13 @@ export default function Sidebar({ onCollapse }) {
           </button>
         </div>
 
-        {state.projects.length === 0 && (
+        {tree.others.length === 0 && (
           <div className="dim" style={{ fontSize: 12.5 }}>
-            기록된 프로젝트가 없습니다.
+            다른 프로젝트가 없습니다.
           </div>
         )}
-
-        {state.projects.map((p) => (
-          <div key={p.dirName} className="proj-item">
-            <button
-              type="button"
-              className="proj-head"
-              onClick={() => toggleProject(p.dirName)}
-              title={p.cwd || p.dirName}
-            >
-              <span>{expanded[p.dirName] ? '▾' : '▸'}</span>
-              <span className="truncate">{shortPath(p.cwd) || p.dirName}</span>
-              <span className="badge">{p.sessionCount}</span>
-            </button>
-            {expanded[p.dirName] === 'loading' && (
-              <div className="dim" style={{ fontSize: 12, paddingLeft: 22 }}>
-                불러오는 중…
-              </div>
-            )}
-            {Array.isArray(expanded[p.dirName]) &&
-              expanded[p.dirName].map((meta) => (
-                <button
-                  key={meta.sessionId}
-                  type="button"
-                  className="recent-session"
-                  disabled={!p.cwd}
-                  title={
-                    p.cwd
-                      ? `재개: ${meta.sessionId}`
-                      : 'cwd를 알 수 없어 재개할 수 없습니다'
-                  }
-                  onClick={() => resumeSession(p, meta)}
-                >
-                  <span className="truncate" style={{ display: 'block' }}>
-                    {meta.title || '(제목 없음)'}
-                  </span>
-                  <span className="rs-meta dim">{fmtTime(meta.mtime)}</span>
-                </button>
-              ))}
-          </div>
+        {tree.others.map((node) => (
+          <DirGroup key={node.key} node={node} />
         ))}
 
         {error && <div className="sidebar-error">{error}</div>}

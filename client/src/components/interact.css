@@ -675,3 +675,68 @@
 .perm-deny-row input {
   width: 100%;
 }
+
+/* ===== 통합 세션 트리 ===== */
+.pin-box {
+  margin: 4px 0 10px;
+  padding: 6px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  animation: enter-fade var(--dur-base) var(--ease-out) both;
+}
+.pin-box .sidebar-h { margin-top: 2px; color: var(--accent); }
+
+.dir-group { margin: 1px 0; }
+.dir-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  text-align: left;
+}
+.dir-head:hover { background: var(--surface-2); color: var(--text); }
+.dir-head:disabled { opacity: 1; cursor: default; }
+.dir-caret { width: 12px; flex: none; font-size: 10px; transition: transform var(--dur-fast) var(--ease-out); }
+.dir-ico { flex: none; }
+.dir-head .badge { margin-left: auto; }
+.active-dir > .dir-head { color: var(--text); }
+.live-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); flex: none;
+}
+
+/* 펼침 — grid-rows 0fr→1fr (순수 CSS, JS 높이 계산 불필요) */
+.dir-rows {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-base) var(--ease-out);
+}
+.dir-rows[data-open='true'] { grid-template-rows: 1fr; }
+.dir-rows-inner { overflow: hidden; min-height: 0; }
+
+.sess-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 8px 5px 22px;
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  text-align: left;
+}
+.sess-row.history:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.sess-row.live { padding-right: 4px; }
+.sess-row .sess-main {
+  display: flex; align-items: center; gap: 7px;
+  flex: 1; min-width: 0; padding: 0; border: none; background: none;
+  color: inherit; text-align: left;
+}
+.sess-row.live.active { background: var(--accent-soft); color: var(--text); }
+.sess-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
+.sess-dot.live { background: var(--accent); }
+.sess-row .rs-meta { margin-left: auto; font-size: 11px; }
+.dir-loading, .dir-empty { padding: 4px 8px 4px 22px; font-size: 12px; }
