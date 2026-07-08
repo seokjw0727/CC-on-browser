@@ -427,7 +427,7 @@ export default function Sidebar({ onCollapse }) {
           )}
           <span className="badge">{node.count || node.live.length}</span>
         </button>
-        <div className="dir-rows" data-open={open ? 'true' : 'false'}>
+        <div className="dir-rows" data-open={open ? 'true' : 'false'} inert={!open}>
           <div className="dir-rows-inner">
             {node.live.map((row) => liveRow(row, node))}
             {expanded[node.dirName] === 'loading' && (
@@ -488,7 +488,7 @@ export default function Sidebar({ onCollapse }) {
             type="button"
             className="icon-btn"
             onClick={refreshProjects}
-            aria-label="최근 세션 새로고침"
+            aria-label="프로젝트 목록 새로고침"
             title="새로고침"
           >
             ↻

@@ -730,6 +730,11 @@
 }
 .sess-row.history:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
 .sess-row.live { padding-right: 4px; }
+.sess-row.live.active .session-stop,
+.sess-row.live:hover .session-stop,
+.sess-row.live .session-stop:focus-visible {
+  opacity: 1;
+}
 .sess-row .sess-main {
   display: flex; align-items: center; gap: 7px;
   flex: 1; min-width: 0; padding: 0; border: none; background: none;
