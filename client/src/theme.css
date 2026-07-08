@@ -3,6 +3,52 @@
    Inspired by the Claude Code product shell: serif wordmark,
    coral accent, generous whitespace, composer-centric layout.
    ============================================================ */
+
+/* 번들 폰트 — 자기완결(무-CDN). Pretendard KR = UI, Monoplex KR = 대화·코드. */
+/* Pretendard: 정적 웨이트(가변 woff2는 일부 브라우저에서 weight축 미적용 → 얇게 렌더되어 정적 사용) */
+@font-face {
+  font-family: 'Pretendard KR';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/Pretendard-Regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Pretendard KR';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/Pretendard-Medium.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Pretendard KR';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/Pretendard-SemiBold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Pretendard KR';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/Pretendard-Bold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Monoplex KR';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/MonoplexKR-Regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Monoplex KR';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/MonoplexKR-Bold.woff2') format('woff2');
+}
+
 :root {
   color-scheme: dark;
 
@@ -38,13 +84,13 @@
   --danger: #e0705f;
   --danger-soft: rgba(224, 112, 95, 0.14);
 
-  /* Type */
-  --font-serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua',
-    Georgia, 'Times New Roman', 'Apple SD Gothic Neo', 'Noto Serif KR', serif;
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+  /* Type — Pretendard KR = 기본 UI, Monoplex KR = 대화·코드 (모두 번들) */
+  --font-serif: 'Pretendard KR', Pretendard, -apple-system, BlinkMacSystemFont,
     'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
-  --font-mono: ui-monospace, 'Cascadia Code', Consolas, 'SF Mono', Menlo,
-    'D2Coding', monospace;
+  --font-sans: 'Pretendard KR', Pretendard, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  --font-mono: 'Monoplex KR', ui-monospace, 'Cascadia Code', Consolas, 'D2Coding',
+    monospace;
 
   /* Radii */
   --r-pill: 999px;
@@ -228,6 +274,7 @@ select:focus {
 
 .main {
   position: relative;
+  grid-column: 2; /* 사이드바가 display:none(접힘)이어도 main이 1열(0px)로 떨어지지 않게 고정 */
   display: flex;
   flex-direction: column;
   min-width: 0;

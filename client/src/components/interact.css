@@ -306,6 +306,7 @@
   width: 100%;
   border: none;
   background: transparent;
+  font-family: var(--font-mono);
   padding: 4px 4px 6px;
   resize: none;
   font-size: 15px;
@@ -494,7 +495,7 @@
   background: var(--accent-soft);
 }
 .cmd-name {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans); /* 슬래시 커맨드 팝업은 대화가 아닌 UI → Pretendard */
   font-size: 12.5px;
   color: var(--accent);
 }
@@ -524,13 +525,29 @@
   width: 100%;
   max-width: 560px;
   max-height: 86vh;
-  overflow-y: auto;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-pop);
   padding: 18px 20px 20px;
   animation: dialog-in var(--dur-base) var(--ease-out) both;
+}
+/* 새 세션 모달: 제목·액션 고정, 가운데만 스크롤 → 액션 버튼이 항상 보임 */
+.modal {
+  display: flex;
+  flex-direction: column;
+}
+.modal > .modal-title,
+.modal > .modal-actions {
+  flex: none;
+}
+.modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.perm-dialog {
+  overflow-y: auto;
 }
 .modal-overlay.closing .modal { animation: dialog-in var(--dur-fast) var(--ease-out) reverse both; }
 .modal-title {

@@ -5,3 +5,4 @@ client/dist/
 
 # 로컬 개발/테스트 산출물 (커밋 제외)
 .devils-advocate/
+design_reference.png

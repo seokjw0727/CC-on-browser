@@ -115,6 +115,7 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose, pre
           </button>
         </div>
 
+        <div className="modal-body">
         <div className="picker-field">
           <span className="dim">작업 디렉터리 (cwd)</span>
           <div className="cwd-path-row">
@@ -220,6 +221,7 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose, pre
         )}
 
         {error && <div className="sidebar-error">{error}</div>}
+        </div>
 
         <div className="modal-actions">
           <button type="button" onClick={onClose}>
