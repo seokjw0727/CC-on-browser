@@ -12,6 +12,7 @@ import { reduceCliEvent } from '../lib/reduce-cli-event.js';
 import { buildSessionTree } from '../lib/sessionTree.js';
 import { Sparkle, Mascot } from './Brand.jsx';
 import { useFocusTrap } from '../lib/useFocusTrap.js';
+import { usePresence } from '../lib/usePresence.js';
 import './interact.css';
 
 const STATUS_BADGE = {
@@ -45,7 +46,7 @@ function fmtTime(ms) {
 }
 
 // ----- 새 세션 모달 (cwd 피커: 트리 탐색 + 직접 입력 + 최근 프로젝트) -----
-function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose }) {
+function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose, presenceStatus }) {
   const [cwd, setCwd] = useState(defaultCwd || '');
   const [model, setModel] = useState('');
   const [mode, setMode] = useState('default');
@@ -96,7 +97,7 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose }) {
 
   return (
     <div
-      className="modal-overlay"
+      className={`modal-overlay${presenceStatus === 'closing' ? ' closing' : ''}`}
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
@@ -527,18 +528,24 @@ export default function Sidebar({ onCollapse }) {
 
       {/* 모달은 aside 밖에 렌더 — 사이드바 접힘(.sidebar{display:none}) 시에도
           컴포저 레포 pill로 열 수 있어야 하므로 display:none 서브트리를 피한다. */}
-      {modalOpen && (
-        <NewSessionModal
-          initInfo={state.initInfo}
-          projects={state.projects}
-          defaultCwd={defaultCwd}
-          onClose={closeModal}
-          onStart={(opts) => {
-            closeModal();
-            startSession(opts);
-          }}
-        />
-      )}
+      <NewSessionPresence
+        open={modalOpen}
+        initInfo={state.initInfo}
+        projects={state.projects}
+        defaultCwd={defaultCwd}
+        onClose={closeModal}
+        onStart={(opts) => {
+          closeModal();
+          startSession(opts);
+        }}
+      />
     </>
   );
+}
+
+// 새 세션 모달의 닫힘 애니메이션 — usePresence로 페이드아웃 동안 마운트를 유지한 뒤 제거.
+function NewSessionPresence({ open, ...rest }) {
+  const { mounted, status } = usePresence(open, 140);
+  if (!mounted) return null;
+  return <NewSessionModal {...rest} presenceStatus={status} />;
 }

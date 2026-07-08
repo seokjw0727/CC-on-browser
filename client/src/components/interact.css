@@ -516,8 +516,11 @@
   padding: 24px;
   background: var(--overlay);
   backdrop-filter: blur(2px);
+  animation: overlay-in var(--dur-fast) var(--ease-out) both;
 }
-.modal {
+.modal-overlay.closing { animation: overlay-in var(--dur-fast) var(--ease-out) reverse both; }
+.modal,
+.perm-dialog {
   width: 100%;
   max-width: 560px;
   max-height: 86vh;
@@ -527,7 +530,9 @@
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-pop);
   padding: 18px 20px 20px;
+  animation: dialog-in var(--dur-base) var(--ease-out) both;
 }
+.modal-overlay.closing .modal { animation: dialog-in var(--dur-fast) var(--ease-out) reverse both; }
 .modal-title {
   display: flex;
   align-items: center;
