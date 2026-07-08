@@ -481,3 +481,8 @@ details.collapse > pre {
 :root[data-theme='light'] .hljs-meta {
   color: #0184bc;
 }
+
+/* ----- Task 5: 세션 전환 뷰 트랜지션 + 메시지 등장 게이팅 ----- */
+.msg-enter { animation: enter-rise var(--dur-base) var(--ease-out) both; }
+.chat-view-inner { will-change: auto; }
+.view-enter { animation: enter-rise var(--dur-base) var(--ease-out) both; }

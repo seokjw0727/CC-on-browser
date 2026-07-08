@@ -9,18 +9,19 @@ function rawSummary(payload) {
   return payload.subtype ? `이벤트 ${t}/${payload.subtype}` : `이벤트 ${t}`;
 }
 
-export default function Message({ item }) {
+export default function Message({ item, isNew }) {
+  const enter = isNew ? ' msg-enter' : '';
   switch (item.kind) {
     case 'user-text':
       return (
-        <div className="msg msg-user">
+        <div className={`msg msg-user${enter}`}>
           <pre className="user-text">{item.text}</pre>
         </div>
       );
 
     case 'assistant-text':
       return (
-        <div className="msg msg-assistant">
+        <div className={`msg msg-assistant${enter}`}>
           <div
             className="markdown-body"
             dangerouslySetInnerHTML={{ __html: render(item.text) }}
@@ -30,20 +31,20 @@ export default function Message({ item }) {
       );
 
     case 'thinking':
-      return <ThinkingBlock item={item} />;
+      return <div className={enter ? 'msg-enter' : undefined}><ThinkingBlock item={item} /></div>;
 
     case 'tool_use':
-      return <ToolCard item={item} />;
+      return <div className={enter ? 'msg-enter' : undefined}><ToolCard item={item} /></div>;
 
     case 'notice':
-      return <div className="msg msg-notice dim">{item.text}</div>;
+      return <div className={`msg msg-notice dim${enter}`}>{item.text}</div>;
 
     case 'error':
-      return <div className="msg msg-error">{item.text}</div>;
+      return <div className={`msg msg-error${enter}`}>{item.text}</div>;
 
     case 'raw':
       return (
-        <details className="msg-raw">
+        <details className={`msg-raw${enter}`}>
           <summary className="dim">{rawSummary(item.payload)}</summary>
           <pre>{JSON.stringify(item.payload, null, 2)}</pre>
         </details>
