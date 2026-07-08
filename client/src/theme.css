@@ -60,6 +60,13 @@
 
   --sidebar-width: 264px;
   --composer-max: 760px;
+
+  /* Motion — refined/fast (tone A) */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --dur-micro: 90ms;
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 220ms;
 }
 
 :root[data-theme='light'] {
@@ -382,4 +389,38 @@ select:focus {
 .mascot {
   color: var(--accent);
   flex: none;
+}
+
+/* ============================================================
+   Motion — shared keyframes + reduced-motion (tone A: fade+slide)
+   ============================================================ */
+@keyframes enter-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes enter-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* 뷰 전환용 — 컨테이너에 클래스 재적용해 재생 */
+.view-enter { animation: enter-rise var(--dur-base) var(--ease-out) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
