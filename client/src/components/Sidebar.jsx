@@ -354,12 +354,13 @@ export default function Sidebar({ onCollapse }) {
     activeKey: state.activeKey,
   });
 
-  // 라이브 세션 행
-  const LiveRow = ({ row, node }) => {
+  // 라이브 세션 행 — 렌더 헬퍼(요소 인스턴스화가 아니라 호출)로 두어 DOM을 안정화.
+  // 매 렌더마다 새 컴포넌트 타입이 생기지 않으므로 React가 remount 없이 patch한다.
+  const liveRow = (row, node) => {
     const badge = STATUS_BADGE[row.status] ?? { label: row.status, cls: '' };
     const label = row.sessionId ? row.sessionId.slice(0, 8) : '새 세션';
     return (
-      <div className={`sess-row live${row.active ? ' active' : ''}`}>
+      <div key={row.key} className={`sess-row live${row.active ? ' active' : ''}`}>
         <button
           type="button"
           className="sess-main"
@@ -386,8 +387,9 @@ export default function Sidebar({ onCollapse }) {
   };
 
   // 재개 가능 히스토리 행
-  const HistoryRow = ({ h, node }) => (
+  const historyRow = (h, node) => (
     <button
+      key={h.sessionId}
       type="button"
       className="sess-row history"
       disabled={!node.cwd}
@@ -404,10 +406,10 @@ export default function Sidebar({ onCollapse }) {
   );
 
   // 디렉토리 그룹(헤더 + 펼침 영역)
-  const DirGroup = ({ node, pinned = false }) => {
+  const dirGroup = (node, pinned = false) => {
     const open = pinned || !!expanded[node.dirName];
     return (
-      <div className={`dir-group${node.active ? ' active-dir' : ''}`}>
+      <div key={node.key} className={`dir-group${node.active ? ' active-dir' : ''}`}>
         <button
           type="button"
           className="dir-head"
@@ -427,15 +429,11 @@ export default function Sidebar({ onCollapse }) {
         </button>
         <div className="dir-rows" data-open={open ? 'true' : 'false'}>
           <div className="dir-rows-inner">
-            {node.live.map((row) => (
-              <LiveRow key={row.key} row={row} node={node} />
-            ))}
+            {node.live.map((row) => liveRow(row, node))}
             {expanded[node.dirName] === 'loading' && (
               <div className="dim dir-loading">불러오는 중…</div>
             )}
-            {node.history.map((h) => (
-              <HistoryRow key={h.sessionId} h={h} node={node} />
-            ))}
+            {node.history.map((h) => historyRow(h, node))}
             {open &&
               node.live.length === 0 &&
               node.historyLoaded &&
@@ -479,7 +477,7 @@ export default function Sidebar({ onCollapse }) {
         {tree.pinned && (
           <div className="pin-box">
             <div className="sidebar-h">현재 세션</div>
-            <DirGroup node={tree.pinned} pinned />
+            {dirGroup(tree.pinned, true)}
           </div>
         )}
 
@@ -502,9 +500,7 @@ export default function Sidebar({ onCollapse }) {
             다른 프로젝트가 없습니다.
           </div>
         )}
-        {tree.others.map((node) => (
-          <DirGroup key={node.key} node={node} />
-        ))}
+        {tree.others.map((node) => dirGroup(node))}
 
         {error && <div className="sidebar-error">{error}</div>}
 
