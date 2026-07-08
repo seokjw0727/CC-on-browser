@@ -219,6 +219,7 @@ select:focus {
   display: grid;
   height: 100%;
   grid-template-columns: var(--sidebar-width) 1fr;
+  transition: grid-template-columns var(--dur-slow) var(--ease-out);
 }
 
 .app.sidebar-collapsed {
@@ -249,6 +250,7 @@ select:focus {
   border: 1px solid var(--border);
   color: var(--text-dim);
   box-shadow: var(--shadow-1);
+  animation: enter-fade var(--dur-base) var(--ease-out) both;
 }
 .sidebar-reopen:hover {
   color: var(--text);

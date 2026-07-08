@@ -750,3 +750,21 @@
 .sess-dot.live { background: var(--accent); }
 .sess-row .rs-meta { margin-left: auto; font-size: 11px; }
 .dir-loading, .dir-empty { padding: 4px 8px 4px 22px; font-size: 12px; }
+
+/* ===== Task 6: press 마이크로 인터랙션 ===== */
+@media (prefers-reduced-motion: no-preference) {
+  .btn-primary:active:not(:disabled),
+  .pill:active,
+  .send-btn:active:not(:disabled),
+  .new-session-btn:active,
+  .dir-head:active,
+  .sess-row:active {
+    transform: scale(0.97);
+  }
+}
+.btn-primary, .pill, .send-btn, .new-session-btn, .dir-head, .sess-row {
+  transition: transform var(--dur-micro) var(--ease-out),
+              background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
