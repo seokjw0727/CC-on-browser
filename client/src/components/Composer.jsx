@@ -407,6 +407,7 @@ export default function Composer({ theme, onToggleTheme }) {
     // 연타(pendingStarts) 가드는 고아 세션 방지.
     if (
       !session ||
+      state.conn !== 'open' ||
       state.pendingStarts.size > 0 ||
       session.status !== 'idle' ||
       !session.sessionId
