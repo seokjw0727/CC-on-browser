@@ -170,6 +170,17 @@ export async function startServer({
         case 'setPermissionMode':
           await hub.setPermissionMode(key, msg.mode);
           return;
+        case 'setThinking': {
+          // null = CLI 기본(자동), 0 = 끔, 양수 = 사고 토큰 예산
+          const raw = msg.maxThinkingTokens;
+          const value = raw == null ? null : Number(raw);
+          if (value !== null && (!Number.isInteger(value) || value < 0)) {
+            sendError(ws, { key, message: `invalid maxThinkingTokens: ${raw}` });
+            return;
+          }
+          await hub.setMaxThinkingTokens(key, value);
+          return;
+        }
         case 'attach': {
           const replay = hub.attachReplay(key, Number(msg.afterSeq) || 0);
           for (const { seq, payload } of replay.events) {

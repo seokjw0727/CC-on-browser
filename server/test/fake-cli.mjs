@@ -81,8 +81,12 @@ function handle(msg) {
         model: 'sonnet',
       });
     } else {
-      // interrupt / set_model / set_permission_mode 등 — 성공 응답
-      out({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response: {} } });
+      // interrupt / set_model / set_permission_mode / set_max_thinking_tokens 등 — 성공 응답.
+      // echo_request: 받은 요청을 그대로 되돌려주는 픽스처 전용 진단 필드(wire format 검증용).
+      out({
+        type: 'control_response',
+        response: { subtype: 'success', request_id: requestId, response: { echo_request: request } },
+      });
     }
     return;
   }

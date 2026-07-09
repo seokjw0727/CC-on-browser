@@ -36,6 +36,7 @@ export function createSessionState(partial = {}) {
     sessionId: null,
     model: null,
     permissionMode: 'default',
+    maxThinkingTokens: null, // 사고 예산 — null=CLI 기본(자동), 0=끔, 양수=토큰 예산
     messages: [],
     streaming: {},
     pendingPermissions: [],

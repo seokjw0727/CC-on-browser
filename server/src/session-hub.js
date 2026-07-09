@@ -139,6 +139,10 @@ export class SessionHub extends EventEmitter {
     return this.#require(key).session.setPermissionMode(mode);
   }
 
+  setMaxThinkingTokens(key, maxThinkingTokens) {
+    return this.#require(key).session.setMaxThinkingTokens(maxThinkingTokens);
+  }
+
   /** 링버퍼에서 afterSeq 이후 이벤트 + 미해결 권한 요청 + 종료 상태 반환 (재접속 리플레이용). */
   attachReplay(key, afterSeq = 0) {
     const entry = this.#require(key);

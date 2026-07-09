@@ -1,5 +1,5 @@
-// 컴포저(레퍼런스 충실) — 상단 pill 행(레포·권한모드), 입력, 하단 컨트롤(모델·전송),
-// 그 아래 상태줄(컨텍스트·5h/7d 사용량·비용·rate limit·연결·테마). 상단 바를 대체한다.
+// 컴포저(레퍼런스 충실) — 상단 pill 행(레포·권한모드), 입력, 하단 컨트롤(모델·사고 수준
+// 피커 + 전송), 그 아래 상태줄(컨텍스트·5h/7d 사용량·비용·rate limit·연결·테마). 상단 바를 대체한다.
 // Enter 전송/Shift+Enter 개행, `/` 커맨드 드롭다운, Esc/버튼 interrupt.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
@@ -105,6 +105,125 @@ function fmtResetsAt(resetsAt) {
   }
 }
 
+// claude.ai 스타일 모델·사고 수준 피커 — 트리거 pill + 위로 열리는 메뉴
+// (모델 라디오 목록 + 구분선 + 사고 수준 라디오 목록).
+const THINKING_LEVELS = [
+  { value: 0, label: '끄기', desc: '확장 사고 없음' },
+  { value: null, label: '기본', desc: 'CLI 기본 동작 (자동)' },
+  { value: 10000, label: '깊게', desc: '사고 예산 10K 토큰' },
+  { value: 31999, label: '최대', desc: '사고 예산 32K 토큰' },
+];
+
+function ModelMenu({ session, models, disabled, onSelectModel, onSelectThinking }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    // 열릴 때 현재 선택 항목으로 포커스 이동
+    wrapRef.current?.querySelector('.mm-item[aria-checked="true"]')?.focus();
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const current = models.find((m) => m.value === session.model);
+  const currentLabel = current?.displayName || session.model || '모델';
+  const tk = session.maxThinkingTokens ?? null;
+  const tkLevel = THINKING_LEVELS.find((l) => (l.value ?? null) === tk);
+
+  // 메뉴 내 화살표 키 이동 (ARIA menu 관례)
+  const onMenuKey = (e) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    const items = [...e.currentTarget.querySelectorAll('.mm-item')];
+    const idx = items.indexOf(document.activeElement);
+    const next = e.key === 'ArrowDown'
+      ? items[Math.min(idx + 1, items.length - 1)]
+      : items[Math.max(idx - 1, 0)];
+    next?.focus();
+  };
+
+  const pick = (fn, v) => {
+    fn(v);
+    setOpen(false);
+  };
+
+  return (
+    <span className="model-menu-wrap" ref={wrapRef}>
+      <button
+        type="button"
+        className="pill model-menu-btn"
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="모델 · 사고 수준"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="truncate">{currentLabel}</span>
+        {tkLevel && tkLevel.value !== null && (
+          <span className="mm-think-badge">✦ {tkLevel.label}</span>
+        )}
+        <span className="mm-caret" aria-hidden="true">▾</span>
+      </button>
+      {open && (
+        <div className="mm-menu" role="menu" aria-label="모델 및 사고 수준" onKeyDown={onMenuKey}>
+          <div className="mm-section">모델</div>
+          {models.map((m) => (
+            <button
+              key={m.value}
+              type="button"
+              role="menuitemradio"
+              aria-checked={m.value === session.model}
+              className="mm-item"
+              onClick={() => pick(onSelectModel, m.value)}
+            >
+              <span className="mm-text">
+                <span className="mm-name">{m.displayName || m.value}</span>
+                {m.description && <span className="mm-desc dim">{m.description}</span>}
+              </span>
+              {m.value === session.model && <span className="mm-check" aria-hidden="true">✓</span>}
+            </button>
+          ))}
+          {!current && session.model && (
+            <div className="mm-unknown dim">현재 모델: {session.model}</div>
+          )}
+          <div className="mm-divider" role="separator" />
+          <div className="mm-section">사고 수준</div>
+          {THINKING_LEVELS.map((l) => {
+            const sel = (l.value ?? null) === tk;
+            return (
+              <button
+                key={String(l.value)}
+                type="button"
+                role="menuitemradio"
+                aria-checked={sel}
+                className="mm-item"
+                onClick={() => pick(onSelectThinking, l.value)}
+              >
+                <span className="mm-text">
+                  <span className="mm-name">{l.label}</span>
+                  <span className="mm-desc dim">{l.desc}</span>
+                </span>
+                {sel && <span className="mm-check" aria-hidden="true">✓</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </span>
+  );
+}
+
 export default function Composer({ theme, onToggleTheme }) {
   const { state, dispatch, send } = useStore();
   const session = useActiveSession();
@@ -120,8 +239,6 @@ export default function Composer({ theme, onToggleTheme }) {
     !!session && session.status === 'idle' && state.conn === 'open' && text.trim() !== '';
 
   const models = Array.isArray(state.initInfo?.models) ? state.initInfo.models : [];
-  const modelValue = session?.model ?? '';
-  const modelInList = models.some((m) => m.value === modelValue);
   const rl = session?.rateLimit;
   const rlWarn = rl && rl.status && rl.status !== 'allowed';
   const gu = state.globalUsage;
@@ -197,6 +314,11 @@ export default function Composer({ theme, onToggleTheme }) {
     if (!session || !mode) return;
     if (!send({ type: 'setPermissionMode', key: session.key, mode })) return;
     dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, permissionMode: mode }) });
+  };
+  const changeThinking = (maxThinkingTokens) => {
+    if (!session) return;
+    if (!send({ type: 'setThinking', key: session.key, maxThinkingTokens })) return;
+    dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, maxThinkingTokens }) });
   };
 
   const onKeyDown = (e) => {
@@ -322,27 +444,13 @@ export default function Composer({ theme, onToggleTheme }) {
         <div className="composer-foot">
           <div className="foot-left">
             {session && models.length > 0 && (
-              <span className="pill-select-wrap">
-                <select
-                  aria-label="모델"
-                  className="pill-select"
-                  value={modelInList ? modelValue : ''}
-                  disabled={!live || state.conn !== 'open'}
-                  title="모델 (setModel)"
-                  onChange={(e) => changeModel(e.target.value)}
-                >
-                  {!modelInList && (
-                    <option value="" disabled>
-                      {modelValue || '모델'}
-                    </option>
-                  )}
-                  {models.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.displayName || m.value}
-                    </option>
-                  ))}
-                </select>
-              </span>
+              <ModelMenu
+                session={session}
+                models={models}
+                disabled={!live || state.conn !== 'open'}
+                onSelectModel={changeModel}
+                onSelectThinking={changeThinking}
+              />
             )}
             <span className="foot-hint faint">Enter 전송 · Shift+Enter 개행 · / 커맨드</span>
           </div>

@@ -32,8 +32,9 @@ spawn: `claude.exe -p --input-format stream-json --output-format stream-json --v
 {"type":"control_request","request_id":"int_1","request":{"subtype":"interrupt"}}
 {"type":"control_request","request_id":"m_1","request":{"subtype":"set_model","model":"sonnet"}}
 {"type":"control_request","request_id":"pm_1","request":{"subtype":"set_permission_mode","mode":"acceptEdits"}}
+{"type":"control_request","request_id":"tk_1","request":{"subtype":"set_max_thinking_tokens","max_thinking_tokens":10000}}
 ```
-(interrupt/set_model/set_permission_mode 서브타입은 SDK 관례 — E2E에서 확인 전까지 **선택 기능으로 취급**: control_response가 error이거나 30s 타임아웃이면 해당 기능만 비활성 안내(toast)하고 턴 흐름·세션은 유지한다. 핵심 계약(user 턴, can_use_tool)과 결합하지 않는다.)
+(interrupt/set_model/set_permission_mode 서브타입은 SDK 관례 — E2E에서 확인 전까지 **선택 기능으로 취급**: control_response가 error이거나 30s 타임아웃이면 해당 기능만 비활성 안내(toast)하고 턴 흐름·세션은 유지한다. 핵심 계약(user 턴, can_use_tool)과 결합하지 않는다. set_max_thinking_tokens(2026-07-10 추가, null=기본/0=끔/양수=예산)는 CLI v2.1.205 바이너리의 내부 클라이언트에서 실측한 서브타입 — 같은 선택-기능 정책을 적용한다.)
 
 (allow 응답의 `updatedPermissions`(수락한 `permission_suggestions` 배열을 그대로 에코 — "항상 허용" 류 영구 규칙 저장용)도 SDK PermissionResult 관례 — 프로브 기록에는 없으며 Task 9 Step 2 실 CLI E2E에서 확인. 미수용이어도 allow/deny 핵심 흐름과 결합하지 않는다.)
 
@@ -60,6 +61,7 @@ spawn: `claude.exe -p --input-format stream-json --output-format stream-json --v
 {"type":"interrupt","key":"s_1"}
 {"type":"setModel","key":"s_1","model":"sonnet"}
 {"type":"setPermissionMode","key":"s_1","mode":"acceptEdits"}
+{"type":"setThinking","key":"s_1","maxThinkingTokens":10000}  // null=CLI 기본, 0=끔 (2026-07-10 추가)
 {"type":"attach","key":"s_1","afterSeq":42}
 {"type":"stop","key":"s_1"}
 ```
@@ -179,6 +181,7 @@ class ClaudeSession extends EventEmitter {
   async interrupt(): Promise<void>
   async setModel(model: string): Promise<void>
   async setPermissionMode(mode: string): Promise<void>
+  async setMaxThinkingTokens(v: number|null): Promise<object> // set_max_thinking_tokens — v2.1.205 바이너리 실측 (2026-07-10 추가)
   stop(): void                        // stdin.end() 후 5s 내 미종료 시 kill
   sessionId: string|null              // system/init 수신 시 세팅
   // emits: 'event'(cliMessage), 'permission_request'({requestId,toolName,displayName,input,description,suggestions,toolUseId}),

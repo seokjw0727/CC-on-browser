@@ -21,7 +21,7 @@ queried with the OAuth token the CLI already stores — not a model call, so it 
 - **Working-directory picker** — type or paste a path in the new-session modal, then click-select from the folder tree underneath.
 - **Statusline** — circular gauges for session context (vs the 200k window) and your account's official
   5-hour / 7-day usage (%) — the same numbers as the `/usage` panel; local transcript aggregates in tooltips.
-- **Runtime controls** — model switching, permission-mode switching (ask every time / accept edits / plan / bypass), `/` slash-command autocomplete, turn interrupt (Esc).
+- **Runtime controls** — a claude.ai-style picker for model and thinking level (off/default/deep/max), permission-mode switching (ask every time / accept edits / plan / bypass), `/` slash-command autocomplete, turn interrupt (Esc).
 - **Composer-centric UI** — no top bar; repo, permission mode, model, send, and usage fold into the composer. Light/dark themes, zero external font/image dependencies (brand assets are self-contained SVGs — safe under a local CSP).
 
 ## Requirements

@@ -201,7 +201,7 @@ test('(f) multi-turn: second sendUserText after result yields second result', as
   }
 });
 
-test('(g) interrupt/setModel/setPermissionMode resolve on success control_response', async () => {
+test('(g) interrupt/setModel/setPermissionMode/setMaxThinkingTokens resolve on success control_response', async () => {
   const session = makeSession('echo');
   const exit = trackExit(session);
   try {
@@ -209,6 +209,27 @@ test('(g) interrupt/setModel/setPermissionMode resolve on success control_respon
     await session.interrupt();
     await session.setModel('sonnet');
     await session.setPermissionMode('acceptEdits');
+    await session.setMaxThinkingTokens(10000);
+  } finally {
+    await shutdown(session, exit);
+  }
+});
+
+test('(g2) setMaxThinkingTokens wire format — subtype/필드명이 실측 프로토콜과 일치', async () => {
+  const session = makeSession('echo');
+  const exit = trackExit(session);
+  try {
+    await session.start();
+    // fake-cli가 echo_request로 요청 원문을 되돌려준다 — 필드명 오타/드리프트를 고정
+    const budget = await session.setMaxThinkingTokens(31999);
+    assert.equal(budget.echo_request.subtype, 'set_max_thinking_tokens');
+    assert.equal(budget.echo_request.max_thinking_tokens, 31999);
+
+    const off = await session.setMaxThinkingTokens(0);
+    assert.equal(off.echo_request.max_thinking_tokens, 0);
+
+    const auto = await session.setMaxThinkingTokens(null);
+    assert.equal(auto.echo_request.max_thinking_tokens, null);
   } finally {
     await shutdown(session, exit);
   }

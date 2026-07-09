@@ -116,6 +116,18 @@ export class ClaudeSession extends EventEmitter {
     await this.#sendControlRequest({ subtype: 'set_permission_mode', mode });
   }
 
+  /**
+   * 사고(확장 thinking) 예산 변경 — null = CLI 기본(자동), 0 = 사고 끔, 양수 = 토큰 예산.
+   * CLI v2.1.205 바이너리의 내부 클라이언트(setMaxThinkingTokens)와 동일 채널·필드
+   * (subtype/max_thinking_tokens)를 실측해 사용한다. set_model과 같은 미문서 인터페이스.
+   */
+  async setMaxThinkingTokens(maxThinkingTokens) {
+    return this.#sendControlRequest({
+      subtype: 'set_max_thinking_tokens',
+      max_thinking_tokens: maxThinkingTokens,
+    });
+  }
+
   stop() {
     if (!this.#proc || this.#exited) return;
     try {
