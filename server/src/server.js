@@ -171,14 +171,16 @@ export async function startServer({
           await hub.setPermissionMode(key, msg.mode);
           return;
         case 'setThinking': {
-          // null = CLI 기본(자동), 0 = 끔, 양수 = 사고 토큰 예산
+          // null(또는 생략) = CLI 기본(자동), 0 = 끔, 양의 정수 = 사고 토큰 예산.
+          // 강제 변환 금지 — ""/false/[] 류가 Number()로 0(사고 끔)이 되는 것을 차단한다.
           const raw = msg.maxThinkingTokens;
-          const value = raw == null ? null : Number(raw);
-          if (value !== null && (!Number.isInteger(value) || value < 0)) {
-            sendError(ws, { key, message: `invalid maxThinkingTokens: ${raw}` });
+          const isValid =
+            raw == null || (typeof raw === 'number' && Number.isInteger(raw) && raw >= 0);
+          if (!isValid) {
+            sendError(ws, { key, message: `invalid maxThinkingTokens: ${JSON.stringify(raw)}` });
             return;
           }
-          await hub.setMaxThinkingTokens(key, value);
+          await hub.setMaxThinkingTokens(key, raw ?? null);
           return;
         }
         case 'attach': {

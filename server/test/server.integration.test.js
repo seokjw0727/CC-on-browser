@@ -288,6 +288,40 @@ test('(d2) allow with updatedPermissions is forwarded to CLI', async () => {
   client.close();
 });
 
+test('setThinking: 엄격 검증 — 강제변환성 무효 입력은 error, 유효 입력은 CLI 왕복', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
+  client.send({ type: 'start', startId: 'cl_tk', cwd: tmpRoot });
+  const started = await client.next((m) => m.type === 'started' && m.startId === 'cl_tk');
+  const key = started.key;
+
+  // 무효 입력 — Number() 강제변환이었다면 ""/false/[]가 0(사고 끔)으로 둔갑했을 값들 포함
+  for (const bad of ['', '0', false, [], -1, 1.5]) {
+    client.send({ type: 'setThinking', key, maxThinkingTokens: bad });
+    const err = await client.next((m) => m.type === 'error' && m.key === key);
+    assert.match(err.message, /invalid maxThinkingTokens/);
+  }
+
+  // 유효 입력 — null(기본)/0(끔)/양의 정수는 error 없이 CLI까지 왕복
+  for (const good of [null, 0, 10000]) {
+    client.send({ type: 'setThinking', key, maxThinkingTokens: good });
+  }
+  // 마커 프로브를 에코 턴 "앞"에 둔다 — 유효 입력이 하나라도 거부됐다면 그 error가
+  // 마커 error보다 먼저 도착해 아래 본문 단언이 실패한다(순서 보장, next가 프레임을
+  // 소비해 증거가 사라지는 문제 차단).
+  client.send({ type: 'setThinking', key, maxThinkingTokens: 'FINAL_MARKER' });
+  const finalErr = await client.next((m) => m.type === 'error' && m.key === key);
+  assert.match(finalErr.message, /FINAL_MARKER/);
+  // 에코 턴 라운드트립으로 파이프라인 건강까지 확인
+  client.send({ type: 'send', key, text: 'after thinking' });
+  await client.next((m) => m.type === 'event' && m.key === key && m.payload?.type === 'result');
+  // 버퍼 전수 계수: 이 키의 error 프레임은 정확히 7개(무효 6 + 마커 1) — 늦게 도착한
+  // 잠복 error까지 잡는다.
+  const errCount = client.messages.filter((m) => m.type === 'error' && m.key === key).length;
+  assert.equal(errCount, 7);
+  client.close();
+});
+
 test('crash scenario propagates exit message', async () => {
   process.env.FAKE_SCENARIO = 'crash';
   const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
