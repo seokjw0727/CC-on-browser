@@ -613,6 +613,9 @@
 .browse-item {
   display: block;
   width: 100%;
+  /* flex column 스크롤 목록에서 필수: overflow:hidden(ellipsis용)이 flex 최소 높이를
+     0으로 풀어 max-height 초과 시 모든 행이 세로로 압착·클리핑됨(흐림처럼 보임) */
+  flex: none;
   text-align: left;
   background: none;
   border: none;
