@@ -11,9 +11,11 @@ import { SessionHub } from './session-hub.js';
 import { listProjects, listSessions, loadTranscript } from './history.js';
 import { listDirs } from './fs-api.js';
 import { aggregateUsage } from './usage.js';
+import { fetchQuota } from './quota.js';
 
 const VERSION_TIMEOUT_MS = 3_000;
 const USAGE_CACHE_MS = 30_000;
+const QUOTA_CACHE_MS = 60_000;
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -38,6 +40,7 @@ export async function startServer({
   projectsRoot,
   staticDir,
   exitedRetentionMs,
+  quotaFetcher, // 테스트 주입용 — 기본은 quota.js의 공식 사용률 조회
 } = {}) {
   if (!token) throw new TypeError('token is required');
   if (!cliPath) throw new TypeError('cliPath is required');
@@ -48,6 +51,8 @@ export async function startServer({
   let boundPort = null;
   let versionPromise = null;
   let usageCache = { at: 0, promise: null };
+  let quotaCache = { at: 0, promise: null };
+  const getQuota = quotaFetcher ?? fetchQuota;
 
   const tokenBuf = Buffer.from(String(token));
   const tokenEquals = (candidate) => {
@@ -239,7 +244,21 @@ export async function startServer({
             });
             usageCache = { at: Date.now(), promise };
           }
-          json(res, 200, await usageCache.promise);
+          if (!quotaCache.promise || Date.now() - quotaCache.at > QUOTA_CACHE_MS) {
+            // 공식 사용률은 실패해도 응답을 막지 않는다 — null 폴백(다음 주기 재시도)
+            const promise = Promise.resolve()
+              .then(() => getQuota())
+              .catch(() => null)
+              .then((quota) => {
+                if (quota == null && quotaCache.promise === promise) {
+                  quotaCache = { at: 0, promise: null };
+                }
+                return quota;
+              });
+            quotaCache = { at: Date.now(), promise };
+          }
+          const [local, quota] = await Promise.all([usageCache.promise, quotaCache.promise]);
+          json(res, 200, { ...local, quota });
           return;
         }
         default:

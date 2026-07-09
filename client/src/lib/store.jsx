@@ -57,7 +57,7 @@ function createInitialState() {
     pendingStarts: new Map(), // startId -> {cwd, model, permissionMode, resumeSessionId}
     lastError: null,
     newSessionOpen: false, // 새 세션(레포 선택) 모달 표시 여부 — Sidebar/Composer 공용
-    globalUsage: null, // /api/usage 폴링 결과 (5h/7d 로컬 집계) — 상태줄 표시용
+    globalUsage: null, // /api/usage 폴링 결과 — 로컬 5h/7d 집계 + 공식 quota(실패 시 null), 상태줄 표시용
   };
 }
 

@@ -5,9 +5,11 @@
 A **local-only** web app for using CLI-based Claude Code from your browser.
 Instead of the terminal TUI, it gives you streaming markdown chat, tool-execution cards, permission dialogs, and a session-resume UI.
 
-**No SDK, no API.** There is no `@anthropic-ai/sdk`, no `claude-agent-sdk`, and no direct call to api.anthropic.com —
+**No SDK, no API.** There is no `@anthropic-ai/sdk` and no `claude-agent-sdk` —
 the app drives your locally installed `claude` CLI as a child process. Authentication and billing follow your
-Claude subscription (e.g., Claude Max) entirely; no API key is required.
+Claude subscription (e.g., Claude Max) entirely; no API key is required. One deliberate exception: the
+statusline's official usage percentages come from a single usage-metadata endpoint on api.anthropic.com,
+queried with the OAuth token the CLI already stores — not a model call, so it never incurs charges.
 
 ## What you get
 
@@ -15,9 +17,10 @@ Claude subscription (e.g., Claude Max) entirely; no API key is required.
 - **Tool execution cards** — Bash, Edit, Write, Read, Grep and other tool calls rendered as input/result cards; long results collapse.
 - **Thinking blocks** — extended-thinking streams shown as separate, collapsible blocks.
 - **Permission dialog** — `can_use_tool` requests pop up as a modal for allow/deny. Suggestions are labeled by their actual effect, never vague wording like "always allow".
-- **Session resume** — browse past projects/sessions, preload the transcript, and continue (`--resume`).
+- **Session resume** — resume past sessions of the current project; the transcript is preloaded and continued (`--resume`).
 - **Working-directory picker** — type or paste a path in the new-session modal, then click-select from the folder tree underneath.
-- **Statusline** — under the composer: current-session context usage (last turn) plus 5-hour / 7-day token usage (aggregated locally from transcripts).
+- **Statusline** — circular gauges for session context (vs the 200k window) and your account's official
+  5-hour / 7-day usage (%) — the same numbers as the `/usage` panel; local transcript aggregates in tooltips.
 - **Runtime controls** — model switching, permission-mode switching (ask every time / accept edits / plan / bypass), `/` slash-command autocomplete, turn interrupt (Esc).
 - **Composer-centric UI** — no top bar; repo, permission mode, model, send, and usage fold into the composer. Light/dark themes, zero external font/image dependencies (brand assets are self-contained SVGs — safe under a local CSP).
 
@@ -108,7 +111,8 @@ server/src/
   session-hub.js     Session registry — key↔ClaudeSession, event broadcast/replay relay
   claude-session.js  Wraps one CLI child process — stream-json I/O, undocumented protocol isolated here
   history.js         Reads ~/.claude projects/sessions/transcripts (for session resume)
-  usage.js           Local aggregation over ~/.claude transcripts — 5h/7d usage (/api/usage)
+  usage.js           Local aggregation over ~/.claude transcripts — 5h/7d reference (/api/usage)
+  quota.js           Official account usage (5h/7d %) — uses the CLI's OAuth token; the only api.anthropic.com touchpoint
   fs-api.js          Directory listing (/api/browse) — never serves file contents
   jsonl.js           Line-delimited JSON parser
 client/src/

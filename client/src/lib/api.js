@@ -36,5 +36,8 @@ export const fetchTranscript = (dirName, sessionId) =>
 export const browseDirs = (absPath = '') =>
   get(`/api/browse?path=${encodeURIComponent(absPath)}`);
 
-/** @returns {Promise<{now, fiveHour, sevenDay}>} 로컬 트랜스크립트 집계 사용량 (5h/7d) */
+/**
+ * @returns {Promise<{now, fiveHour, sevenDay, quota}>}
+ * 로컬 트랜스크립트 집계(5h/7d) + 계정 공식 사용률 quota({fiveHour,sevenDay} — 실패 시 null)
+ */
 export const fetchUsage = () => get('/api/usage');

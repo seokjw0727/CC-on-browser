@@ -328,6 +328,43 @@
 .meta-item.danger {
   color: var(--danger);
 }
+/* 상태줄 원형 게이지 — 라벨 텍스트를 둘러싼 링이 사용률만큼 채워진다 */
+.ring-stat {
+  gap: 4px;
+}
+.ring {
+  display: block;
+}
+.ring-track {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 2.5;
+}
+.ring-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: center;
+  transition: stroke-dasharray 0.4s ease;
+}
+.ring-stat.warn .ring-fill {
+  stroke: var(--warning);
+}
+.ring-stat.danger .ring-fill {
+  stroke: var(--danger);
+}
+.ring-label {
+  fill: var(--text-faint);
+  font-size: 7px;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+.ring-pct {
+  font-variant-numeric: tabular-nums;
+}
 .meta-x {
   padding: 0 4px;
   color: inherit;

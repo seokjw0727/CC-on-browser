@@ -44,6 +44,54 @@ function usageWindowTitle(label, b) {
     ' (로컬 트랜스크립트 집계)'
   );
 }
+// 7일 창 리셋처럼 하루를 넘기는 시각은 날짜까지 보여준다.
+function fmtReset(ms) {
+  if (!Number.isFinite(ms)) return null;
+  try {
+    const d = new Date(ms);
+    return d.toDateString() === new Date().toDateString()
+      ? d.toLocaleTimeString()
+      : d.toLocaleString();
+  } catch {
+    return null;
+  }
+}
+function quotaTitle(label, q, local) {
+  const reset = fmtReset(q.resetsAt);
+  return (
+    `${label} 사용률 ${Math.round(q.utilization)}% — 계정 공식 수치(/usage와 동일)` +
+    (reset ? ` · ${reset} 리셋` : '') +
+    (local ? ` · 로컬 집계 참고 ${fmtTok(local.totalTokens)} tok` : '')
+  );
+}
+
+// 텍스트(label)를 둘러싼 원형 게이지 — 사용률 pct(0~100)만큼 링이 채워진다.
+function RingStat({ label, pct, title }) {
+  const R = 9;
+  const C = 2 * Math.PI * R;
+  const clamped = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
+  const cls = clamped >= 95 ? ' danger' : clamped >= 80 ? ' warn' : '';
+  return (
+    <span
+      className={`meta-item ring-stat${cls}`}
+      title={title}
+      aria-label={`${label} ${Math.round(clamped)}%`}
+    >
+      <svg className="ring" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <circle className="ring-track" cx="12" cy="12" r={R} />
+        <circle
+          className="ring-fill"
+          cx="12"
+          cy="12"
+          r={R}
+          strokeDasharray={`${(clamped / 100) * C} ${C}`}
+        />
+        <text className="ring-label" x="12" y="12">{label}</text>
+      </svg>
+      <span className="ring-pct">{Math.round(clamped)}%</span>
+    </span>
+  );
+}
 function fmtResetsAt(resetsAt) {
   if (resetsAt == null) return null;
   const n = Number(resetsAt);
@@ -76,8 +124,9 @@ export default function Composer({ theme, onToggleTheme }) {
   const rl = session?.rateLimit;
   const rlWarn = rl && rl.status && rl.status !== 'allowed';
   const gu = state.globalUsage;
+  const quota = gu?.quota;
   const ctxTokens = session?.usage?.contextTokens || 0;
-  const ctxPct = Math.min(999, Math.round((ctxTokens / CONTEXT_WINDOW) * 100));
+  const ctxPct = (ctxTokens / CONTEXT_WINDOW) * 100;
 
   // ----- `/` 커맨드 드롭다운 -----
   const commands = useMemo(() => {
@@ -327,22 +376,43 @@ export default function Composer({ theme, onToggleTheme }) {
       {/* 상태줄 — 컨텍스트·5h/7d 사용량·비용·rate limit·연결·테마 */}
       <div className="composer-meta">
         {ctxTokens > 0 && (
-          <span
-            className={`meta-item${ctxPct >= 80 ? ' warn' : ''}`}
-            title={`현재 세션 컨텍스트(마지막 턴 기준): ${ctxTokens.toLocaleString()} / ${CONTEXT_WINDOW.toLocaleString()} tok`}
-          >
-            CTX {ctxPct}%
-          </span>
+          <RingStat
+            label="CTX"
+            pct={ctxPct}
+            title={`현재 세션 컨텍스트(마지막 턴 기준): ${ctxTokens.toLocaleString()} / ${CONTEXT_WINDOW.toLocaleString()} tok (${Math.round(ctxPct)}%)`}
+          />
         )}
-        {gu?.fiveHour && (
-          <span className="meta-item" title={usageWindowTitle('최근 5시간', gu.fiveHour)}>
-            5h {fmtTok(gu.fiveHour.totalTokens)}
-          </span>
+        {quota?.fiveHour ? (
+          <RingStat
+            label="5h"
+            pct={quota.fiveHour.utilization}
+            title={quotaTitle('5시간 창', quota.fiveHour, gu?.fiveHour)}
+          />
+        ) : (
+          gu?.fiveHour && (
+            <span
+              className="meta-item"
+              title={`${usageWindowTitle('최근 5시간', gu.fiveHour)} — 공식 % 조회 실패(CLI 미로그인 또는 네트워크)`}
+            >
+              5h {fmtTok(gu.fiveHour.totalTokens)}
+            </span>
+          )
         )}
-        {gu?.sevenDay && (
-          <span className="meta-item" title={usageWindowTitle('최근 7일', gu.sevenDay)}>
-            7d {fmtTok(gu.sevenDay.totalTokens)}
-          </span>
+        {quota?.sevenDay ? (
+          <RingStat
+            label="7d"
+            pct={quota.sevenDay.utilization}
+            title={quotaTitle('7일 창', quota.sevenDay, gu?.sevenDay)}
+          />
+        ) : (
+          gu?.sevenDay && (
+            <span
+              className="meta-item"
+              title={`${usageWindowTitle('최근 7일', gu.sevenDay)} — 공식 % 조회 실패(CLI 미로그인 또는 네트워크)`}
+            >
+              7d {fmtTok(gu.sevenDay.totalTokens)}
+            </span>
+          )
         )}
         {session && (
           <span

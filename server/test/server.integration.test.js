@@ -122,6 +122,12 @@ before(async () => {
     cliArgsPrefix: [fakeCliPath],
     projectsRoot,
     staticDir,
+    // 테스트는 네트워크 금지 — 공식 사용률은 고정 스텁으로 주입
+    quotaFetcher: async () => ({
+      fiveHour: { utilization: 46, resetsAt: 1783365599000 },
+      sevenDay: { utilization: 28, resetsAt: 1783835999000 },
+      fetchedAt: 1,
+    }),
   });
   port = handle.port;
   base = `http://127.0.0.1:${port}`;
@@ -393,11 +399,42 @@ test('(f) REST auth + /api/projects/sessions/transcript/browse/bootstrap', async
   assert.ok('claudeVersion' in bootstrap);
   assert.equal(typeof bootstrap.defaultCwd, 'string');
 
-  // /api/usage — 픽스처 assistant 엔트리(방금 timestamp) 1건이 양쪽 창에 집계된다
+  // /api/usage — 픽스처 assistant 엔트리(방금 timestamp) 1건이 양쪽 창에 집계되고,
+  // 주입한 공식 사용률 스텁이 quota 필드로 실린다
   const usage = await (await fetch(`${base}/api/usage`, auth)).json();
   assert.equal(usage.fiveHour.totalTokens, 185);
   assert.equal(usage.fiveHour.entries, 1);
   assert.equal(usage.sevenDay.totalTokens, 185);
+  assert.equal(usage.quota.fiveHour.utilization, 46);
+  assert.equal(usage.quota.sevenDay.utilization, 28);
+});
+
+test('/api/usage quota 실패 → quota:null + 로컬 집계 보존 + 요청마다 재시도', async () => {
+  let calls = 0;
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    quotaFetcher: async () => {
+      calls += 1;
+      throw new Error('offline');
+    },
+  });
+  try {
+    const b = `http://127.0.0.1:${h.port}`;
+    const auth = { headers: { 'x-auth-token': TOKEN } };
+    const r1 = await (await fetch(`${b}/api/usage`, auth)).json();
+    assert.equal(r1.quota, null);
+    assert.equal(r1.fiveHour.totalTokens, 185); // quota 실패가 로컬 집계를 막지 않는다
+    const r2 = await (await fetch(`${b}/api/usage`, auth)).json();
+    assert.equal(r2.quota, null);
+    assert.equal(calls, 2); // null은 캐시되지 않는다 — 다음 요청에서 재시도
+  } finally {
+    await h.close();
+  }
 });
 
 test('static serving + SPA fallback (no auth required)', async () => {

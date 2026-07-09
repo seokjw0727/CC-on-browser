@@ -1,4 +1,4 @@
-// 사이드바 — wordmark / [새 세션](cwd 피커 모달) / 열린 세션 탭 / 최근 세션(재개).
+// 사이드바 — wordmark / [새 세션](cwd 피커 모달) / 현재 세션(라이브 탭 + 해당 프로젝트 히스토리 재개).
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../lib/store.jsx';
 import {
@@ -506,8 +506,6 @@ export default function Sidebar({ onCollapse }) {
     );
   };
 
-  const isEmpty = openSessions.length === 0 && state.projects.length === 0;
-
   return (
     <>
       <aside className="sidebar">
@@ -540,37 +538,12 @@ export default function Sidebar({ onCollapse }) {
           </div>
         )}
 
-        <div className="sidebar-h">
-          다른 프로젝트
-          <span className="spacer" />
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={refreshProjects}
-            aria-label="프로젝트 목록 새로고침"
-            title="새로고침"
-          >
-            ↻
-          </button>
-        </div>
-
-        {tree.others.length === 0 && (
-          <div className="dim" style={{ fontSize: 12.5 }}>
-            다른 프로젝트가 없습니다.
-          </div>
-        )}
-        {tree.others.map((node) => dirGroup(node))}
-
         {error && <div className="sidebar-error">{error}</div>}
 
         {openSessions.length === 0 && (
           <div className="sidebar-empty">
             <Mascot scale={5} className="empty-mascot" />
-            <span className="dim">
-              {isEmpty
-                ? '시작한 세션이 여기에 표시됩니다'
-                : '위에서 세션을 재개하거나 새 세션을 시작하세요'}
-            </span>
+            <span className="dim">새 세션을 시작하면 여기에 표시됩니다</span>
           </div>
         )}
       </div>
