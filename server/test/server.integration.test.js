@@ -288,6 +288,23 @@ test('(d2) allow with updatedPermissions is forwarded to CLI', async () => {
   client.close();
 });
 
+test('start: effort 검증 — 무효값은 spawn 전에 거부, 유효값은 정상 시작', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
+  client.send({ type: 'start', startId: 'cl_eff_bad', cwd: tmpRoot, effort: 'ultra' });
+  const err = await client.next((m) => m.type === 'error' && m.startId === 'cl_eff_bad');
+  assert.match(err.message, /invalid effort/);
+
+  client.send({ type: 'start', startId: 'cl_eff_ok', cwd: tmpRoot, effort: 'low' });
+  const started = await client.next((m) => m.type === 'started' && m.startId === 'cl_eff_ok');
+  assert.ok(started.key.startsWith('s_'));
+  // 픽스처 진단 argv로 --effort 전달까지 확인
+  const argv = started.initInfo.argv;
+  assert.equal(argv[argv.indexOf('--effort') + 1], 'low');
+  client.send({ type: 'stop', key: started.key });
+  client.close();
+});
+
 test('setThinking: 엄격 검증 — 강제변환성 무효 입력은 error, 유효 입력은 CLI 왕복', async () => {
   process.env.FAKE_SCENARIO = 'echo';
   const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);

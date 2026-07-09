@@ -29,7 +29,8 @@ CLI 기반 Claude Code를 브라우저에서 사용할 수 있게 하는 로컬 
 6. **스트림 이벤트**: `stream_event`(text_delta 등), `system/thinking_tokens`, `system/status`, `rate_limit_event`, tool_result가 담긴 `user` 메시지, 최종 `result`(usage, total_cost_usd, num_turns) 수신.
 7. 스폰된 CLI는 사용자의 훅·스킬·설정을 그대로 로드 → 브라우저 UI는 사용자의 실제 CLI 환경의 전면부가 된다.
 8. 세션 파일: `~/.claude/projects/<cwd를 -로 인코딩한 경로>/<session_id>.jsonl`. `--resume <id>`로 재개(이전 메시지 재전송 금지).
-9. (2026-07-10 추가, CLI v2.1.205 **바이너리 문자열 분석** — 런타임 프로브 아님) control_request 서브타입 `set_max_thinking_tokens`(`max_thinking_tokens`: null=기본/0=끔/양수=예산, CLI 내부 클라이언트가 동일 채널 사용)를 확인, 사고 수준 런타임 조절에 사용. `rate_limit_event`의 rate_limit_info에는 사용률 %가 없음(status/resetsAt/rateLimitType뿐)도 transcript 실측으로 확인.
+9. (2026-07-10 추가, CLI v2.1.205 **바이너리 문자열 분석** — 런타임 프로브 아님) control_request 서브타입 `set_max_thinking_tokens`(`max_thinking_tokens`: null=기본/0=끔/양수=예산, CLI 내부 클라이언트가 동일 채널 사용) 확인 — 서버 계층에 setThinking으로 구현(현 UI는 미노출). `rate_limit_event`의 rate_limit_info에는 사용률 %가 없음(status/resetsAt/rateLimitType뿐)도 transcript 실측으로 확인.
+10. (2026-07-10 추가, 동일 바이너리 분석) `--effort <level>`(low|medium|high|xhigh|max, 기본 high)은 **spawn 전용** — 런타임 변경 서브타입이 없고 apply_flag_settings 문맥에 "can't change server effort" 문자열 존재. 따라서 노력 수준 변경 UI는 stop → `--resume`+`--effort` 재스폰(대화 이월)으로 구현.
 
 주의: stream-json 제어 프로토콜은 공식 미문서 인터페이스다. CLI 업데이트로 형식이 바뀔 수 있으므로 프로토콜 계층을 한 모듈로 격리하고, 알 수 없는 메시지는 무시가 아닌 "raw 이벤트"로 UI에 전달할 수 있게 설계한다.
 

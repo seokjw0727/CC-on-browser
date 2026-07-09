@@ -16,6 +16,8 @@ import { fetchQuota } from './quota.js';
 const VERSION_TIMEOUT_MS = 3_000;
 const USAGE_CACHE_MS = 30_000;
 const QUOTA_CACHE_MS = 60_000;
+// --effort 허용값 (spawn 전용 — claude --help 실측)
+const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -133,11 +135,17 @@ export async function startServer({
       switch (msg.type) {
         case 'start': {
           const startId = msg.startId ?? null;
+          const effort = msg.effort ?? null;
+          if (effort !== null && !EFFORT_LEVELS.has(effort)) {
+            sendError(ws, { startId, message: `invalid effort: ${JSON.stringify(msg.effort)}` });
+            return;
+          }
           try {
             const { key: newKey, initInfo } = await hub.startSession({
               cwd: msg.cwd,
               model: msg.model,
               permissionMode: msg.permissionMode,
+              effort,
               resumeSessionId: msg.resumeSessionId,
             });
             sendTo(ws, { type: 'started', startId, key: newKey, initInfo });

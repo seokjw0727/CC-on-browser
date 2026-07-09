@@ -63,12 +63,18 @@ function handle(msg) {
           request_id: requestId,
           response: {
             commands: [{ name: 'help', description: 'Show help' }],
+            // 실 CLI v2.1.205 initialize 응답을 미러링 (2026-07-08 E2E 캡처와 동일 형태)
             models: [
-              { value: 'sonnet', displayName: 'Claude Sonnet', description: 'balanced' },
-              { value: 'opus', displayName: 'Claude Opus', description: 'most capable' },
+              { value: 'default', resolvedModel: 'claude-opus-4-8[1m]', displayName: 'Default (recommended)', description: 'Opus 4.8 with 1M context · Best for everyday, complex tasks', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+              { value: 'opus[1m]', resolvedModel: 'claude-opus-4-8[1m]', displayName: 'Opus', description: 'Opus 4.8 with 1M context · Best for everyday, complex tasks', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+              { value: 'claude-fable-5[1m]', resolvedModel: 'claude-fable-5', displayName: 'Fable', description: 'Fable 5 · Most capable for your hardest and longest-running tasks', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+              { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet', description: 'Sonnet 5 · Efficient for routine tasks', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+              { value: 'haiku', resolvedModel: 'claude-haiku-4-5-20251001', displayName: 'Haiku', description: 'Haiku 4.5 · Fastest for quick answers' },
             ],
             account: { email: 'fake@example.com', subscriptionType: 'pro' },
             output_style: 'default',
+            // 픽스처 전용 진단: spawn argv 에코 (--effort 등 플래그 전달 검증용)
+            argv: process.argv.slice(2),
           },
         },
       });

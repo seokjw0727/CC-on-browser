@@ -21,7 +21,7 @@
 
 ## 검증된 CLI 프로토콜 (v2.1.201 실측 — 이대로 구현)
 
-spawn: `claude.exe -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio [--model <m>] [--permission-mode <mode>] [--resume <sessionId>]`, cwd = 사용자가 고른 프로젝트 디렉터리. stdio 전부 pipe. 메시지는 한 줄당 JSON 하나(JSONL), `\n` 종결.
+spawn: `claude.exe -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio [--model <m>] [--permission-mode <mode>] [--effort <level>] [--resume <sessionId>]`, cwd = 사용자가 고른 프로젝트 디렉터리. (--effort는 2026-07-10 추가 — spawn 전용, 런타임 변경 채널 없음.) stdio 전부 pipe. 메시지는 한 줄당 JSON 하나(JSONL), `\n` 종결.
 
 **서버 → CLI (stdin):**
 ```json
@@ -55,7 +55,7 @@ spawn: `claude.exe -p --input-format stream-json --output-format stream-json --v
 
 **클라이언트 → 서버:**
 ```json
-{"type":"start","startId":"cl_1","cwd":"C:\\path","model":"opus","permissionMode":"default","resumeSessionId":null}
+{"type":"start","startId":"cl_1","cwd":"C:\\path","model":"opus","permissionMode":"default","effort":null,"resumeSessionId":null}  // effort: low|medium|high|xhigh|max|null — spawn 전용 --effort (2026-07-10 추가)
 {"type":"send","key":"s_1","text":"사용자 입력"}
 {"type":"permission","key":"s_1","requestId":"<uuid>","behavior":"allow","updatedInput":{},"updatedPermissions":[],"message":null}
 {"type":"interrupt","key":"s_1"}
@@ -174,7 +174,8 @@ export function createJsonlParser(onMessage, onRaw = () => {}) {
 ```js
 class ClaudeSession extends EventEmitter {
   constructor(opts: { cliPath: string, cliArgsPrefix?: string[], cwd: string,
-                      model?: string, permissionMode?: string, resumeSessionId?: string })
+                      model?: string, permissionMode?: string, effort?: string, // effort 2026-07-10 추가
+                      resumeSessionId?: string })
   async start(): Promise<initInfo>   // spawn + initialize 왕복, 10s 타임아웃
   sendUserText(text: string): void
   respondPermission(requestId: string, result: object): boolean // pending에 없으면 false

@@ -36,7 +36,8 @@ export function createSessionState(partial = {}) {
     sessionId: null,
     model: null,
     permissionMode: 'default',
-    maxThinkingTokens: null, // 사고 예산 — null=CLI 기본(자동), 0=끔, 양수=토큰 예산
+    maxThinkingTokens: null, // 사고 예산 — 서버 setThinking 채널용으로 유지(현재 UI 미노출)
+    effort: null, // 노력 수준(low|medium|high|xhigh|max) — null=CLI 기본(high), spawn 전용
     messages: [],
     streaming: {},
     pendingPermissions: [],
@@ -55,7 +56,7 @@ function createInitialState() {
     activeKey: null,
     projects: [],
     initInfo: null,
-    pendingStarts: new Map(), // startId -> {cwd, model, permissionMode, resumeSessionId}
+    pendingStarts: new Map(), // startId -> {cwd, model, permissionMode, effort, resumeSessionId, preloadMessages?}
     lastError: null,
     newSessionOpen: false, // 새 세션(레포 선택) 모달 표시 여부 — Sidebar/Composer 공용
     globalUsage: null, // /api/usage 폴링 결과 — 로컬 5h/7d 집계 + 공식 quota(실패 시 null), 상태줄 표시용
@@ -84,6 +85,9 @@ function handleServerMessage(state, msg) {
           cwd: opts.cwd ?? null,
           model: opts.model ?? null,
           permissionMode: opts.permissionMode ?? 'default',
+          effort: opts.effort ?? null,
+          // effort 재시작 등 in-memory 이월: 이전 세션의 메시지를 그대로 이어붙인다
+          messages: Array.isArray(opts.preloadMessages) ? [...opts.preloadMessages] : [],
         }),
       );
       return {
@@ -242,6 +246,7 @@ export function StoreProvider({ children }) {
             cwd: opts.cwd,
             model: opts.model ?? null,
             permissionMode: opts.permissionMode ?? 'default',
+            effort: opts.effort ?? null,
             resumeSessionId: opts.resumeSessionId ?? null,
           });
         if (!ok) {

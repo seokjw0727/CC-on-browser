@@ -64,7 +64,7 @@ test('(a) start() returns initInfo; sessionId set after system/init', async () =
     const initInfo = await session.start();
     assert.ok(Array.isArray(initInfo.commands));
     assert.ok(Array.isArray(initInfo.models));
-    assert.equal(initInfo.models[0].value, 'sonnet');
+    assert.ok(initInfo.models.some((m) => m.value === 'sonnet'));
     assert.equal(initInfo.account.email, 'fake@example.com');
     assert.equal(initInfo.output_style, 'default');
     await initEventP;
@@ -210,6 +210,26 @@ test('(g) interrupt/setModel/setPermissionMode/setMaxThinkingTokens resolve on s
     await session.setModel('sonnet');
     await session.setPermissionMode('acceptEdits');
     await session.setMaxThinkingTokens(10000);
+  } finally {
+    await shutdown(session, exit);
+  }
+});
+
+test('(h) effort 옵션이 spawn argv에 --effort로 전달된다', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const session = new ClaudeSession({
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    cwd: process.cwd(),
+    effort: 'xhigh',
+  });
+  const exit = trackExit(session);
+  try {
+    const initInfo = await session.start();
+    const argv = initInfo.argv; // fake-cli가 에코한 자신의 argv
+    const i = argv.indexOf('--effort');
+    assert.ok(i >= 0, `--effort not in argv: ${argv.join(' ')}`);
+    assert.equal(argv[i + 1], 'xhigh');
   } finally {
     await shutdown(session, exit);
   }

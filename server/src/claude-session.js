@@ -14,6 +14,7 @@ export class ClaudeSession extends EventEmitter {
   #cwd;
   #model;
   #permissionMode;
+  #effort;
   #resumeSessionId;
   #proc = null;
   #exited = false;
@@ -26,7 +27,7 @@ export class ClaudeSession extends EventEmitter {
 
   sessionId = null;
 
-  constructor({ cliPath, cliArgsPrefix = [], cwd, model, permissionMode, resumeSessionId } = {}) {
+  constructor({ cliPath, cliArgsPrefix = [], cwd, model, permissionMode, effort, resumeSessionId } = {}) {
     super();
     if (!cliPath) throw new TypeError('cliPath is required');
     if (!cwd) throw new TypeError('cwd is required');
@@ -35,6 +36,9 @@ export class ClaudeSession extends EventEmitter {
     this.#cwd = cwd;
     this.#model = model;
     this.#permissionMode = permissionMode;
+    // effort(low|medium|high|xhigh|max)는 spawn 전용 플래그 — 런타임 변경 채널이 없음을
+    // v2.1.205 바이너리에서 확인("can't change server effort"). 변경은 --resume 재시작으로.
+    this.#effort = effort;
     this.#resumeSessionId = resumeSessionId;
   }
 
@@ -50,6 +54,7 @@ export class ClaudeSession extends EventEmitter {
       '--permission-prompt-tool', 'stdio',
       ...(this.#model ? ['--model', this.#model] : []),
       ...(this.#permissionMode ? ['--permission-mode', this.#permissionMode] : []),
+      ...(this.#effort ? ['--effort', this.#effort] : []),
       ...(this.#resumeSessionId ? ['--resume', this.#resumeSessionId] : []),
     ];
     this.#proc = spawn(this.#cliPath, args, {

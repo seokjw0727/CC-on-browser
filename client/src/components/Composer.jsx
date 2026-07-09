@@ -1,5 +1,6 @@
-// 컴포저(레퍼런스 충실) — 상단 pill 행(레포·권한모드), 입력, 하단 컨트롤(모델·사고 수준
-// 피커 + 전송), 그 아래 상태줄(컨텍스트·5h/7d 사용량·비용·rate limit·연결·테마). 상단 바를 대체한다.
+// 컴포저(레퍼런스 충실) — 상단 pill 행(레포·권한모드), 입력, 하단 컨트롤(모델 피커 +
+// 노력 수준 진행 바 + 전송), 그 아래 상태줄(컨텍스트·5h/7d 사용량·비용·rate limit·연결·테마).
+// 상단 바를 대체한다.
 // Enter 전송/Shift+Enter 개행, `/` 커맨드 드롭다운, Esc/버튼 interrupt.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
@@ -105,19 +106,10 @@ function fmtResetsAt(resetsAt) {
   }
 }
 
-// claude.ai 스타일 모델·사고 수준 피커 — 트리거 pill + 위로 열리는 메뉴
-// (모델 라디오 목록 + 구분선 + 사고 수준 라디오 목록).
-const THINKING_LEVELS = [
-  { value: 0, label: '끄기', desc: '확장 사고 없음' },
-  { value: null, label: '기본', desc: 'CLI 기본 동작 (자동)' },
-  { value: 10000, label: '깊게', desc: '사고 예산 10K 토큰' },
-  { value: 31999, label: '최대', desc: '사고 예산 32K 토큰' },
-];
-
-function ModelMenu({ session, models, disabled, onSelectModel, onSelectThinking }) {
+// ----- 공용 팝오버 동작 — 바깥 클릭/Esc 닫기, 열릴 때 선택 항목으로 포커스 -----
+function usePopover() {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
-
   useEffect(() => {
     if (!open) return undefined;
     const onDown = (e) => {
@@ -128,36 +120,69 @@ function ModelMenu({ session, models, disabled, onSelectModel, onSelectThinking 
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
-    // 열릴 때 현재 선택 항목으로 포커스 이동
-    wrapRef.current?.querySelector('.mm-item[aria-checked="true"]')?.focus();
+    wrapRef.current?.querySelector('[aria-checked="true"]')?.focus();
     return () => {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
+  return { open, setOpen, wrapRef };
+}
 
-  const current = models.find((m) => m.value === session.model);
-  const currentLabel = current?.displayName || session.model || '모델';
-  const tk = session.maxThinkingTokens ?? null;
-  const tkLevel = THINKING_LEVELS.find((l) => (l.value ?? null) === tk);
+// 메뉴 내 화살표 키 이동 (ARIA menu 관례)
+function menuArrowNav(e) {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  e.preventDefault();
+  const items = [...e.currentTarget.querySelectorAll('.mm-item, .effort-seg')];
+  const idx = items.indexOf(document.activeElement);
+  const next = e.key === 'ArrowDown'
+    ? items[Math.min(idx + 1, items.length - 1)]
+    : items[Math.max(idx - 1, 0)];
+  next?.focus();
+}
 
-  // 메뉴 내 화살표 키 이동 (ARIA menu 관례)
-  const onMenuKey = (e) => {
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-    e.preventDefault();
-    const items = [...e.currentTarget.querySelectorAll('.mm-item')];
-    const idx = items.indexOf(document.activeElement);
-    const next = e.key === 'ArrowDown'
-      ? items[Math.min(idx + 1, items.length - 1)]
-      : items[Math.max(idx - 1, 0)];
-    next?.focus();
-  };
+// claude.ai 모델 피커를 본딴 카탈로그 — 표시 이름·설명은 claude.ai 서비스 문구 기준,
+// 전송 value·버전은 CLI initialize의 실측 목록(value/resolvedModel)에서 취한다.
+const MODEL_FAMILIES = [
+  { family: 'haiku', name: 'Haiku', fallbackValue: 'haiku', fallbackVersion: '4.5', desc: '빠른 응답이 필요한 가벼운 작업에 최적' },
+  { family: 'sonnet', name: 'Sonnet', fallbackValue: 'sonnet', fallbackVersion: '5', desc: '일상 업무를 위한 똑똑하고 효율적인 모델' },
+  { family: 'opus', name: 'Opus', fallbackValue: 'opus', fallbackVersion: '4.8', desc: '복잡한 과제를 위한 강력한 대형 모델' },
+  { family: 'fable', name: 'Fable', fallbackValue: 'claude-fable-5', fallbackVersion: '5', desc: '가장 어렵고 긴 작업을 위한 최고 성능 모델' },
+];
 
-  const pick = (fn, v) => {
-    fn(v);
-    setOpen(false);
-  };
+function parseVersion(resolvedModel) {
+  const m = /claude-[a-z]+-(\d+)(?:-(\d+))?/.exec(String(resolvedModel ?? ''));
+  if (!m) return null;
+  return m[2] ? `${m[1]}.${m[2]}` : m[1];
+}
 
+function familyOf(model) {
+  const s = String(model ?? '').toLowerCase();
+  return MODEL_FAMILIES.find((f) => s.includes(f.family)) ?? null;
+}
+
+function buildModelOptions(models) {
+  return MODEL_FAMILIES.map((f) => {
+    const entry = models.find(
+      (m) =>
+        m.value !== 'default' &&
+        `${m.resolvedModel ?? ''} ${m.value ?? ''} ${m.displayName ?? ''}`.toLowerCase().includes(f.family),
+    );
+    return {
+      ...f,
+      value: entry?.value ?? f.fallbackValue,
+      version: parseVersion(entry?.resolvedModel) ?? f.fallbackVersion,
+      cliEntry: entry ?? null,
+    };
+  });
+}
+
+// ----- 모델 피커 (claude.ai식 메뉴: 이름 + 버전 + 설명 + 체크) -----
+function ModelPicker({ session, options, disabled, onSelect }) {
+  const { open, setOpen, wrapRef } = usePopover();
+  const fam = familyOf(session.model);
+  const curOpt = fam ? options.find((o) => o.family === fam.family) : null;
+  const label = curOpt ? `Claude ${curOpt.name} ${curOpt.version}` : session.model || '모델';
   return (
     <span className="model-menu-wrap" ref={wrapRef}>
       <button
@@ -166,53 +191,34 @@ function ModelMenu({ session, models, disabled, onSelectModel, onSelectThinking 
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
-        title="모델 · 사고 수준"
+        title="모델 선택"
         onClick={() => setOpen((o) => !o)}
       >
-        <span className="truncate">{currentLabel}</span>
-        {tkLevel && tkLevel.value !== null && (
-          <span className="mm-think-badge">✦ {tkLevel.label}</span>
-        )}
+        <span className="truncate">{label}</span>
         <span className="mm-caret" aria-hidden="true">▾</span>
       </button>
       {open && (
-        <div className="mm-menu" role="menu" aria-label="모델 및 사고 수준" onKeyDown={onMenuKey}>
+        <div className="mm-menu" role="menu" aria-label="모델 선택" onKeyDown={menuArrowNav}>
           <div className="mm-section">모델</div>
-          {models.map((m) => (
-            <button
-              key={m.value}
-              type="button"
-              role="menuitemradio"
-              aria-checked={m.value === session.model}
-              className="mm-item"
-              onClick={() => pick(onSelectModel, m.value)}
-            >
-              <span className="mm-text">
-                <span className="mm-name">{m.displayName || m.value}</span>
-                {m.description && <span className="mm-desc dim">{m.description}</span>}
-              </span>
-              {m.value === session.model && <span className="mm-check" aria-hidden="true">✓</span>}
-            </button>
-          ))}
-          {!current && session.model && (
-            <div className="mm-unknown dim">현재 모델: {session.model}</div>
-          )}
-          <div className="mm-divider" role="separator" />
-          <div className="mm-section">사고 수준</div>
-          {THINKING_LEVELS.map((l) => {
-            const sel = (l.value ?? null) === tk;
+          {options.map((o) => {
+            const sel = curOpt?.family === o.family;
             return (
               <button
-                key={String(l.value)}
+                key={o.family}
                 type="button"
                 role="menuitemradio"
                 aria-checked={sel}
                 className="mm-item"
-                onClick={() => pick(onSelectThinking, l.value)}
+                onClick={() => {
+                  onSelect(o.value);
+                  setOpen(false);
+                }}
               >
                 <span className="mm-text">
-                  <span className="mm-name">{l.label}</span>
-                  <span className="mm-desc dim">{l.desc}</span>
+                  <span className="mm-name">
+                    Claude {o.name} <span className="mm-ver">{o.version}</span>
+                  </span>
+                  <span className="mm-desc dim">{o.desc}</span>
                 </span>
                 {sel && <span className="mm-check" aria-hidden="true">✓</span>}
               </button>
@@ -224,8 +230,84 @@ function ModelMenu({ session, models, disabled, onSelectModel, onSelectThinking 
   );
 }
 
+// ----- 노력 수준 피커 — progress bar 형태 (--effort는 spawn 전용 → 변경 시 --resume 재시작) -----
+const EFFORT_LEVELS = [
+  { value: 'low', label: '낮음' },
+  { value: 'medium', label: '중간' },
+  { value: 'high', label: '높음' },
+  { value: 'xhigh', label: '매우 높음' },
+  { value: 'max', label: '최대' },
+];
+const DEFAULT_EFFORT = 'high'; // CLI 기본값 (claude --help 실측: defaults to high)
+
+function EffortPicker({ session, options, disabled, onSelect }) {
+  const { open, setOpen, wrapRef } = usePopover();
+  const fam = familyOf(session.model);
+  const opt = fam ? options.find((o) => o.family === fam.family) : null;
+  // CLI 항목이 supportsEffort를 명시하지 않은 모델(예: Haiku)은 비활성; 정보가 없으면 허용
+  const supports = opt?.cliEntry ? !!opt.cliEntry.supportsEffort : true;
+  const levels = opt?.cliEntry?.supportedEffortLevels?.length
+    ? EFFORT_LEVELS.filter((l) => opt.cliEntry.supportedEffortLevels.includes(l.value))
+    : EFFORT_LEVELS;
+  const cur = session.effort ?? DEFAULT_EFFORT;
+  const curIdx = Math.max(0, levels.findIndex((l) => l.value === cur));
+  const curLabel = levels[curIdx]?.label ?? cur;
+
+  return (
+    <span className="model-menu-wrap" ref={wrapRef}>
+      <button
+        type="button"
+        className="pill model-menu-btn"
+        disabled={disabled || !supports}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={supports ? '노력 수준 (변경 시 같은 대화로 재시작)' : '이 모델은 노력 수준을 지원하지 않습니다'}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="effort-bar mini" aria-hidden="true">
+          {levels.map((l, i) => (
+            <span key={l.value} className={`effort-seg-vis${i <= curIdx ? ' fill' : ''}`} />
+          ))}
+        </span>
+        <span className="truncate">노력 {curLabel}</span>
+        <span className="mm-caret" aria-hidden="true">▾</span>
+      </button>
+      {open && (
+        <div className="mm-menu effort-menu" role="menu" aria-label="노력 수준" onKeyDown={menuArrowNav}>
+          <div className="mm-section">노력 수준</div>
+          <div className="effort-track" role="group" aria-label="노력 수준 선택">
+            {levels.map((l, i) => (
+              <button
+                key={l.value}
+                type="button"
+                role="menuitemradio"
+                aria-checked={l.value === cur}
+                aria-label={l.label}
+                className={`effort-seg${i <= curIdx ? ' fill' : ''}`}
+                title={l.label}
+                onClick={() => {
+                  if (l.value !== cur) onSelect(l.value);
+                  setOpen(false);
+                }}
+              />
+            ))}
+          </div>
+          <div className="effort-labels">
+            <span className="dim">{levels[0]?.label}</span>
+            <span className="effort-cur">{curLabel}</span>
+            <span className="dim">{levels[levels.length - 1]?.label}</span>
+          </div>
+          <div className="mm-desc dim effort-note">
+            변경하면 같은 대화로 세션을 재시작합니다 (--effort는 시작 시에만 적용).
+          </div>
+        </div>
+      )}
+    </span>
+  );
+}
+
 export default function Composer({ theme, onToggleTheme }) {
-  const { state, dispatch, send } = useStore();
+  const { state, dispatch, send, startSession, stopSession } = useStore();
   const session = useActiveSession();
   const [text, setText] = useState('');
   const [selIdx, setSelIdx] = useState(0);
@@ -239,6 +321,7 @@ export default function Composer({ theme, onToggleTheme }) {
     !!session && session.status === 'idle' && state.conn === 'open' && text.trim() !== '';
 
   const models = Array.isArray(state.initInfo?.models) ? state.initInfo.models : [];
+  const modelOptions = useMemo(() => buildModelOptions(models), [models]);
   const rl = session?.rateLimit;
   const rlWarn = rl && rl.status && rl.status !== 'allowed';
   const gu = state.globalUsage;
@@ -315,10 +398,21 @@ export default function Composer({ theme, onToggleTheme }) {
     if (!send({ type: 'setPermissionMode', key: session.key, mode })) return;
     dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, permissionMode: mode }) });
   };
-  const changeThinking = (maxThinkingTokens) => {
-    if (!session) return;
-    if (!send({ type: 'setThinking', key: session.key, maxThinkingTokens })) return;
-    dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, maxThinkingTokens }) });
+  // effort(--effort)는 spawn 전용 — 런타임 변경 채널이 없어(바이너리 실측) 같은
+  // 대화로 재시작한다: 기존 프로세스 정지 → --resume + --effort 재스폰, 메시지는
+  // 메모리에서 이월(preloadMessages).
+  const changeEffort = (effort) => {
+    // 시작 대기 중인 재시작이 있으면 무시 — 연타로 고아 세션이 생기는 것을 막는다
+    if (!session || state.pendingStarts.size > 0) return;
+    stopSession(session.key);
+    startSession({
+      cwd: session.cwd,
+      model: session.model,
+      permissionMode: session.permissionMode,
+      effort,
+      resumeSessionId: session.sessionId ?? null,
+      preloadMessages: session.messages,
+    });
   };
 
   const onKeyDown = (e) => {
@@ -443,14 +537,22 @@ export default function Composer({ theme, onToggleTheme }) {
         {/* 하단 컨트롤 — 모델 + 전송/중단 */}
         <div className="composer-foot">
           <div className="foot-left">
-            {session && models.length > 0 && (
-              <ModelMenu
-                session={session}
-                models={models}
-                disabled={!live || state.conn !== 'open'}
-                onSelectModel={changeModel}
-                onSelectThinking={changeThinking}
-              />
+            {session && (
+              <>
+                <ModelPicker
+                  session={session}
+                  options={modelOptions}
+                  disabled={!live || state.conn !== 'open'}
+                  onSelect={changeModel}
+                />
+                <EffortPicker
+                  session={session}
+                  options={modelOptions}
+                  // 진행 중 턴이 있으면 잠근다 — effort 변경은 재시작이라 진행분을 파괴한다
+                  disabled={!live || state.conn !== 'open' || session.status !== 'idle'}
+                  onSelect={changeEffort}
+                />
+              </>
             )}
             <span className="foot-hint faint">Enter 전송 · Shift+Enter 개행 · / 커맨드</span>
           </div>

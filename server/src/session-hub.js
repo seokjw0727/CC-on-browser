@@ -27,13 +27,14 @@ export class SessionHub extends EventEmitter {
   }
 
   /** 새 CLI 세션을 spawn하고 initialize 왕복까지 마친 뒤 { key, initInfo } 반환. */
-  async startSession({ cwd, model, permissionMode, resumeSessionId } = {}) {
+  async startSession({ cwd, model, permissionMode, effort, resumeSessionId } = {}) {
     const session = new ClaudeSession({
       cliPath: this.#cliPath,
       cliArgsPrefix: this.#cliArgsPrefix,
       cwd,
       model: model || undefined,
       permissionMode: permissionMode || undefined,
+      effort: effort || undefined,
       resumeSessionId: resumeSessionId || undefined,
     });
     const key = `s_${++this.#nextKey}`;
