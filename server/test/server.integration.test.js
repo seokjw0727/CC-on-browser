@@ -123,7 +123,8 @@ before(async () => {
 
 after(async () => {
   if (handle) await handle.close();
-  await fs.rm(tmpRoot, { recursive: true, force: true });
+  // Windows에서 kill 직후 자식 프로세스 핸들 해제가 늦어 EBUSY가 날 수 있다 — 재시도로 흡수.
+  await fs.rm(tmpRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 test('(a) wrong token websocket is closed immediately', async () => {
