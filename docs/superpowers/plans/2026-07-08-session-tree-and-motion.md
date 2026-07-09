@@ -55,7 +55,7 @@ Every task's requirements implicitly include this section.
     - `DirNode = { key, cwd, dirName, label, mtime, count, hasLive, active, historyLoaded, live: LiveRow[], history: HistoryRow[] }`
     - `LiveRow = { key, sessionId, status, active }`; `HistoryRow = { sessionId, title, mtime }`
 
-- [ ] **Step 1: 실패 테스트 작성** — `client/test/sessionTree.test.js`
+- [x] **Step 1: 실패 테스트 작성** — `client/test/sessionTree.test.js`
 
 ```js
 import { test } from 'node:test';
@@ -163,12 +163,12 @@ test('shortDir: 마지막 2 세그먼트로 축약', () => {
 });
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [x] **Step 2: 테스트 실패 확인**
 
 Run: `npm test`
 Expected: FAIL — `Cannot find module '../src/lib/sessionTree.js'` (또는 export 없음). *(먼저 Step 4의 package.json 수정을 적용해야 client 테스트가 수집된다. 순서상 Step 2에서 실패를 보려면 Step 4를 먼저 해도 무방 — 실패 메시지만 확인.)*
 
-- [ ] **Step 3: 최소 구현** — `client/src/lib/sessionTree.js`
+- [x] **Step 3: 최소 구현** — `client/src/lib/sessionTree.js`
 
 ```js
 // 라이브 세션 + 히스토리 프로젝트를 디렉토리(cwd) 단위 트리로 병합하는 순수 함수.
@@ -267,7 +267,7 @@ export function buildSessionTree({
 }
 ```
 
-- [ ] **Step 4: 테스트 스크립트에 client 테스트 포함** — `package.json`
+- [x] **Step 4: 테스트 스크립트에 client 테스트 포함** — `package.json`
 
 `"test"` 스크립트를 다음으로 교체:
 
@@ -275,12 +275,12 @@ export function buildSessionTree({
 "test": "node --test \"server/test/*.test.js\" \"client/test/*.test.js\"",
 ```
 
-- [ ] **Step 5: 테스트 통과 확인**
+- [x] **Step 5: 테스트 통과 확인**
 
 Run: `npm test`
 Expected: PASS — 기존 38 + 신규 8 = **46 tests, 0 fail**. (신규 8개가 카운트에 나타나는지 확인 — 안 나타나면 node가 client 글롭을 수집 못 한 것이니 node 버전/글롭 확인.)
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add client/src/lib/sessionTree.js client/test/sessionTree.test.js package.json
@@ -297,7 +297,7 @@ git commit -m "feat(client): add sessionTree pure merge/dedupe module + tests"
 **Interfaces:**
 - Produces (CSS): 변수 `--ease-out`, `--dur-micro/fast/base/slow`; keyframes `enter-rise`, `overlay-in`, `dialog-in`; 전역 `prefers-reduced-motion` 축소.
 
-- [ ] **Step 1: 모션 토큰 추가** — `:root` 블록 끝(`--composer-max: 760px;` 다음 줄, 닫는 `}` 앞)에 삽입:
+- [x] **Step 1: 모션 토큰 추가** — `:root` 블록 끝(`--composer-max: 760px;` 다음 줄, 닫는 `}` 앞)에 삽입:
 
 ```css
   /* Motion — refined/fast (tone A) */
@@ -308,7 +308,7 @@ git commit -m "feat(client): add sessionTree pure merge/dedupe module + tests"
   --dur-slow: 220ms;
 ```
 
-- [ ] **Step 2: 공용 keyframes + reduced-motion 추가** — 파일 맨 끝에 추가:
+- [x] **Step 2: 공용 keyframes + reduced-motion 추가** — 파일 맨 끝에 추가:
 
 ```css
 /* ============================================================
@@ -346,12 +346,12 @@ git commit -m "feat(client): add sessionTree pure merge/dedupe module + tests"
 }
 ```
 
-- [ ] **Step 3: 빌드 확인**
+- [x] **Step 3: 빌드 확인**
 
 Run: `npm run build --prefix client`
 Expected: PASS — `✓ built`. (CSS만 추가했으므로 컴파일 성공.)
 
-- [ ] **Step 4: 커밋**
+- [x] **Step 4: 커밋**
 
 ```bash
 git add client/src/theme.css
@@ -369,7 +369,7 @@ git commit -m "feat(client): add motion tokens, shared keyframes, reduced-motion
 **Interfaces:**
 - Consumes: `buildSessionTree`, `shortDir` (Task 1); `--ease-out`, `--dur-*` (Task 2).
 
-- [ ] **Step 1: import 추가** — `Sidebar.jsx` 상단, `Brand.jsx` import 아래에:
+- [x] **Step 1: import 추가** — `Sidebar.jsx` 상단, `Brand.jsx` import 아래에:
 
 ```js
 import { buildSessionTree } from '../lib/sessionTree.js';
@@ -377,7 +377,7 @@ import { buildSessionTree } from '../lib/sessionTree.js';
 
 (기존 로컬 `shortPath`는 유지하거나 `shortDir`로 대체 가능. 본 Task는 트리 렌더에 `sessionTree`의 label을 쓰므로 로컬 `shortPath`는 그대로 두어도 무방.)
 
-- [ ] **Step 2: 트리 파생 + 하위 컴포넌트 추가** — `Sidebar` 함수 본문, `const openSessions = [...state.sessions.values()];` 다음에 삽입:
+- [x] **Step 2: 트리 파생 + 하위 컴포넌트 추가** — `Sidebar` 함수 본문, `const openSessions = [...state.sessions.values()];` 다음에 삽입:
 
 ```js
   const tree = buildSessionTree({
@@ -484,7 +484,7 @@ import { buildSessionTree } from '../lib/sessionTree.js';
 
 *주의:* 기존 `resumeSession(project, meta)`는 `project.dirName`, `project.cwd`, `meta.sessionId`를 사용하므로 위 `HistoryRow`가 넘기는 `{ dirName, cwd }` / `{ sessionId }` 형태와 호환된다. 확인만 하고 시그니처는 바꾸지 않는다.
 
-- [ ] **Step 3: `.sidebar-inner` 렌더를 트리로 교체** — `Sidebar.jsx`에서 기존 "열린 세션" 블록과 "최근 세션" 블록(즉 `{openSessions.length > 0 && ( ... )}` 부터 `state.projects.map(...)` 렌더 끝까지)을 다음으로 교체:
+- [x] **Step 3: `.sidebar-inner` 렌더를 트리로 교체** — `Sidebar.jsx`에서 기존 "열린 세션" 블록과 "최근 세션" 블록(즉 `{openSessions.length > 0 && ( ... )}` 부터 `state.projects.map(...)` 렌더 끝까지)을 다음으로 교체:
 
 ```jsx
         {tree.pinned && (
@@ -520,7 +520,7 @@ import { buildSessionTree } from '../lib/sessionTree.js';
 
 기존 하단 `{error && ...}` 와 `{openSessions.length === 0 && (빈 상태)}` 블록은 그대로 둔다. (빈 상태 조건 `isEmpty`도 유지.)
 
-- [ ] **Step 4: 트리·핀 박스·펼침 애니 스타일 추가** — `interact.css` 끝에 추가:
+- [x] **Step 4: 트리·핀 박스·펼침 애니 스타일 추가** — `interact.css` 끝에 추가:
 
 ```css
 /* ===== 통합 세션 트리 ===== */
@@ -591,7 +591,7 @@ import { buildSessionTree } from '../lib/sessionTree.js';
 
 기존 `.session-tab`/`.session-tab-row`/`.proj-*`/`.recent-session` 규칙은 더 이상 참조되지 않으면 삭제해도 되나, 이번 Task 범위에서는 남겨도 무해하므로 **삭제하지 않는다**(회귀 위험 최소).
 
-- [ ] **Step 5: 빌드 + 브라우저 실측**
+- [x] **Step 5: 빌드 + 브라우저 실측**
 
 Run: `npm run build --prefix client`
 Expected: PASS.
@@ -610,7 +610,7 @@ Brave에서 출력된 `http://127.0.0.1:8790/#token=...` 접속(원격 디버깅
 # dev-fake 서버 종료(포트 8790 리스너 kill)
 ```
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add client/src/components/Sidebar.jsx client/src/components/interact.css
@@ -630,7 +630,7 @@ git commit -m "feat(client): unify sidebar into current-session-pinned directory
 **Interfaces:**
 - Produces: `usePresence(isOpen: boolean, duration = 140) => { mounted: boolean, status: 'open' | 'closing' }`
 
-- [ ] **Step 1: `usePresence` 훅 작성** — `client/src/lib/usePresence.js`
+- [x] **Step 1: `usePresence` 훅 작성** — `client/src/lib/usePresence.js`
 
 ```js
 // 모달 leave 애니메이션용 존재(presence) 훅.
@@ -672,7 +672,7 @@ export function usePresence(isOpen, duration = 140) {
 }
 ```
 
-- [ ] **Step 2: NewSessionModal에 usePresence 연결** — `Sidebar.jsx`
+- [x] **Step 2: NewSessionModal에 usePresence 연결** — `Sidebar.jsx`
 
 import에 추가:
 ```js
@@ -715,9 +715,9 @@ function NewSessionPresence({ open, ...rest }) {
 ```
 로 바꾸고, `NewSessionModal({ ... })` 시그니처에 `presenceStatus` 파라미터를 추가한다.
 
-- [ ] **Step 3: PermissionDialog 열림 애니(enter-only)** — 별도 코드 변경 없이 CSS로 처리(Step 4). PermissionDialog는 leave 애니 미적용(스펙 §2.3) — 구조 변경 없음. (`usePresence` 사용하지 않음.)
+- [x] **Step 3: PermissionDialog 열림 애니(enter-only)** — 별도 코드 변경 없이 CSS로 처리(Step 4). PermissionDialog는 leave 애니 미적용(스펙 §2.3) — 구조 변경 없음. (`usePresence` 사용하지 않음.)
 
-- [ ] **Step 4: overlay/dialog 애니 CSS** — `interact.css`의 기존 `.modal-overlay`/`.modal` 규칙에 애니 추가(규칙을 찾아 `animation` 선언을 더한다):
+- [x] **Step 4: overlay/dialog 애니 CSS** — `interact.css`의 기존 `.modal-overlay`/`.modal` 규칙에 애니 추가(규칙을 찾아 `animation` 선언을 더한다):
 
 ```css
 .modal-overlay {
@@ -736,7 +736,7 @@ function NewSessionPresence({ open, ...rest }) {
 
 (주: `.modal-overlay`·`.modal`·`.perm-dialog` 선택자는 이미 interact.css에 존재. 기존 블록에 `animation` 한 줄씩 추가하는 방식.)
 
-- [ ] **Step 5: 빌드 + 브라우저 실측**
+- [x] **Step 5: 빌드 + 브라우저 실측**
 
 Run: `npm run build --prefix client`
 Expected: PASS.
@@ -750,7 +750,7 @@ node scripts/dev-fake.mjs --port 8790 --scenario permission
 - 세션 시작 후 메시지 전송 → 권한 다이얼로그가 열림 애니로 등장(닫힘은 즉시 — 의도됨).
 - 직전에 고친 포커스 트랩/복원 정상(모달 내 Tab 순환, 닫힘 시 트리거로 포커스 복원).
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add client/src/lib/usePresence.js client/src/components/Sidebar.jsx client/src/components/interact.css
@@ -770,7 +770,7 @@ git commit -m "feat(client): animate modal open/close via usePresence (new-sessi
 - Consumes: `enter-rise`, `--dur-*`, `--ease-out` (Task 2), `.view-enter` (Task 2).
 - Message는 새 prop `isNew?: boolean`을 받아 등장 클래스를 붙인다.
 
-- [ ] **Step 1: ChatView에 뷰 전환 재적용 + 새 메시지 게이팅** — `ChatView.jsx`
+- [x] **Step 1: ChatView에 뷰 전환 재적용 + 새 메시지 게이팅** — `ChatView.jsx`
 
 `ChatView` 본문 상단(refs 근처)에 추가:
 ```js
@@ -845,7 +845,7 @@ git commit -m "feat(client): animate modal open/close via usePresence (new-sessi
   });
 ```
 
-- [ ] **Step 2: Message에 등장 클래스** — `Message.jsx`
+- [x] **Step 2: Message에 등장 클래스** — `Message.jsx`
 
 시그니처를 `export default function Message({ item, isNew })` 로 바꾸고, 각 `.msg`/카드 루트에 `isNew`일 때 `enter-rise` 애니 클래스를 붙인다. 반복을 줄이기 위해 상단에 헬퍼:
 ```js
@@ -887,7 +887,7 @@ export default function Message({ item, isNew }) {
 ```
 (thinking/tool_use는 자체 루트가 있으므로 얇은 래퍼 div에 `msg-enter`를 얹는다. 래퍼가 레이아웃에 영향 없도록 CSS에서 `display: contents` 대신 기본 block 유지 — Task 6에서 tool 카드 자체에 직접 적용하도록 개선 가능하나 본 Task는 래퍼로 충분.)
 
-- [ ] **Step 3: 등장 애니 CSS** — `chat.css` 끝에 추가:
+- [x] **Step 3: 등장 애니 CSS** — `chat.css` 끝에 추가:
 
 ```css
 .msg-enter { animation: enter-rise var(--dur-base) var(--ease-out) both; }
@@ -896,7 +896,7 @@ export default function Message({ item, isNew }) {
 ```
 (`.view-enter`는 theme.css에도 있으나 chat 스코프에서 확실히 적용되도록 중복 무해. 원치 않으면 생략 가능.)
 
-- [ ] **Step 4: 빌드 + 브라우저 실측**
+- [x] **Step 4: 빌드 + 브라우저 실측**
 
 Run: `npm run build --prefix client`
 Expected: PASS.
@@ -910,7 +910,7 @@ node scripts/dev-fake.mjs --port 8790 --scenario echo
 - 메시지 전송 → **새 메시지만** 아래에서 살짝 떠오르며 등장. 기존 메시지는 가만히.
 - reduced-motion 에뮬레이션(chrome-devtools `emulate` 또는 OS 설정) 시 즉시 표시.
 
-- [ ] **Step 5: 커밋**
+- [x] **Step 5: 커밋**
 
 ```bash
 git add client/src/components/ChatView.jsx client/src/components/Message.jsx client/src/components/chat.css
@@ -929,7 +929,7 @@ git commit -m "feat(client): session-switch view transition + gated message entr
 **Interfaces:**
 - Consumes: `--dur-*`, `--ease-out` (Task 2).
 
-- [ ] **Step 1: 사이드바 접기 폭 트랜지션** — `theme.css`의 `.app` 규칙에 transition 추가. `.app { display: grid; height: 100%; grid-template-columns: var(--sidebar-width) 1fr; }` 를:
+- [x] **Step 1: 사이드바 접기 폭 트랜지션** — `theme.css`의 `.app` 규칙에 transition 추가. `.app { display: grid; height: 100%; grid-template-columns: var(--sidebar-width) 1fr; }` 를:
 ```css
 .app {
   display: grid;
@@ -940,7 +940,7 @@ git commit -m "feat(client): session-switch view transition + gated message entr
 ```
 로 바꾼다. (`.app.sidebar-collapsed`는 이미 `0 1fr` — 이제 폭이 부드럽게 전환.) sidebar 내용이 폭 0에서 잘리도록 `.sidebar { overflow: hidden; }`가 필요하면 `interact.css`의 `.sidebar` 규칙에 `overflow: hidden;`을 확인/추가.
 
-- [ ] **Step 2: 버튼/pill press 마이크로** — `theme.css` 하단(또는 interact.css)에 추가:
+- [x] **Step 2: 버튼/pill press 마이크로** — `theme.css` 하단(또는 interact.css)에 추가:
 ```css
 @media (prefers-reduced-motion: no-preference) {
   .btn-primary:active:not(:disabled),
@@ -961,12 +961,12 @@ git commit -m "feat(client): session-switch view transition + gated message entr
 ```
 (기존 `button`의 0.13s transition과 충돌하지 않도록 이 선택자들은 명시적으로 재선언. reduced-motion에서는 Task 2의 전역 규칙이 transform을 즉시화.)
 
-- [ ] **Step 3: reopen 버튼 페이드** — `interact.css` 또는 theme.css의 `.sidebar-reopen`에 등장 애니:
+- [x] **Step 3: reopen 버튼 페이드** — `interact.css` 또는 theme.css의 `.sidebar-reopen`에 등장 애니:
 ```css
 .sidebar-reopen { animation: enter-fade var(--dur-base) var(--ease-out) both; }
 ```
 
-- [ ] **Step 4: 빌드 + 브라우저 실측**
+- [x] **Step 4: 빌드 + 브라우저 실측**
 
 Run: `npm run build --prefix client`
 Expected: PASS.
@@ -976,7 +976,7 @@ fake-cli(echo)로 실측:
 - 버튼·pill·디렉토리 헤더 클릭 시 살짝 눌리는 press 피드백.
 - reduced-motion 시 즉시(축소).
 
-- [ ] **Step 5: 전체 검증(회귀 포함)**
+- [x] **Step 5: 전체 검증(회귀 포함)**
 
 Run: `npm test`
 Expected: PASS — **46 tests, 0 fail**(Task 1 이후 유지).
@@ -986,7 +986,7 @@ Expected: PASS.
 
 브라우저 통합 실측(권한 시나리오 1회, echo 시나리오 1회)으로 6개 표면(트리·전환·펼침·모달·등장·접기) + reduced-motion 최종 확인.
 
-- [ ] **Step 6: 커밋**
+- [x] **Step 6: 커밋**
 
 ```bash
 git add client/src/theme.css client/src/components/interact.css client/src/components/chat.css

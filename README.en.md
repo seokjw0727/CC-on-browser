@@ -1,0 +1,125 @@
+# Claude Code on Browser
+
+[한국어](README.md) · **English**
+
+A **local-only** web app for using CLI-based Claude Code from your browser.
+Instead of the terminal TUI, it gives you streaming markdown chat, tool-execution cards, permission dialogs, and a session-resume UI.
+
+**No SDK, no API.** There is no `@anthropic-ai/sdk`, no `claude-agent-sdk`, and no direct call to api.anthropic.com —
+the app drives your locally installed `claude` CLI as a child process. Authentication and billing follow your
+Claude subscription (e.g., Claude Max) entirely; no API key is required.
+
+## What you get
+
+- **Streaming markdown chat** — renders partial messages (`--include-partial-messages`) in real time. Code highlighting (highlight.js) + XSS sanitization (DOMPurify).
+- **Tool execution cards** — Bash, Edit, Write, Read, Grep and other tool calls rendered as input/result cards; long results collapse.
+- **Thinking blocks** — extended-thinking streams shown as separate, collapsible blocks.
+- **Permission dialog** — `can_use_tool` requests pop up as a modal for allow/deny. Suggestions are labeled by their actual effect, never vague wording like "always allow".
+- **Session resume** — browse past projects/sessions, preload the transcript, and continue (`--resume`).
+- **Runtime controls** — model switching, permission-mode switching (ask every time / accept edits / plan / bypass), `/` slash-command autocomplete, turn interrupt (Esc).
+- **Composer-centric UI** — no top bar; repo, permission mode, model, send, and usage fold into the composer. Light/dark themes, zero external font/image dependencies (brand assets are self-contained SVGs — safe under a local CSP).
+
+## Requirements
+
+- Windows / macOS / Linux + Node.js 20 or later
+- [Claude Code CLI](https://claude.com/claude-code) installed and **logged in** (run `claude` → `/login`)
+  - The app reuses the CLI's auth state as-is. If the CLI is not logged in, session start fails.
+
+## Install / Build / Run
+
+```sh
+npm run install:all   # install server/ and client/ dependencies
+npm run build         # client → client/dist
+npm start             # start the server (default port 8787; change via PORT or --port)
+```
+
+On startup the console prints the access URL:
+
+```
+Claude Code on Browser: http://127.0.0.1:8787/#token=<random-token>
+```
+
+Open that URL (token included) in your browser.
+
+**CLI path resolution order**: the `CLAUDE_WEB_CLI_PATH` environment variable (if set) → the development
+default path (only when it exists) → `claude` on the OS `PATH` (`claude.exe` on Windows). If `claude` is on
+your PATH you usually need no extra setup; if it lives somewhere unusual, point `CLAUDE_WEB_CLI_PATH` at the
+absolute path.
+
+### Subscription-free demo (fake CLI)
+
+You can bring up the whole stack with a fake CLI that mimics the protocol instead of the real one:
+
+```sh
+node scripts/dev-fake.mjs                       # echo scenario (default port 8788)
+node scripts/dev-fake.mjs --scenario permission # permission-dialog scenario (works in any shell)
+```
+
+If you prefer environment variables: POSIX shells use `FAKE_SCENARIO=permission node scripts/dev-fake.mjs`,
+PowerShell uses `$env:FAKE_SCENARIO='permission'; node scripts/dev-fake.mjs`.
+
+Tests also run exclusively against the fake CLI, so they never consume your subscription: `npm test`
+
+## Architecture
+
+```
+Browser (SPA: Vite + React)
+   │  WebSocket + REST (127.0.0.1, token auth, Origin validation)
+   ▼
+Node server (server/src/server.js — http + ws)
+   ├─ static: serves client/dist
+   ├─ REST: /api/bootstrap /api/projects /api/sessions /api/transcript /api/browse
+   └─ SessionHub ── ClaudeSession (one CLI process per session, ring-buffer event replay)
+         │  spawn (stdio pipe, JSONL)
+         ▼
+      claude -p --input-format stream-json --output-format stream-json
+             --verbose --include-partial-messages --permission-prompt-tool stdio
+             [--resume <id>] [--model <m>] [--permission-mode <mode>]  (cwd = selected project)
+```
+
+- Tool permission requests (`can_use_tool`) reach the server over stdio; the browser's permission dialog
+  decides allow/deny and the answer is written back to the CLI.
+- The spawned CLI loads your hooks, skills, and settings as usual — the browser UI is a front end to your
+  real CLI environment.
+- All knowledge of the undocumented CLI protocol is isolated in a single module: `server/src/claude-session.js`.
+
+## Project layout
+
+```
+server/src/
+  server.js          HTTP (REST + static) + WebSocket hub. 127.0.0.1-only, token/Origin auth
+  session-hub.js     Session registry — key↔ClaudeSession, event broadcast/replay relay
+  claude-session.js  Wraps one CLI child process — stream-json I/O, undocumented protocol isolated here
+  history.js         Reads ~/.claude projects/sessions/transcripts (for session resume)
+  fs-api.js          Directory listing (/api/browse) — never serves file contents
+  jsonl.js           Line-delimited JSON parser
+client/src/
+  App.jsx            Shell layout & theme owner
+  lib/               store.jsx (state) · ws.js (auto-reconnect) · reduce-cli-event.js (CLI events→state) · markdown.js · api.js
+  components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · Brand
+scripts/dev-fake.mjs Subscription-free demo launcher (fake CLI)
+server/test/         Integration/unit tests against the fake CLI (never runs the real claude)
+docs/superpowers/    Spec & plan documents
+```
+
+## Security notes
+
+- The server binds to `127.0.0.1` only. **Never expose it remotely** (port forwarding, reverse proxies) —
+  this app drives a CLI that can access your filesystem and shell.
+- A random token generated at startup is delivered via the URL fragment (`#token=`). Do not share that URL.
+  The WebSocket re-sends it as the `?token=` query and REST as the `x-auth-token` header; the Origin header
+  is validated as well.
+- The filesystem API (`/api/browse`) lists directories only. File-content access goes through CLI tools and
+  the permission dialog.
+
+## Limitations (out of v1 scope)
+
+Image attachments, subagent tree visualization, MCP server management UI, PTY terminal tabs,
+multi-browser concurrent-client sync, remote (non-localhost) access.
+
+## Protocol warning
+
+The stream-json control protocol (including `--permission-prompt-tool stdio`) is an **officially
+undocumented interface** (verified empirically against CLI v2.1.201). CLI updates may change the format;
+unknown messages are never dropped — they surface in the UI as raw events. If you suspect a protocol change,
+re-verify with the probe procedure in `docs/superpowers/specs/2026-07-06-claude-code-on-browser-design.md`.

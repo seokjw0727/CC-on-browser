@@ -1,5 +1,7 @@
 # Claude Code on Browser
 
+**한국어** · [English](README.en.md)
+
 CLI 기반 Claude Code를 브라우저에서 쓰는 **로컬 전용** 웹 앱.
 터미널 TUI 대신 스트리밍 마크다운 채팅, 도구 실행 카드, 권한 다이얼로그, 세션 재개 UI를 제공합니다.
 
