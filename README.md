@@ -95,7 +95,8 @@ Node 서버 (server/src/server.js — http + ws)
          ▼
       claude -p --input-format stream-json --output-format stream-json
              --verbose --include-partial-messages --permission-prompt-tool stdio
-             [--resume <id>] [--model <m>] [--permission-mode <mode>]  (cwd = 선택한 프로젝트)
+             [--resume <id>] [--model <m>] [--permission-mode <mode>] [--effort <level>]
+             (cwd = 선택한 프로젝트)
 ```
 
 - 도구 권한 요청(`can_use_tool`)은 stdio로 서버에 전달되고, 브라우저의 권한 다이얼로그에서

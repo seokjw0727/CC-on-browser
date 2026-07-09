@@ -63,7 +63,8 @@ Node 서버 (ESM, http + ws)
          ▼
       claude.exe -p --input-format stream-json --output-format stream-json
                  --verbose --include-partial-messages --permission-prompt-tool stdio
-                 [--resume <id>] [--model <m>] [--permission-mode <mode>] (cwd = 선택한 프로젝트)
+                 [--resume <id>] [--model <m>] [--permission-mode <mode>] [--effort <level>]
+                 (cwd = 선택한 프로젝트)
 ```
 
 ### 4.1 서버 모듈 (server/src/)

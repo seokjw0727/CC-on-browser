@@ -402,8 +402,15 @@ export default function Composer({ theme, onToggleTheme }) {
   // 대화로 재시작한다: 기존 프로세스 정지 → --resume + --effort 재스폰, 메시지는
   // 메모리에서 이월(preloadMessages).
   const changeEffort = (effort) => {
-    // 시작 대기 중인 재시작이 있으면 무시 — 연타로 고아 세션이 생기는 것을 막는다
-    if (!session || state.pendingStarts.size > 0) return;
+    // 트리거 disabled와 동일한 불변식을 여기서도 강제한다 — 팝오버가 열린 채로
+    // 상태가 바뀌면(턴 시작·세션 전환·init 미도착) 버튼 잠금만으로는 못 막는다.
+    // 연타(pendingStarts) 가드는 고아 세션 방지.
+    if (
+      !session ||
+      state.pendingStarts.size > 0 ||
+      session.status !== 'idle' ||
+      !session.sessionId
+    ) return;
     stopSession(session.key);
     startSession({
       cwd: session.cwd,
@@ -548,8 +555,12 @@ export default function Composer({ theme, onToggleTheme }) {
                 <EffortPicker
                   session={session}
                   options={modelOptions}
-                  // 진행 중 턴이 있으면 잠근다 — effort 변경은 재시작이라 진행분을 파괴한다
-                  disabled={!live || state.conn !== 'open' || session.status !== 'idle'}
+                  // 진행 중 턴이 있으면 잠근다 — effort 변경은 재시작이라 진행분을 파괴한다.
+                  // sessionId 확보 전(init 도착 전)에도 잠근다 — 이때 재시작하면 --resume
+                  // 대상이 없어 이월된 화면과 달리 새 대화로 시작해 버린다.
+                  disabled={
+                    !live || state.conn !== 'open' || session.status !== 'idle' || !session.sessionId
+                  }
                   onSelect={changeEffort}
                 />
               </>

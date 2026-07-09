@@ -96,7 +96,8 @@ Node server (server/src/server.js — http + ws)
          ▼
       claude -p --input-format stream-json --output-format stream-json
              --verbose --include-partial-messages --permission-prompt-tool stdio
-             [--resume <id>] [--model <m>] [--permission-mode <mode>]  (cwd = selected project)
+             [--resume <id>] [--model <m>] [--permission-mode <mode>] [--effort <level>]
+             (cwd = selected project)
 ```
 
 - Tool permission requests (`can_use_tool`) reach the server over stdio; the browser's permission dialog
