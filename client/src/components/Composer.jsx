@@ -75,6 +75,7 @@ function RingStat({ label, pct, title }) {
     <span
       className={`meta-item ring-stat${cls}`}
       title={title}
+      role="img"
       aria-label={`${label} ${Math.round(clamped)}%`}
     >
       <svg className="ring" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">

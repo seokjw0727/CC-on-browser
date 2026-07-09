@@ -1,4 +1,5 @@
-// 사이드바 — wordmark / [새 세션](cwd 피커 모달) / 현재 세션(라이브 탭 + 해당 프로젝트 히스토리 재개).
+// 사이드바 — wordmark / [새 세션](cwd 피커 모달) / 현재 세션(라이브 탭 + 히스토리 재개)
+// / 다른 열린 세션(타 프로젝트 라이브 세션 전환·종료).
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../lib/store.jsx';
 import {
@@ -413,6 +414,7 @@ export default function Sidebar({ onCollapse }) {
     historyByDir: expanded,
     activeKey: state.activeKey,
   });
+  const liveOthers = tree.others.filter((n) => n.live.length > 0);
 
   // 라이브 세션 행 — 렌더 헬퍼(요소 인스턴스화가 아니라 호출)로 두어 DOM을 안정화.
   // 매 렌더마다 새 컴포넌트 타입이 생기지 않으므로 React가 remount 없이 patch한다.
@@ -536,6 +538,15 @@ export default function Sidebar({ onCollapse }) {
             <div className="sidebar-h">현재 세션</div>
             {dirGroup(tree.pinned, true)}
           </div>
+        )}
+
+        {/* 다른 프로젝트에서 아직 살아 있는 세션 — 목록 섹션은 삭제됐지만
+            실행 중인 세션의 전환·종료 경로는 남겨야 한다. */}
+        {liveOthers.length > 0 && (
+          <>
+            <div className="sidebar-h">다른 열린 세션</div>
+            {liveOthers.map((n) => dirGroup(n, true))}
+          </>
         )}
 
         {error && <div className="sidebar-error">{error}</div>}
