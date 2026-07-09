@@ -101,7 +101,14 @@ before(async () => {
     }) + '\n' +
     JSON.stringify({
       type: 'assistant',
-      message: { id: 'msg_1', role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+      requestId: 'req_int_1',
+      timestamp: new Date().toISOString(),
+      message: {
+        id: 'msg_1',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'answer' }],
+        usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 25, cache_creation_input_tokens: 10 },
+      },
     }) + '\n',
   );
   staticDir = path.join(tmpRoot, 'dist');
@@ -385,6 +392,12 @@ test('(f) REST auth + /api/projects/sessions/transcript/browse/bootstrap', async
   assert.equal(bootstrap.port, port);
   assert.ok('claudeVersion' in bootstrap);
   assert.equal(typeof bootstrap.defaultCwd, 'string');
+
+  // /api/usage — 픽스처 assistant 엔트리(방금 timestamp) 1건이 양쪽 창에 집계된다
+  const usage = await (await fetch(`${base}/api/usage`, auth)).json();
+  assert.equal(usage.fiveHour.totalTokens, 185);
+  assert.equal(usage.fiveHour.entries, 1);
+  assert.equal(usage.sevenDay.totalTokens, 185);
 });
 
 test('static serving + SPA fallback (no auth required)', async () => {

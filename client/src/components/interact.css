@@ -166,40 +166,6 @@
   border-radius: var(--r-sm);
 }
 
-.account-chip {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-top: 1px solid var(--border-soft);
-  min-width: 0;
-}
-.avatar {
-  flex: none;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  font-weight: 700;
-  font-size: 13px;
-}
-.account-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  line-height: 1.25;
-}
-.account-name {
-  font-weight: 500;
-  font-size: 13px;
-}
-.account-plan {
-  font-size: 11px;
-}
-
 /* ===================== Composer ===================== */
 .composer-dock {
   position: relative;
@@ -558,6 +524,55 @@
 }
 .browse-item:hover {
   background: var(--surface-2);
+}
+.dt-row {
+  display: flex;
+  align-items: center;
+  /* .browse-item과 동일 — flex column 스크롤 목록에서 행 압착 방지 */
+  flex: none;
+  min-width: 0;
+  border-radius: var(--r-sm);
+}
+.dt-row.sel {
+  background: var(--surface-2);
+}
+.dt-row.sel .dt-name {
+  font-weight: 600;
+}
+.dt-caret {
+  flex: none;
+  width: 22px;
+  padding: 5px 0;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  border-radius: var(--r-sm);
+}
+.dt-caret:hover {
+  background: var(--surface-2);
+}
+.dt-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 5px 6px;
+  border-radius: var(--r-sm);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.dt-name:hover {
+  background: var(--surface-2);
+}
+.dt-note {
+  flex: none;
+  padding: 5px 8px;
+  font-size: 12.5px;
 }
 .recent-projects {
   display: flex;

@@ -16,6 +16,8 @@ Claude subscription (e.g., Claude Max) entirely; no API key is required.
 - **Thinking blocks** — extended-thinking streams shown as separate, collapsible blocks.
 - **Permission dialog** — `can_use_tool` requests pop up as a modal for allow/deny. Suggestions are labeled by their actual effect, never vague wording like "always allow".
 - **Session resume** — browse past projects/sessions, preload the transcript, and continue (`--resume`).
+- **Working-directory picker** — type or paste a path in the new-session modal, then click-select from the folder tree underneath.
+- **Statusline** — under the composer: current-session context usage (last turn) plus 5-hour / 7-day token usage (aggregated locally from transcripts).
 - **Runtime controls** — model switching, permission-mode switching (ask every time / accept edits / plan / bypass), `/` slash-command autocomplete, turn interrupt (Esc).
 - **Composer-centric UI** — no top bar; repo, permission mode, model, send, and usage fold into the composer. Light/dark themes, zero external font/image dependencies (brand assets are self-contained SVGs — safe under a local CSP).
 
@@ -82,7 +84,7 @@ Browser (SPA: Vite + React)
    ▼
 Node server (server/src/server.js — http + ws)
    ├─ static: serves client/dist
-   ├─ REST: /api/bootstrap /api/projects /api/sessions /api/transcript /api/browse
+   ├─ REST: /api/bootstrap /api/projects /api/sessions /api/transcript /api/browse /api/usage
    └─ SessionHub ── ClaudeSession (one CLI process per session, ring-buffer event replay)
          │  spawn (stdio pipe, JSONL)
          ▼
@@ -106,6 +108,7 @@ server/src/
   session-hub.js     Session registry — key↔ClaudeSession, event broadcast/replay relay
   claude-session.js  Wraps one CLI child process — stream-json I/O, undocumented protocol isolated here
   history.js         Reads ~/.claude projects/sessions/transcripts (for session resume)
+  usage.js           Local aggregation over ~/.claude transcripts — 5h/7d usage (/api/usage)
   fs-api.js          Directory listing (/api/browse) — never serves file contents
   jsonl.js           Line-delimited JSON parser
 client/src/

@@ -39,7 +39,7 @@ export function createSessionState(partial = {}) {
     messages: [],
     streaming: {},
     pendingPermissions: [],
-    usage: { cost: 0, inTok: 0, outTok: 0 },
+    usage: { cost: 0, inTok: 0, outTok: 0, contextTokens: 0 },
     rateLimit: null,
     status: 'idle', // idle | thinking | tool | awaiting-permission | exited
     lastSeq: 0,
@@ -57,6 +57,7 @@ function createInitialState() {
     pendingStarts: new Map(), // startId -> {cwd, model, permissionMode, resumeSessionId}
     lastError: null,
     newSessionOpen: false, // 새 세션(레포 선택) 모달 표시 여부 — Sidebar/Composer 공용
+    globalUsage: null, // /api/usage 폴링 결과 (5h/7d 로컬 집계) — 상태줄 표시용
   };
 }
 
@@ -182,6 +183,8 @@ export function reducer(state, action) {
       return { ...state, newSessionOpen: false };
     case 'set-projects':
       return { ...state, projects: action.projects };
+    case 'set-usage':
+      return { ...state, globalUsage: action.usage };
     case 'update-session':
       return updateSession(state, action.key, action.fn);
     case 'clear-error':

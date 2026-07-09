@@ -22,7 +22,12 @@ function emitResult(text, extra = {}) {
     result: text,
     session_id: SESSION_ID,
     total_cost_usd: 0.001,
-    usage: { input_tokens: 10, output_tokens: 5 },
+    usage: {
+      input_tokens: 10,
+      output_tokens: 5,
+      cache_read_input_tokens: 1200,
+      cache_creation_input_tokens: 300,
+    },
     num_turns: userCount,
     duration_ms: 42,
     is_error: false,

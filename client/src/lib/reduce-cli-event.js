@@ -409,6 +409,13 @@ function reduceResult(session, payload) {
           : next.usage.cost,
       inTok: (next.usage.inTok || 0) + (usage.input_tokens || 0),
       outTok: (next.usage.outTok || 0) + (usage.output_tokens || 0),
+      // 마지막 턴의 프롬프트측 토큰(입력+캐시) ≈ 현재 컨텍스트 크기 — 상태줄 표시용
+      contextTokens:
+        (usage.input_tokens || 0) +
+          (usage.cache_read_input_tokens || 0) +
+          (usage.cache_creation_input_tokens || 0) ||
+        next.usage.contextTokens ||
+        0,
     },
     lastResult: {
       subtype: payload.subtype ?? null,

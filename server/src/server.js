@@ -10,8 +10,10 @@ import { WebSocketServer } from 'ws';
 import { SessionHub } from './session-hub.js';
 import { listProjects, listSessions, loadTranscript } from './history.js';
 import { listDirs } from './fs-api.js';
+import { aggregateUsage } from './usage.js';
 
 const VERSION_TIMEOUT_MS = 3_000;
+const USAGE_CACHE_MS = 30_000;
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -45,6 +47,7 @@ export async function startServer({
   const sockets = new Set();
   let boundPort = null;
   let versionPromise = null;
+  let usageCache = { at: 0, promise: null };
 
   const tokenBuf = Buffer.from(String(token));
   const tokenEquals = (candidate) => {
@@ -227,6 +230,18 @@ export async function startServer({
         case '/api/browse':
           json(res, 200, await listDirs(url.searchParams.get('path') ?? ''));
           return;
+        case '/api/usage': {
+          if (!usageCache.promise || Date.now() - usageCache.at > USAGE_CACHE_MS) {
+            const promise = aggregateUsage(projectsRoot).catch((err) => {
+              // 실패는 캐시하지 않는다 — 단, 그 사이 설치된 새 캐시는 건드리지 않는다
+              if (usageCache.promise === promise) usageCache = { at: 0, promise: null };
+              throw err;
+            });
+            usageCache = { at: Date.now(), promise };
+          }
+          json(res, 200, await usageCache.promise);
+          return;
+        }
         default:
           json(res, 404, { error: 'not found' });
       }

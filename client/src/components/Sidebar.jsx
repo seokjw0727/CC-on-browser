@@ -1,4 +1,4 @@
-// 사이드바 — wordmark / [새 세션](cwd 피커 모달) / 열린 세션 탭 / 최근 세션(재개) / 계정 칩.
+// 사이드바 — wordmark / [새 세션](cwd 피커 모달) / 열린 세션 탭 / 최근 세션(재개).
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../lib/store.jsx';
 import {
@@ -45,12 +45,110 @@ function fmtTime(ms) {
   }
 }
 
-// ----- 새 세션 모달 (cwd 피커: 트리 탐색 + 직접 입력 + 최근 프로젝트) -----
+// ----- 디렉터리 트리 (지정한 루트의 하위 폴더 lazy 탐색) -----
+function joinPath(parent, name) {
+  if (!parent) return name; // 루트('') = 드라이브 목록 — 항목('C:\') 자체가 절대 경로
+  const sep = parent.includes('/') && !parent.includes('\\') ? '/' : '\\';
+  return parent.endsWith(sep) ? parent + name : parent + sep + name;
+}
+
+function DirTree({ root, selected, onSelect }) {
+  const [children, setChildren] = useState({}); // path -> string[] | 'loading' | {error}
+  const [open, setOpen] = useState({}); // path -> bool
+
+  const load = async (p) => {
+    setChildren((prev) => ({ ...prev, [p]: 'loading' }));
+    try {
+      const res = await browseDirs(p);
+      setChildren((prev) => ({ ...prev, [p]: res.dirs }));
+    } catch (err) {
+      setChildren((prev) => ({ ...prev, [p]: { error: String(err.message ?? err) } }));
+    }
+  };
+
+  // 루트가 바뀌면(경로 입력 이동/최근 프로젝트 클릭) 트리를 새 기준으로 리셋
+  useEffect(() => {
+    setChildren({});
+    setOpen({});
+    load(root);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [root]);
+
+  const toggle = (p) => {
+    // 미로드이거나 직전 로드가 실패({error})면 다시 시도 — 재루팅 없이 재시도 가능하게.
+    if (!open[p] && (children[p] == null || children[p]?.error)) load(p);
+    setOpen((prev) => ({ ...prev, [p]: !prev[p] }));
+  };
+
+  const rows = [];
+  const note = (key, depth, text) => {
+    rows.push(
+      <div key={key} className="dt-note dim" style={{ paddingLeft: `${10 + depth * 16}px` }}>
+        {text}
+      </div>,
+    );
+  };
+  const walk = (parentPath, depth) => {
+    const kids = children[parentPath];
+    if (kids === 'loading') {
+      note(`${parentPath}#loading`, depth, '불러오는 중…');
+      return;
+    }
+    if (kids && !Array.isArray(kids)) {
+      note(`${parentPath}#error`, depth, kids.error);
+      return;
+    }
+    if (!kids) return;
+    if (kids.length === 0) {
+      note(`${parentPath}#empty`, depth, '(하위 폴더 없음)');
+      return;
+    }
+    for (const name of kids) {
+      const p = joinPath(parentPath, name);
+      const isOpen = !!open[p];
+      rows.push(
+        <div
+          key={p}
+          className={`dt-row${selected === p ? ' sel' : ''}`}
+          style={{ paddingLeft: `${depth * 16}px` }}
+        >
+          <button
+            type="button"
+            className="dt-caret"
+            aria-expanded={isOpen}
+            aria-label={isOpen ? `${name} 접기` : `${name} 펼치기`}
+            onClick={() => toggle(p)}
+          >
+            {isOpen ? '▾' : '▸'}
+          </button>
+          <button
+            type="button"
+            className="dt-name"
+            title={`이 폴더 선택: ${p}`}
+            onClick={() => onSelect(p)}
+          >
+            📁 {name}
+          </button>
+        </div>,
+      );
+      if (isOpen) walk(p, depth + 1);
+    }
+  };
+  walk(root, 0);
+
+  return (
+    <div className="browse-box dir-tree" aria-label="하위 폴더 트리">
+      {rows}
+    </div>
+  );
+}
+
+// ----- 새 세션 모달 (cwd 지정: 직접 입력 + 하위 폴더 트리 + 최근 프로젝트) -----
 function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose, presenceStatus }) {
   const [cwd, setCwd] = useState(defaultCwd || '');
   const [model, setModel] = useState('');
   const [mode, setMode] = useState('default');
-  const [browse, setBrowse] = useState(null); // {path, parent, dirs}
+  const [treeRoot, setTreeRoot] = useState(null); // 트리 기준 경로 ('' = 드라이브 목록)
   const [error, setError] = useState(null);
   // 포커스 트랩 — 모달이 열린 동안 Tab을 안에 가두고, 닫히면 여는 버튼으로 복원.
   const cwdRef = useRef(null);
@@ -59,7 +157,7 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose, pre
   const navigate = async (target) => {
     try {
       const res = await browseDirs(target ?? '');
-      setBrowse(res);
+      setTreeRoot(res.path);
       if (res.path) setCwd(res.path);
       setError(null);
     } catch (err) {
@@ -71,12 +169,6 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose, pre
     navigate(defaultCwd || '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const childPath = (name) => {
-    if (!browse || !browse.path) return name; // 드라이브 루트 목록
-    const sep = browse.path.includes('/') && !browse.path.includes('\\') ? '/' : '\\';
-    return browse.path.endsWith(sep) ? browse.path + name : browse.path + sep + name;
-  };
 
   const models = Array.isArray(initInfo?.models) ? initInfo.models : [];
   const recent = projects.filter((p) => p.cwd);
@@ -139,31 +231,10 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose, pre
           </div>
         </div>
 
-        {browse && (
-          <div className="browse-box">
-            {browse.parent != null && (
-              <button type="button" className="browse-item dim" onClick={() => navigate(browse.parent)}>
-                ↑ ..
-              </button>
-            )}
-            {browse.path !== '' && (
-              <button type="button" className="browse-item dim" onClick={() => navigate('')}>
-                ⌂ 드라이브 목록
-              </button>
-            )}
-            {browse.dirs.map((name) => (
-              <button
-                key={name}
-                type="button"
-                className="browse-item"
-                onClick={() => navigate(browse.path === '' ? name : childPath(name))}
-              >
-                📁 {name}
-              </button>
-            ))}
-            {browse.dirs.length === 0 && (
-              <div className="browse-item dim">(하위 폴더 없음)</div>
-            )}
+        {treeRoot != null && (
+          <div className="picker-field">
+            <span className="dim">하위 폴더 트리 — 이름 클릭으로 선택, ▸로 펼치기</span>
+            <DirTree root={treeRoot} selected={cwd} onSelect={setCwd} />
           </div>
         )}
 
@@ -234,20 +305,6 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose, pre
       </div>
     </div>
   );
-}
-
-// account.email → 표시 이름. subscriptionType → 짧은 플랜명.
-function accountName(account) {
-  const email = account?.email;
-  if (!email) return '사용자';
-  const local = String(email).split('@')[0] || email;
-  const base = local.replace(/[._-].*$/, '').replace(/\d+$/, '') || local;
-  return base.charAt(0).toUpperCase() + base.slice(1);
-}
-function planLabel(account) {
-  const t = account?.subscriptionType;
-  if (!t) return '';
-  return String(t).replace(/^claude\s+/i, '');
 }
 
 // ----- 사이드바 본체 -----
@@ -449,7 +506,6 @@ export default function Sidebar({ onCollapse }) {
     );
   };
 
-  const account = state.initInfo?.account;
   const isEmpty = openSessions.length === 0 && state.projects.length === 0;
 
   return (
@@ -517,14 +573,6 @@ export default function Sidebar({ onCollapse }) {
             </span>
           </div>
         )}
-      </div>
-
-      <div className="account-chip" title={account?.email || '계정'}>
-        <span className="avatar">{accountName(account).charAt(0)}</span>
-        <span className="account-text">
-          <span className="account-name truncate">{accountName(account)}</span>
-          {planLabel(account) && <span className="account-plan dim">{planLabel(account)}</span>}
-        </span>
       </div>
       </aside>
 

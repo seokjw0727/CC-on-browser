@@ -1,5 +1,5 @@
 // 컴포저(레퍼런스 충실) — 상단 pill 행(레포·권한모드), 입력, 하단 컨트롤(모델·전송),
-// 그 아래 마이크로 메타(비용·토큰·rate limit·연결·테마). 상단 바를 대체한다.
+// 그 아래 상태줄(컨텍스트·5h/7d 사용량·비용·rate limit·연결·테마). 상단 바를 대체한다.
 // Enter 전송/Shift+Enter 개행, `/` 커맨드 드롭다운, Esc/버튼 interrupt.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
@@ -26,6 +26,23 @@ function shortPath(p) {
 }
 function fmtCost(c) {
   return typeof c === 'number' ? `$${c.toFixed(4)}` : '$0.0000';
+}
+const CONTEXT_WINDOW = 200_000; // Claude 표준 컨텍스트 창(200k tok) 기준 사용률
+function fmtTok(n) {
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
+  return String(n);
+}
+function usageWindowTitle(label, b) {
+  return (
+    `${label} — 입력 ${b.inputTokens.toLocaleString()}` +
+    ` · 출력 ${b.outputTokens.toLocaleString()}` +
+    ` · 캐시읽기 ${b.cacheReadTokens.toLocaleString()}` +
+    ` · 캐시생성 ${b.cacheCreationTokens.toLocaleString()} tok` +
+    ' (로컬 트랜스크립트 집계)'
+  );
 }
 function fmtResetsAt(resetsAt) {
   if (resetsAt == null) return null;
@@ -58,6 +75,9 @@ export default function Composer({ theme, onToggleTheme }) {
   const modelInList = models.some((m) => m.value === modelValue);
   const rl = session?.rateLimit;
   const rlWarn = rl && rl.status && rl.status !== 'allowed';
+  const gu = state.globalUsage;
+  const ctxTokens = session?.usage?.contextTokens || 0;
+  const ctxPct = Math.min(999, Math.round((ctxTokens / CONTEXT_WINDOW) * 100));
 
   // ----- `/` 커맨드 드롭다운 -----
   const commands = useMemo(() => {
@@ -304,8 +324,26 @@ export default function Composer({ theme, onToggleTheme }) {
         </div>
       </div>
 
-      {/* 마이크로 메타 — 비용·토큰·rate limit·연결·테마 */}
+      {/* 상태줄 — 컨텍스트·5h/7d 사용량·비용·rate limit·연결·테마 */}
       <div className="composer-meta">
+        {ctxTokens > 0 && (
+          <span
+            className={`meta-item${ctxPct >= 80 ? ' warn' : ''}`}
+            title={`현재 세션 컨텍스트(마지막 턴 기준): ${ctxTokens.toLocaleString()} / ${CONTEXT_WINDOW.toLocaleString()} tok`}
+          >
+            CTX {ctxPct}%
+          </span>
+        )}
+        {gu?.fiveHour && (
+          <span className="meta-item" title={usageWindowTitle('최근 5시간', gu.fiveHour)}>
+            5h {fmtTok(gu.fiveHour.totalTokens)}
+          </span>
+        )}
+        {gu?.sevenDay && (
+          <span className="meta-item" title={usageWindowTitle('최근 7일', gu.sevenDay)}>
+            7d {fmtTok(gu.sevenDay.totalTokens)}
+          </span>
+        )}
         {session && (
           <span
             className="meta-item"

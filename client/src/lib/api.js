@@ -35,3 +35,6 @@ export const fetchTranscript = (dirName, sessionId) =>
 /** @returns {Promise<{path, parent, dirs: string[]}>} 빈 문자열이면 드라이브 목록 */
 export const browseDirs = (absPath = '') =>
   get(`/api/browse?path=${encodeURIComponent(absPath)}`);
+
+/** @returns {Promise<{now, fiveHour, sevenDay}>} 로컬 트랜스크립트 집계 사용량 (5h/7d) */
+export const fetchUsage = () => get('/api/usage');

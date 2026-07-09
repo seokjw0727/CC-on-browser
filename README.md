@@ -16,6 +16,8 @@ Claude 구독(예: Claude Max)을 따르며, API 키가 필요 없습니다.
 - **사고(thinking) 블록** — 확장 사고 스트림을 별도 블록으로 표시.
 - **권한 다이얼로그** — `can_use_tool` 요청을 모달로 띄워 허용/거부. 제안(suggestion)은 "항상 허용" 같은 모호한 문구 대신 실제 효과를 그대로 서술.
 - **세션 재개** — 과거 프로젝트·세션 목록에서 트랜스크립트를 불러와 이어가기(`--resume`).
+- **작업 디렉터리 지정** — 새 세션 모달에서 경로를 직접 입력·붙여넣고, 그 아래 하위 폴더 트리에서 클릭으로 선택.
+- **상태줄(statusline)** — 컴포저 아래에 현재 세션 컨텍스트 사용률(마지막 턴 기준)과 최근 5시간·7일 토큰 사용량(로컬 트랜스크립트 집계)을 표시.
 - **런타임 컨트롤** — 모델 전환, 권한 모드(매번 확인 / 편집 수락 / 플랜 / 전체 허용) 전환, `/` 슬래시 커맨드 자동완성, 턴 중단(Esc).
 - **컴포저 중심 UI** — 상단 바 없이 입력창 한 곳에 레포·권한모드·모델·전송·사용량을 접어 넣은 레이아웃. 라이트/다크 테마, 외부 폰트·이미지 의존 0(브랜드 자산은 자체 내장 SVG — 로컬 CSP 안전).
 
@@ -82,7 +84,7 @@ PowerShell은 `$env:FAKE_SCENARIO='permission'; node scripts/dev-fake.mjs` 로�
    ▼
 Node 서버 (server/src/server.js — http + ws)
    ├─ static: client/dist 서빙
-   ├─ REST: /api/bootstrap /api/projects /api/sessions /api/transcript /api/browse
+   ├─ REST: /api/bootstrap /api/projects /api/sessions /api/transcript /api/browse /api/usage
    └─ SessionHub ── ClaudeSession (세션당 CLI 프로세스 1개, 이벤트 링버퍼 리플레이)
          │  spawn (stdio pipe, JSONL)
          ▼
@@ -105,6 +107,7 @@ server/src/
   session-hub.js     세션 레지스트리 — 키↔ClaudeSession, 이벤트 브로드캐스트/리플레이 중계
   claude-session.js  CLI 자식 프로세스 1개 래핑 — stream-json 송수신, 미문서 프로토콜 격리
   history.js         ~/.claude 프로젝트·세션·트랜스크립트 읽기 (세션 재개용)
+  usage.js           ~/.claude 트랜스크립트 로컬 집계 — 5h/7d 사용량 (/api/usage)
   fs-api.js          디렉터리 나열(/api/browse) — 파일 내용은 미제공
   jsonl.js           라인 단위 JSON 파서
 client/src/
