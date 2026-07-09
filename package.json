@@ -1,12 +1,43 @@
 {
-  "name": "claude-code-on-browser",
-  "private": true,
+  "name": "cc-on-browser",
+  "version": "1.0.0",
+  "description": "Use CLI-based Claude Code from your browser — a local-only web UI that drives your claude CLI (no SDK, no API key)",
   "type": "module",
+  "license": "MIT",
+  "author": "seokjw0727",
+  "repository": "github:seokjw0727/CC-on-browser",
+  "homepage": "https://github.com/seokjw0727/CC-on-browser#readme",
+  "bugs": "https://github.com/seokjw0727/CC-on-browser/issues",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "cli",
+    "web-ui",
+    "local",
+    "browser"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "cc-on-browser": "bin/cc-on-browser.mjs"
+  },
+  "files": [
+    "bin/",
+    "server/src/",
+    "server/test/fake-cli.mjs",
+    "scripts/dev-fake.mjs",
+    "client/dist/"
+  ],
   "scripts": {
-    "install:all": "npm install --prefix server && npm install --prefix client",
+    "install:all": "npm install && npm install --prefix client",
     "build": "npm run build --prefix client",
-    "start": "node server/src/server.js",
+    "start": "node bin/cc-on-browser.mjs",
     "test": "node --test \"server/test/*.test.js\" \"client/test/*.test.js\"",
-    "dev:client": "npm run dev --prefix client"
+    "dev:client": "npm run dev --prefix client",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
   }
 }

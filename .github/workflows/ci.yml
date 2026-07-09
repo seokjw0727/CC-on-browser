@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+      - run: npm run install:all
+      - run: npm run build
+      - run: npm test
+
+  pack-smoke:
+    name: pack & install smoke (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+      - run: npm run install:all
+      - run: npm pack
+      - name: Install the tarball as a consumer and boot the server
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/consumer
+          cd /tmp/consumer
+          npm init -y > /dev/null
+          npm install "$GITHUB_WORKSPACE"/cc-on-browser-*.tgz
+          ./node_modules/.bin/cc-on-browser --port 8790 > boot.log 2>&1 &
+          SERVER_PID=$!
+          for i in $(seq 1 30); do
+            grep -q '#token=' boot.log && break
+            sleep 1
+          done
+          cat boot.log
+          TOKEN=$(grep -o '#token=[0-9a-f]*' boot.log | head -1 | cut -d= -f2)
+          test -n "$TOKEN"
+          curl -fsS http://127.0.0.1:8790/ | grep -qi '<!doctype html'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8790/api/bootstrap)" = "401"
+          curl -fsS -H "x-auth-token: $TOKEN" http://127.0.0.1:8790/api/bootstrap
+          kill "$SERVER_PID"

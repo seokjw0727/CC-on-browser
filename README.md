@@ -21,29 +21,44 @@ Claude 구독(예: Claude Max)을 따르며, API 키가 필요 없습니다.
 
 ## 요구사항
 
-- Windows / macOS / Linux + Node.js 20 이상
+- Windows / macOS / Linux + Node.js 22 이상
 - [Claude Code CLI](https://claude.com/claude-code) 설치 및 **로그인 완료** (`claude` 실행 → `/login`)
   - 이 앱은 CLI의 인증 상태를 그대로 사용합니다. CLI에서 로그인돼 있지 않으면 세션 시작이 실패합니다.
 
-## 설치 / 빌드 / 실행
+## 설치 / 실행
+
+### A. 패키지로 설치 (빌드 불필요)
+
+[GitHub Releases](https://github.com/seokjw0727/CC-on-browser/releases)에서 `cc-on-browser-<버전>.tgz`를 받아 전역 설치합니다:
 
 ```sh
-npm run install:all   # server/, client/ 의존성 설치
+npm install -g ./cc-on-browser-1.0.0.tgz
+cc-on-browser                # 기본 포트 8787 (PORT 환경변수로도 변경 가능)
+cc-on-browser --port 9000    # 포트 지정 (-p), --help 로 전체 옵션 확인
+```
+
+### B. 소스에서 실행
+
+```sh
+git clone https://github.com/seokjw0727/CC-on-browser.git
+cd CC-on-browser
+npm run install:all   # 루트(서버)·client/ 의존성 설치
 npm run build         # client → client/dist
-npm start             # 서버 기동 (기본 포트 8787, PORT 또는 --port 로 변경)
+npm start             # = node bin/cc-on-browser.mjs
 ```
 
 기동하면 콘솔에 접속 URL이 출력됩니다:
 
 ```
-Claude Code on Browser: http://127.0.0.1:8787/#token=<랜덤토큰>
+Claude Code on Browser v1.0.0 — http://127.0.0.1:8787/#token=<랜덤토큰>
 ```
 
-이 URL(토큰 포함)로 브라우저에서 접속하세요.
+이 URL(토큰 포함)로 브라우저에서 접속하세요. `claude` CLI를 찾지 못하면 설치·PATH 안내 경고가
+출력됩니다(서버는 뜨지만 세션 시작은 실패).
 
-**CLI 경로 해석 순서**: `CLAUDE_WEB_CLI_PATH` 환경변수(설정 시) → 개발 기본 경로(존재할 때만) →
-OS `PATH`의 `claude`(Windows는 `claude.exe`). 따라서 `claude`가 PATH에 있으면 대개 추가 설정이
-필요 없고, 특이한 위치에 설치했다면 `CLAUDE_WEB_CLI_PATH`로 절대 경로를 지정하세요.
+**CLI 경로 해석 순서**: `CLAUDE_WEB_CLI_PATH` 환경변수(설정 시) → OS `PATH`의 `claude`(Windows는
+`claude.exe`). `claude`가 PATH에 있으면 추가 설정이 필요 없고, 특이한 위치에 설치했다면
+`CLAUDE_WEB_CLI_PATH`로 절대 경로를 지정하세요.
 
 ### 구독 소모 없는 데모 (fake CLI)
 
@@ -84,6 +99,7 @@ Node 서버 (server/src/server.js — http + ws)
 ## 프로젝트 구조
 
 ```
+bin/cc-on-browser.mjs  CLI 진입점 — 인자 파싱·사전 점검 후 서버 기동 (npm start·전역 설치 공용)
 server/src/
   server.js          HTTP(REST + 정적 서빙) + WebSocket 허브. 127.0.0.1 전용, 토큰·Origin 인증
   session-hub.js     세션 레지스트리 — 키↔ClaudeSession, 이벤트 브로드캐스트/리플레이 중계
@@ -120,3 +136,7 @@ stream-json 제어 프로토콜(`--permission-prompt-tool stdio` 포함)은 **�
 (CLI v2.1.201에서 실측 검증). CLI 업데이트로 형식이 바뀔 수 있으며, 알 수 없는 메시지는 버리지 않고
 raw 이벤트로 UI에 전달되도록 설계돼 있습니다. 프로토콜 변경이 의심되면
 `docs/superpowers/specs/2026-07-06-claude-code-on-browser-design.md`의 프로브 절차로 재검증하세요.
+
+## 라이선스
+
+[MIT](LICENSE)

@@ -5,15 +5,12 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { SessionHub } from './session-hub.js';
 import { listProjects, listSessions, loadTranscript } from './history.js';
 import { listDirs } from './fs-api.js';
 
-const DEFAULT_CLI_PATH = 'C:\\Users\\<user>\\.local\\bin\\claude.exe';
 const VERSION_TIMEOUT_MS = 3_000;
 
 const CONTENT_TYPES = {
@@ -354,29 +351,5 @@ export async function startServer({
     server.closeAllConnections?.();
   });
 
-  return { server, port: boundPort, token, close };
-}
-
-// ---- 직접 실행 시 (node server/src/server.js) ----
-const isMain = process.argv[1]
-  && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
-
-if (isMain) {
-  const args = process.argv.slice(2);
-  const portIdx = args.indexOf('--port');
-  const port = portIdx >= 0 && args[portIdx + 1]
-    ? Number(args[portIdx + 1])
-    : (Number(process.env.PORT) || 8787);
-  const token = crypto.randomBytes(16).toString('hex');
-  // 우선순위: 명시적 env 오버라이드 → 개발 기본 경로(존재할 때만) → PATH의 bare 이름.
-  // bare 이름은 Node spawn이 OS PATH에서 해석하므로 macOS/Linux나 다른 설치 위치에서도 동작.
-  const cliPath = process.env.CLAUDE_WEB_CLI_PATH
-    || (existsSync(DEFAULT_CLI_PATH)
-      ? DEFAULT_CLI_PATH
-      : (process.platform === 'win32' ? 'claude.exe' : 'claude'));
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const staticDir = path.resolve(here, '..', '..', 'client', 'dist');
-
-  const handle = await startServer({ port, token, cliPath, staticDir });
-  console.log(`Claude Code on Browser: http://127.0.0.1:${handle.port}/#token=${handle.token}`);
+  return { server, port: boundPort, token, close, getClaudeVersion };
 }

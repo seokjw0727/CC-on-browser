@@ -21,30 +21,44 @@ Claude subscription (e.g., Claude Max) entirely; no API key is required.
 
 ## Requirements
 
-- Windows / macOS / Linux + Node.js 20 or later
+- Windows / macOS / Linux + Node.js 22 or later
 - [Claude Code CLI](https://claude.com/claude-code) installed and **logged in** (run `claude` → `/login`)
   - The app reuses the CLI's auth state as-is. If the CLI is not logged in, session start fails.
 
-## Install / Build / Run
+## Install / Run
+
+### Option A — install the package (no build needed)
+
+Grab `cc-on-browser-<version>.tgz` from [GitHub Releases](https://github.com/seokjw0727/CC-on-browser/releases) and install it globally:
 
 ```sh
-npm run install:all   # install server/ and client/ dependencies
+npm install -g ./cc-on-browser-1.0.0.tgz
+cc-on-browser                # default port 8787 (the PORT env var works too)
+cc-on-browser --port 9000    # pick a port (-p); see --help for all options
+```
+
+### Option B — run from source
+
+```sh
+git clone https://github.com/seokjw0727/CC-on-browser.git
+cd CC-on-browser
+npm run install:all   # install root (server) and client/ dependencies
 npm run build         # client → client/dist
-npm start             # start the server (default port 8787; change via PORT or --port)
+npm start             # = node bin/cc-on-browser.mjs
 ```
 
 On startup the console prints the access URL:
 
 ```
-Claude Code on Browser: http://127.0.0.1:8787/#token=<random-token>
+Claude Code on Browser v1.0.0 — http://127.0.0.1:8787/#token=<random-token>
 ```
 
-Open that URL (token included) in your browser.
+Open that URL (token included) in your browser. If the `claude` CLI cannot be found, a warning with
+install/PATH guidance is printed (the server still starts, but sessions will fail).
 
-**CLI path resolution order**: the `CLAUDE_WEB_CLI_PATH` environment variable (if set) → the development
-default path (only when it exists) → `claude` on the OS `PATH` (`claude.exe` on Windows). If `claude` is on
-your PATH you usually need no extra setup; if it lives somewhere unusual, point `CLAUDE_WEB_CLI_PATH` at the
-absolute path.
+**CLI path resolution order**: the `CLAUDE_WEB_CLI_PATH` environment variable (if set) → `claude` on the
+OS `PATH` (`claude.exe` on Windows). If `claude` is on your PATH no extra setup is needed; if it lives
+somewhere unusual, point `CLAUDE_WEB_CLI_PATH` at the absolute path.
 
 ### Subscription-free demo (fake CLI)
 
@@ -86,6 +100,7 @@ Node server (server/src/server.js — http + ws)
 ## Project layout
 
 ```
+bin/cc-on-browser.mjs  CLI entry point — arg parsing & preflight checks, then starts the server (npm start / global install)
 server/src/
   server.js          HTTP (REST + static) + WebSocket hub. 127.0.0.1-only, token/Origin auth
   session-hub.js     Session registry — key↔ClaudeSession, event broadcast/replay relay
@@ -123,3 +138,7 @@ The stream-json control protocol (including `--permission-prompt-tool stdio`) is
 undocumented interface** (verified empirically against CLI v2.1.201). CLI updates may change the format;
 unknown messages are never dropped — they surface in the UI as raw events. If you suspect a protocol change,
 re-verify with the probe procedure in `docs/superpowers/specs/2026-07-06-claude-code-on-browser-design.md`.
+
+## License
+
+[MIT](LICENSE)
