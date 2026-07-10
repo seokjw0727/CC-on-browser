@@ -1,5 +1,6 @@
 // message 아이템 하나를 kind별로 렌더.
 import { render } from '../lib/markdown.js';
+import { fmtTok } from '../lib/format.js';
 import ToolCard from './ToolCard.jsx';
 import ThinkingBlock from './ThinkingBlock.jsx';
 
@@ -38,6 +39,16 @@ export default function Message({ item, isNew }) {
 
     case 'notice':
       return <div className={`msg msg-notice dim${enter}`}>{item.text}</div>;
+
+    case 'usage':
+      return (
+        <div className={`msg msg-usage${enter}`}>
+          ↑ {fmtTok(item.inTok)} ↓ {fmtTok(item.outTok)} tok
+          {typeof item.durationMs === 'number'
+            ? ` · ${(item.durationMs / 1000).toFixed(1)}s`
+            : ''}
+        </div>
+      );
 
     case 'error':
       return <div className={`msg msg-error${enter}`}>{item.text}</div>;

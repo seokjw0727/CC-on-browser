@@ -12,9 +12,16 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 28px 24px 12px;
+  /* 하단 여백 48px: 컴포저 위에 올라선 CLAW'D(돌출 ~38px)가 마지막 메시지를
+     가리지 않게 확보한다 (마스코트가 숨는 좁은 화면에서는 원복) */
+  padding: 28px 24px 48px;
   display: flex;
   flex-direction: column;
+}
+@media (max-width: 900px) {
+  .chat-scroll {
+    padding-bottom: 12px;
+  }
 }
 
 .msg-list {
@@ -192,6 +199,14 @@
   gap: 8px;
   padding: 2px 0;
   font-size: 13px;
+}
+
+/* 턴 종료 시 토큰 사용량 — CLI풍 소형 표시(어시스턴트 턴의 꼬리표) */
+.msg-usage {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  padding: 0 2px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ----- 사고 과정 블록 ----- */

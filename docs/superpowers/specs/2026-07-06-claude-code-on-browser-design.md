@@ -33,6 +33,7 @@ CLI 기반 Claude Code를 브라우저에서 사용할 수 있게 하는 로컬 
 10. (2026-07-10 추가, 동일 바이너리 분석) `--effort <level>`(low|medium|high|xhigh|max, 기본 high)은 **spawn 전용** — 런타임 변경 서브타입이 없고 apply_flag_settings 문맥에 "can't change server effort" 문자열 존재. 따라서 노력 수준 변경 UI는 stop → `--resume`+`--effort` 재스폰(대화 이월)으로 구현.
 11. (2026-07-10 추가, CLI v2.1.206 **handshake 런타임 프로브** — 유저 메시지 미전송, 토큰 소모 0) `system/init`은 첫 user 메시지 전에는 방출되지 않고, **무턴 세션은 트랜스크립트(jsonl)를 만들지 않는다** — 그 id로 `--resume`하면 stderr "No conversation found" + exit 1. ⇒ 노력 변경 재시작은 **완결 턴 ≥1 또는 재개로 시작한 세션만** `--resume`을 붙인다(클라이언트 hasCompletedTurn 게이트, 그 외에는 새로 시작 — 잃을 서버측 맥락 없음). 실존 세션 `--resume`은 과거 대화를 replay하지 않음(이월 메시지와 중복 없음).
 12. (동일 프로브) `set_model` 성공 시 `<local-command-stdout>…</local-command-stdout>` 문자열 content의 `user` 이벤트(`isReplay:true`)가 동반된다 — 클라이언트 리듀서가 채팅에서 걸러내고 설정 변경 확인은 토스트로 표시. `set_permission_mode`는 4개 모드 전부 런타임 전환 성공(`system/status`에 새 permissionMode 동반), spawn `--permission-mode bypassPermissions`도 정상.
+13. (2026-07-10 추가, CLI v2.1.206 **바이너리 문자열 분석**) CLAW'D 마스코트의 공식 자산이 바이너리에 내장돼 있다: 테마 색 `clawd_body: rgb(215,119,87)` / `clawd_background: 검정`, 3행 쿼드런트 블록 아트(` ▐▛███▜▌` / `▝▜█████▛▘` / `  ▘▘ ▝▝`), 포즈 4종(default / look-left / look-right / arms-up — 눈 블록 `▛███▜`→`▟███▟`→`▙███▙`과 팔 블록 차이). 웹 마스코트(client/src/lib/clawd.js)는 이 아트의 쿼드런트 전사(18×5, 1픽셀=쿼드런트 1:2 종횡비)다. 채팅의 턴별 토큰 꼬리표(usage 아이템)는 `result.usage.input_tokens/output_tokens` + `duration_ms`에서 취한다(토큰 0이면 생략).
 
 주의: stream-json 제어 프로토콜은 공식 미문서 인터페이스다. CLI 업데이트로 형식이 바뀔 수 있으므로 프로토콜 계층을 한 모듈로 격리하고, 알 수 없는 메시지는 무시가 아닌 "raw 이벤트"로 UI에 전달할 수 있게 설계한다.
 
@@ -94,7 +95,7 @@ Node 서버 (ESM, http + ws)
 - `PermissionDialog`: can_use_tool 표시 — 도구명, 입력(명령/파일/diff), [허용]/[항상 허용(제안 적용)]/[거부+사유]. 응답 전까지 해당 세션 턴은 대기 상태 표시.
 - `Sidebar`: 프로젝트(cwd) 선택, 새 세션, 최근 세션 목록(재개).
 - `Composer`: 멀티라인 입력, Enter 전송/Shift+Enter 줄바꿈, `/` 자동완성(initialize의 commands), Esc=interrupt.
-- `StatusBar`: 모델 선택(initialize의 models), 권한 모드 토글, 턴 비용·토큰, rate limit 표시, 연결 상태.
+- `StatusBar`: 컨텍스트·5h/7d 사용률 게이지, 연결 상태, 테마. 모델·권한 모드는 컴포저 컨트롤로 이동, 턴별 토큰은 채팅의 usage 꼬리표로 표시(비용·rate limit 상시 표시는 제거, 2026-07-10).
 - 테마: 다크 기본 + 라이트, CSS 변수.
 
 ### 4.4 데이터 흐름 (한 턴)
@@ -103,7 +104,7 @@ Node 서버 (ESM, http + ws)
 2. CLI stdout: status/thinking_tokens → 상태 표시; stream_event(text_delta) → 말풍선에 실시간 추가; assistant(tool_use) → ToolCard 생성.
 3. 권한 필요 시: can_use_tool → 서버 pending 등록 → WS `permission_request` → 다이얼로그 → 결정 → control_response → 도구 실행 재개.
 4. tool_result 담긴 user 메시지 → ToolCard에 결과 채움.
-5. `result` → 턴 종료, 비용/토큰 상태바 갱신.
+5. `result` → 턴 종료, 채팅에 usage 꼬리표(토큰 입/출력·소요 시간, 토큰 0이면 생략) 추가.
 
 ## 5. 에러 처리
 

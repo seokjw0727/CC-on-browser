@@ -229,10 +229,6 @@
   gap: 10px;
   min-width: 0;
 }
-.foot-hint {
-  font-size: 11.5px;
-  white-space: nowrap;
-}
 
 /* pill-styled native selects */
 .pill-select-wrap {
@@ -266,7 +262,28 @@
   color: var(--text);
   border-color: var(--border-strong);
 }
-.pill-select.danger {
+/* 권한 모드별 색 — 기본모드는 무색(기본 스타일), 자동=파랑, 플랜=초록, 신뢰=빨강.
+   컴포저 pill과 새 세션 모달 select가 같은 클래스를 공유한다(permission-modes.js).
+   :focus 병기 필수 — theme.css의 select:focus(0,1,1)와 동률이면 번들 순서상
+   포커스 중 테두리가 accent로 뒤집힌다(특이도를 0,2,1로 확보). */
+select.mode-auto,
+select.mode-auto:focus {
+  color: var(--info);
+  border-color: color-mix(in srgb, var(--info) 45%, transparent);
+  background: color-mix(in srgb, var(--info) 12%, transparent);
+}
+select.mode-plan,
+select.mode-plan:focus {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 45%, transparent);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+/* 라이트 배경의 소형 텍스트 AA 대비 — --success(#4f8a3d)는 12% 틴트 위에서 미달 */
+:root[data-theme='light'] select.mode-plan {
+  color: #3a6b2e;
+}
+select.mode-trust,
+select.mode-trust:focus {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 45%, transparent);
   background: var(--danger-soft);
@@ -310,11 +327,7 @@
   max-width: var(--composer-max);
   margin: 8px auto 0;
   padding: 0 4px;
-  font-size: 11.5px;
-  /* 마스코트(.composer-mascot, pointer-events:auto)와 겹치는 영역에서도
-     상태줄 컨트롤(테마 버튼 등)이 클릭을 먼저 받도록 위로 올린다 */
-  position: relative;
-  z-index: 1;
+  font-size: 13px;
   color: var(--text-faint);
   flex-wrap: wrap;
 }
@@ -533,14 +546,14 @@
 
 .composer-mascot {
   position: absolute;
-  right: 24px;
-  bottom: 18px;
-  opacity: 0.5;
+  right: 28px;
+  /* 컴포저 셸 위에 올라선 배치 — 커진 마스코트가 상태줄·전송 버튼을 덮지 않는다.
+     dock 상단 패딩(10px)만큼 내려 발이 셸 윗변에 닿는다(+2px 살짝 겹침). */
+  bottom: calc(100% - 12px);
   pointer-events: none;
 }
 @media (max-width: 900px) {
-  .composer-mascot,
-  .foot-hint {
+  .composer-mascot {
     display: none;
   }
 }
@@ -967,6 +980,12 @@
 
 /* ===== CLAW'D 마스코트 애니메이션 (Clawd.jsx — 무드별 모션, 프레임 스왑은 JS) ===== */
 .clawd { display: inline-block; }
+/* 공식 색 — CLI 바이너리 테마 실측: clawd_body rgb(215,119,87), 눈은 검정(clawd_background) */
+.mascot .px-body { fill: var(--clawd-body, #d77757); }
+.mascot .px-eye { fill: var(--clawd-eye, #141413); }
+/* 실루엣 문맥(사이드바 빈 상태 등) — 단색, 눈은 뚫린 구멍으로 배경이 비친다 */
+.mascot.mono .px-body { fill: currentColor; }
+.mascot.mono .px-eye { fill: transparent; }
 .clawd .clawd-bob,
 .clawd .clawd-poke { display: inline-block; }
 .clawd .clawd-bob {
@@ -978,7 +997,7 @@
 .clawd.mood-alert .clawd-bob {
   animation: clawd-hop 0.7s ease-in-out infinite;
 }
-/* doze 흐림은 내부 레이어에 — 외부(.composer-mascot 0.5)와 곱해져 확실히 더 흐려진다 */
+/* doze 흐림 — 무드가 바뀌면 원복되도록 무드 레이어(clawd-bob)에만 건다 */
 .clawd.mood-doze .clawd-bob {
   animation: clawd-bob 4.8s ease-in-out infinite;
   opacity: 0.55;
@@ -987,8 +1006,10 @@
   animation: clawd-squish 0.3s ease-out;
   transform-origin: 50% 100%;
 }
-/* 컴포저 마스코트는 장식이라 클릭 통과였지만, 찌르기 반응을 위해 열어준다 */
-.composer-mascot.clawd { pointer-events: auto; }
+/* 찌르기 히트박스는 그려진 픽셀(rect)로 한정 — 마스코트가 채팅 위에 올라서 있으므로
+   빈 영역 클릭(텍스트 선택·카드 접기 등)은 아래 콘텐츠로 통과시킨다. rect에서 시작한
+   클릭은 .clawd의 onClick으로 버블링돼 poke가 동작한다. */
+.composer-mascot.clawd rect { pointer-events: visiblePainted; }
 @keyframes clawd-bob {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-2px); }

@@ -1,6 +1,7 @@
 // 자기완결형 브랜드 SVG — 외부 폰트/이미지 의존 없음(로컬 앱 CSP 안전).
-// Sparkle: Claude 스타일 선버스트 스파크. Mascot: 오렌지 픽셀아트.
+// Sparkle: Claude 스타일 선버스트 스파크. Mascot: CLAW'D 실루엣(단색 문맥용).
 import { CLAWD_FRAMES } from '../lib/clawd.js';
+import { FrameSvg } from './Clawd.jsx';
 
 // 10방향 선버스트 스파크(오목한 변의 별) — currentColor로 채움.
 export function Sparkle({ size = 22, className = '' }) {
@@ -37,31 +38,9 @@ export function Sparkle({ size = 22, className = '' }) {
   );
 }
 
-// 11x8 픽셀 인베이더 — 단일 소스는 lib/clawd.js의 base 프레임(드리프트 방지).
-const MASCOT_BITS = CLAWD_FRAMES.base;
-
+// CLAW'D 정지 실루엣 — 단일 소스는 lib/clawd.js의 base 프레임, 렌더러는
+// Clawd.jsx의 FrameSvg를 공유한다(드리프트 방지). mono 클래스가 단색
+// (currentColor, 눈은 구멍)으로 입힌다 — interact.css 참조.
 export function Mascot({ scale = 4, className = '' }) {
-  const cols = MASCOT_BITS[0].length;
-  const rows = MASCOT_BITS.length;
-  const rects = [];
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      if (MASCOT_BITS[y][x] === '1') {
-        rects.push(<rect key={`${x}-${y}`} x={x} y={y} width="1" height="1" />);
-      }
-    }
-  }
-  return (
-    <svg
-      className={`mascot ${className}`.trim()}
-      width={cols * scale}
-      height={rows * scale}
-      viewBox={`0 0 ${cols} ${rows}`}
-      fill="currentColor"
-      shapeRendering="crispEdges"
-      aria-hidden="true"
-    >
-      {rects}
-    </svg>
-  );
+  return <FrameSvg bits={CLAWD_FRAMES.base} scale={scale} className={`mono ${className}`.trim()} />;
 }

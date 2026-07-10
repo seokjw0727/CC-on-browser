@@ -113,3 +113,37 @@ test('is_error result는 채팅에 error 아이템을 남기지 않는다 (토�
   assert.equal(s.messages.length, 0);
   assert.equal(s.lastResult.isError, true);
 });
+
+// ----- 턴별 토큰 사용량의 채팅 표시 (CLI풍 usage 아이템) -----
+
+test('토큰을 소모한 result는 채팅에 usage 아이템을 남긴다', () => {
+  const s = reduceCliEvent(
+    createSessionState(),
+    resultEvent({
+      num_turns: 1,
+      duration_ms: 5300,
+      usage: { input_tokens: 12, output_tokens: 345 },
+    }),
+  );
+  assert.equal(s.messages.length, 1);
+  assert.equal(s.messages[0].kind, 'usage');
+  assert.equal(s.messages[0].inTok, 12);
+  assert.equal(s.messages[0].outTok, 345);
+  assert.equal(s.messages[0].durationMs, 5300);
+});
+
+test('토큰 0인 result(모델 미호출 — 설정 에코·resume 실패류)는 usage 아이템을 남기지 않는다', () => {
+  const s = reduceCliEvent(createSessionState(), resultEvent({ num_turns: 0 }));
+  assert.equal(s.messages.length, 0);
+});
+
+test('is_error라도 토큰>0이면 usage 아이템은 남는다 (에러 알림은 store 토스트 소관)', () => {
+  const s = reduceCliEvent(
+    createSessionState(),
+    resultEvent({ is_error: true, num_turns: 1, usage: { input_tokens: 5, output_tokens: 7 } }),
+  );
+  assert.equal(s.messages.length, 1);
+  assert.equal(s.messages[0].kind, 'usage');
+  assert.equal(s.messages[0].inTok, 5);
+  assert.equal(s.messages[0].outTok, 7);
+});

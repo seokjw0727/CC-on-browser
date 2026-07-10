@@ -30,10 +30,10 @@ function suggestionLabel(s) {
   if (s.type === 'setMode') {
     const modeDesc =
       {
-        acceptEdits: '이 세션에서 파일 편집 자동 허용 (acceptEdits 모드)',
-        bypassPermissions: '모든 권한 확인 생략 (bypassPermissions 모드)',
-        plan: '권한 모드를 plan으로 변경',
-        default: '권한 모드를 default로 변경',
+        acceptEdits: '이 세션에서 파일 편집 자동 허용 (자동모드)',
+        bypassPermissions: '모든 권한 확인 생략 (신뢰모드)',
+        plan: '플랜모드로 변경',
+        default: '기본모드로 변경',
       }[s.mode] || `권한 모드를 ${String(s.mode)}(으)로 변경`;
     return dest ? `${modeDesc} — ${dest}` : modeDesc;
   }

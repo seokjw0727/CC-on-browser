@@ -1,41 +1,21 @@
 // 컴포저(레퍼런스 충실) — 상단 pill 행(레포·권한모드), 입력, 하단 컨트롤(모델 피커 +
-// 노력 수준 진행 바 + 전송), 그 아래 상태줄(컨텍스트·5h/7d 사용량·비용·rate limit·연결·테마).
+// 노력 수준 진행 바 + 전송), 그 아래 상태줄(컨텍스트·5h/7d 사용량·연결·테마).
 // 상단 바를 대체한다. 설정 변경(모델·권한 모드·노력)은 채팅 기록 대신 토스트로 알린다.
+// 턴별 토큰(입/출력)은 상태줄이 아니라 채팅에 usage 아이템으로 표시(reduce-cli-event).
 // Enter 전송/Shift+Enter 개행, `/` 커맨드 드롭다운, Esc/버튼 interrupt.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
+import { fmtTok, shortPath } from '../lib/format.js';
+import { MODES, MODE_LABEL, MODE_CLASS } from '../lib/permission-modes.js';
 import Clawd from './Clawd.jsx';
 import './interact.css';
 
 const MAX_HEIGHT_PX = 200;
 
-const MODE_LABEL = {
-  default: '매번 확인',
-  acceptEdits: '편집 수락',
-  plan: '플랜 모드',
-  bypassPermissions: '전체 허용',
-};
-const MODES = ['default', 'acceptEdits', 'plan', 'bypassPermissions'];
-
 const CONN_LABEL = { connecting: '연결 중', open: '연결됨', closed: '연결 끊김' };
 
-function shortPath(p) {
-  if (!p) return '';
-  const parts = String(p).split(/[\\/]/).filter(Boolean);
-  return parts.length <= 2 ? p : `…\\${parts.slice(-2).join('\\')}`;
-}
-function fmtCost(c) {
-  return typeof c === 'number' ? `$${c.toFixed(4)}` : '$0.0000';
-}
 const CONTEXT_WINDOW = 200_000; // Claude 표준 컨텍스트 창(200k tok) 기준 사용률
-function fmtTok(n) {
-  if (!Number.isFinite(n) || n <= 0) return '0';
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
-  return String(n);
-}
 function usageWindowTitle(label, b) {
   return (
     `${label} — 입력 ${b.inputTokens.toLocaleString()}` +
@@ -94,18 +74,6 @@ function RingStat({ label, pct, title }) {
     </span>
   );
 }
-function fmtResetsAt(resetsAt) {
-  if (resetsAt == null) return null;
-  const n = Number(resetsAt);
-  if (!Number.isFinite(n)) return String(resetsAt);
-  const ms = n > 1e12 ? n : n * 1000;
-  try {
-    return new Date(ms).toLocaleTimeString();
-  } catch {
-    return String(resetsAt);
-  }
-}
-
 // ----- 공용 팝오버 동작 — 바깥 클릭/Esc 닫기, 열릴 때 선택 항목으로 포커스 -----
 function usePopover() {
   const [open, setOpen] = useState(false);
@@ -322,8 +290,6 @@ export default function Composer({ theme, onToggleTheme }) {
 
   const models = Array.isArray(state.initInfo?.models) ? state.initInfo.models : [];
   const modelOptions = useMemo(() => buildModelOptions(models), [models]);
-  const rl = session?.rateLimit;
-  const rlWarn = rl && rl.status && rl.status !== 'allowed';
   const gu = state.globalUsage;
   const quota = gu?.quota;
   const ctxTokens = session?.usage?.contextTokens || 0;
@@ -523,7 +489,7 @@ export default function Composer({ theme, onToggleTheme }) {
             <span className="pill-select-wrap">
               <select
                 aria-label="권한 모드"
-                className={`pill-select${session.permissionMode === 'bypassPermissions' ? ' danger' : ''}`}
+                className={`pill-select ${MODE_CLASS[session.permissionMode] ?? ''}`.trim()}
                 value={session.permissionMode || 'default'}
                 disabled={!live || state.conn !== 'open'}
                 title="권한 모드 (setPermissionMode)"
@@ -581,7 +547,6 @@ export default function Composer({ theme, onToggleTheme }) {
                 />
               </>
             )}
-            <span className="foot-hint faint">Enter 전송 · Shift+Enter 개행 · / 커맨드</span>
           </div>
 
           <span className="spacer" />
@@ -611,7 +576,7 @@ export default function Composer({ theme, onToggleTheme }) {
         </div>
       </div>
 
-      {/* 상태줄 — 컨텍스트·5h/7d 사용량·비용·rate limit·연결·테마 */}
+      {/* 상태줄 — 컨텍스트·5h/7d 사용량·연결·테마 */}
       <div className="composer-meta">
         {ctxTokens > 0 && (
           <RingStat
@@ -652,20 +617,6 @@ export default function Composer({ theme, onToggleTheme }) {
             </span>
           )
         )}
-        {session && (
-          <span
-            className="meta-item"
-            title={`누적 비용 ${fmtCost(session.usage.cost)} · 입력 ${session.usage.inTok} · 출력 ${session.usage.outTok} tok`}
-          >
-            {fmtCost(session.usage.cost)} · ↑{session.usage.inTok} ↓{session.usage.outTok}
-          </span>
-        )}
-        {rlWarn && (
-          <span className="meta-item warn" title={`rate limit: ${rl.status}${rl.rateLimitType ? ` (${rl.rateLimitType})` : ''}`}>
-            ⏳ {rl.status}
-            {fmtResetsAt(rl.resetsAt) ? ` · ${fmtResetsAt(rl.resetsAt)} 해제` : ''}
-          </span>
-        )}
         {busy && <span className="meta-item accent">응답 생성 중 — Esc로 중단</span>}
         {session && state.conn !== 'open' && (
           <span className="meta-item danger">연결 끊김 — 재접속 중…</span>
@@ -688,7 +639,7 @@ export default function Composer({ theme, onToggleTheme }) {
       {/* CLAW'D — 세션 상태에 따라 움직이는 마스코트 (클릭=찌르기) */}
       <Clawd
         className="composer-mascot"
-        scale={4}
+        scale={5}
         status={session?.status ?? 'none'}
         conn={state.conn}
       />

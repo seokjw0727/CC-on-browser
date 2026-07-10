@@ -10,6 +10,7 @@
 //                    result: {content, isError, structured}|null, streaming, parentToolUseId }
 // assistant-text/thinking/tool_use 아이템은 assistant 이벤트로 확정되면 confirmed:true.
 //   notice         { text }           (system/notification)
+//   usage          { inTok, outTok, durationMs } (턴 종료 시 토큰 사용량 — CLI풍 표시)
 //   error          { text }           (레거시 렌더 호환용 — 신규 에러는 store가 토스트로 표시)
 //   raw            { payload }        (미지의 타입 보존)
 //
@@ -451,6 +452,21 @@ function reduceResult(session, payload) {
 
   // is_error 결과는 채팅에 남기지 않는다 — store('event' 처리)가 토스트로 알린다.
 
+  // 턴별 토큰 사용량을 CLI풍으로 채팅에 남긴다(상태줄 대신). 토큰이 0인 결과
+  // (설정 변경·resume 실패류 등 모델 미호출)는 소음이라 남기지 않는다.
+  // is_error라도 토큰>0이면 남긴다 — 인터럽트/실패 턴도 소모량은 사실이고,
+  // 에러 자체는 store가 토스트로 알린다(중복 아님).
+  const turnIn = usage.input_tokens || 0;
+  const turnOut = usage.output_tokens || 0;
+  if (turnIn + turnOut > 0) {
+    next = append(next, {
+      kind: 'usage',
+      inTok: turnIn,
+      outTok: turnOut,
+      durationMs: payload.duration_ms ?? null,
+    });
+  }
+
   return { ...next, status: next.status === 'exited' ? 'exited' : 'idle' };
 }
 
@@ -470,6 +486,8 @@ export function reduceCliEvent(session, payload) {
     case 'result':
       return reduceResult(session, payload);
     case 'rate_limit_event':
+      // 상시 표시부는 제거됨(2026-07-10) — 이벤트를 raw로 채팅에 흘리지 않기 위해
+      // 계속 접수하고, 상태는 향후 임계 알림(토스트) 용도로 보존한다.
       return { ...session, rateLimit: payload.rate_limit_info ?? null };
     case 'control_request':
     case 'control_response':

@@ -11,6 +11,8 @@ import {
 } from '../lib/api.js';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
 import { buildSessionTree } from '../lib/sessionTree.js';
+import { shortPath } from '../lib/format.js';
+import { MODE_LABEL, MODE_CLASS, MODES } from '../lib/permission-modes.js';
 import { Sparkle, Mascot } from './Brand.jsx';
 import { useFocusTrap } from '../lib/useFocusTrap.js';
 import { usePresence } from '../lib/usePresence.js';
@@ -24,18 +26,17 @@ const STATUS_BADGE = {
   exited: { label: '종료', cls: 'off' },
 };
 
-const PERMISSION_MODES = [
-  { value: 'default', label: 'default — 매번 확인' },
-  { value: 'acceptEdits', label: 'acceptEdits — 파일 편집 자동 허용' },
-  { value: 'plan', label: 'plan — 계획만, 실행 안 함' },
-  { value: 'bypassPermissions', label: 'bypassPermissions — 확인 없이 전부 실행' },
-];
-
-function shortPath(p) {
-  if (!p) return '';
-  const parts = String(p).split(/[\\/]/).filter(Boolean);
-  return parts.length <= 2 ? p : `…\\${parts.slice(-2).join('\\')}`;
-}
+// 모달용 상세 설명 — 표시 이름·색 클래스는 permission-modes.js와 공유
+const MODE_DESC = {
+  default: '매번 확인',
+  acceptEdits: '파일 편집 자동 허용',
+  plan: '계획만, 실행 안 함',
+  bypassPermissions: '확인 없이 전부 실행',
+};
+const PERMISSION_MODES = MODES.map((value) => ({
+  value,
+  label: `${MODE_LABEL[value]} — ${MODE_DESC[value]}`,
+}));
 
 function fmtTime(ms) {
   if (!ms) return '';
@@ -277,7 +278,11 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose, pre
           </label>
           <label className="picker-field">
             <span className="dim">권한 모드</span>
-            <select value={mode} onChange={(e) => setMode(e.target.value)}>
+            <select
+              className={MODE_CLASS[mode] || undefined}
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+            >
               {PERMISSION_MODES.map((m) => (
                 <option key={m.value} value={m.value}>
                   {m.label}
@@ -289,8 +294,8 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose, pre
 
         {mode === 'bypassPermissions' && (
           <div className="mode-warning">
-            ⚠ bypassPermissions: 모든 도구가 확인 없이 실행됩니다. 파일 수정·명령
-            실행이 즉시 반영되므로 신뢰할 수 있는 작업에만 사용하세요.
+            ⚠ 신뢰모드(bypassPermissions): 모든 도구가 확인 없이 실행됩니다. 파일
+            수정·명령 실행이 즉시 반영되므로 신뢰할 수 있는 작업에만 사용하세요.
           </div>
         )}
 

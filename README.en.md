@@ -16,11 +16,12 @@ queried with the OAuth token the CLI already stores — not a model call, so it 
 - **Streaming markdown chat** — renders partial messages (`--include-partial-messages`) in real time. Code highlighting (highlight.js) + XSS sanitization (DOMPurify).
 - **Tool execution cards** — Bash, Edit, Write, Read, Grep and other tool calls rendered as input/result cards; long results collapse.
 - **Thinking blocks** — extended-thinking streams shown as separate, collapsible blocks.
-- **Permission dialog** — `can_use_tool` requests pop up as a modal for allow/deny. Suggestions are labeled by their actual effect, never vague wording like "always allow". New sessions default to **bypassPermissions** (run everything without prompts) — change it anytime in the new-session modal or the composer; the dialog kicks in under confirmation-based modes.
+- **Permission dialog** — `can_use_tool` requests pop up as a modal for allow/deny. Suggestions are labeled by their actual effect, never vague wording like "always allow". New sessions default to **bypassPermissions** (run everything without prompts) — change it anytime in the new-session modal or the composer; the dialog kicks in under confirmation-based modes. Modes are shown with Korean labels and per-mode colors: default (neutral), acceptEdits (blue), plan (green), bypassPermissions (red).
 - **Session resume** — resume past sessions of the current project; the transcript is preloaded and continued (`--resume`).
 - **Working-directory picker** — type or paste a path in the new-session modal, then click-select from the folder tree underneath.
 - **Statusline** — circular gauges for session context (vs the 200k window) and your account's official
   5-hour / 7-day usage (%) — the same numbers as the `/usage` panel; local transcript aggregates in tooltips.
+  Per-turn token usage lands in the chat as a small CLI-style tail (`↑ 12 ↓ 345 tok · 5.3s`) instead of the statusline.
 - **Runtime controls** — a claude.ai-style model picker (Haiku 4.5 / Sonnet 5 / Opus 4.8 / Fable 5, with
   versions and descriptions) and an effort-level progress bar (low–max; `--effort` is spawn-only, so changing
   it restarts the session into the same conversation — via `--resume` when the conversation exists on disk,
@@ -28,10 +29,12 @@ queried with the OAuth token the CLI already stores — not a model call, so it 
   turn interrupt (Esc). Setting-change confirmations and errors show as **transient toasts** — they never
   pollute the chat history.
 - **Composer-centric UI** — no top bar; repo, permission mode, model, send, and usage fold into the composer. Light/dark themes, zero external font/image dependencies (brand assets are self-contained SVGs — safe under a local CSP).
-- **A living mascot (CLAW'D)** — the pixel mascot at the composer's bottom-right reacts to session state:
-  blinking while idle, leg-scuttling during a turn, claws-up hopping while a permission prompt waits,
-  dozing when there is no session or the connection drops. Click it for a poke reaction. All done with
-  self-contained SVG frame swaps + CSS (`prefers-reduced-motion` respected, zero external images).
+- **A living mascot (CLAW'D)** — the composer's bottom-right hosts CLAW'D transcribed from the official
+  art embedded in the Claude Code CLI itself (orange body rgb(215,119,87), black eyes, quadrant pixels),
+  reacting to session state: blinking while idle, glancing left/right while scuttling during a turn,
+  claws-up hopping (the official arms-up pose) while a permission prompt waits, dozing when there is no
+  session or the connection drops. Click it for a poke reaction. All done with self-contained SVG frame
+  swaps + CSS (`prefers-reduced-motion` respected, zero external images).
 
 ## Requirements
 
