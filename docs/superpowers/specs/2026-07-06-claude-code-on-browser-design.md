@@ -90,7 +90,7 @@ Node 서버 (ESM, http + ws)
 
 ### 4.3 클라이언트 (client/src/)
 
-- `ChatView`: 메시지 타임라인. text_delta 스트리밍 조립, markdown(marked)+하이라이트(highlight.js), thinking 접기 패널.
+- `ChatView`: 메시지 타임라인. text_delta 스트리밍 조립, markdown(marked)+하이라이트(highlight.js), thinking 접기 패널. 어시스턴트 텍스트는 rAF 페이서(lib/stream-pace, 시간 기반·MAX_LAG 4000·reduced-motion 존중)로 delta 덩어리를 부드럽게 드러내고, 하단 고정은 ResizeObserver(콘텐츠+스크롤포트)와 레이아웃 가드(컴포저 확장/축소로 인한 scrollTop 클램프를 사용자 스크롤로 오인하지 않음)로 유지(2026-07-10).
 - `ToolCard`: tool_use/tool_result 페어 렌더. Bash(명령+출력), Edit/Write(diff/코드), Read/Grep(요약), 기타(JSON 뷰).
 - `PermissionDialog`: can_use_tool 표시 — 도구명, 입력(명령/파일/diff), [허용]/[항상 허용(제안 적용)]/[거부+사유]. 응답 전까지 해당 세션 턴은 대기 상태 표시.
 - `Sidebar`: 프로젝트(cwd) 선택, 새 세션, 최근 세션 목록(재개).
@@ -101,7 +101,7 @@ Node 서버 (ESM, http + ws)
 ### 4.4 데이터 흐름 (한 턴)
 
 1. Composer 전송 → WS `user_message` → 서버가 stdin에 user JSONL 기록.
-2. CLI stdout: status/thinking_tokens → 상태 표시; stream_event(text_delta) → 말풍선에 실시간 추가; assistant(tool_use) → ToolCard 생성.
+2. CLI stdout: status/thinking_tokens → 상태 표시; stream_event(text_delta) → 말풍선에 누적(표시는 rAF 페이서가 부드럽게 따라잡음); assistant(tool_use) → ToolCard 생성.
 3. 권한 필요 시: can_use_tool → 서버 pending 등록 → WS `permission_request` → 다이얼로그 → 결정 → control_response → 도구 실행 재개.
 4. tool_result 담긴 user 메시지 → ToolCard에 결과 채움.
 5. `result` → 턴 종료, 채팅에 usage 꼬리표(토큰 입/출력·소요 시간, 토큰 0이면 생략) 추가.

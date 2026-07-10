@@ -40,6 +40,30 @@ test("started(replaceKey): 새 탭이 옛 탭을 대체하고 resume 시딩이 �
   assert.equal(s.pendingStarts.size, 0);
 });
 
+test('started(재개 프리로드): 메시지·sessionId·usage가 started 커밋에 원자적으로 시딩된다', () => {
+  // 별도 커밋으로 뒤늦게 주입하면 ChatView seenRef가 히스토리를 신규 메시지로
+  // 오인(등장 애니·타자기 출력)한다 — 반드시 started 한 커밋에 실려야 한다.
+  let s = createInitialState();
+  s = registerStart(s, 'cl_r', {
+    cwd: 'C:\\p',
+    resumeSessionId: 'sess-old',
+    preloadMessages: [
+      { uid: 'p1', kind: 'user-text', text: '질문' },
+      { uid: 'p2', kind: 'assistant-text', text: '답', streaming: false },
+    ],
+    preloadSessionId: 'sess-old',
+    preloadUsage: { cost: 0.5, inTok: 100, outTok: 50, contextTokens: 1234 },
+  });
+  s = reducer(s, serverMsg({ type: 'started', startId: 'cl_r', key: 'r1' }));
+
+  const ns = s.sessions.get('r1');
+  assert.deepEqual(ns.messages.map((m) => m.uid), ['p1', 'p2'], '히스토리가 생성 시점에 존재');
+  assert.equal(ns.sessionId, 'sess-old', '원본 세션 id 표기 이월');
+  assert.equal(ns.usage.contextTokens, 1234, 'usage(CTX%) 연속성');
+  assert.equal(ns.hasCompletedTurn, true);
+  assert.equal(s.activeKey, 'r1');
+});
+
 test('started(resume 없는 재시작): 게이트는 닫힌 채 시딩된다', () => {
   let s = stateWithSession('old');
   s = registerStart(s, 'cl_2', { cwd: 'C:\\p', resumeSessionId: null, replaceKey: 'old' });

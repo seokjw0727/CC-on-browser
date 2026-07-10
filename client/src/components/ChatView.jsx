@@ -41,6 +41,9 @@ export default function ChatView() {
   const [pinned, setPinned] = useState(true);
   const viewRef = useRef(null);
   const seenRef = useRef(new Set());
+  // 직전에 관측한 스크롤포트 높이 — handleScroll에서 "사용자 스크롤"과
+  // "컴포저 확장/축소로 인한 레이아웃 스크롤"을 구분하는 기준.
+  const lastClientHRef = useRef(0);
 
   // seen 리셋은 effect가 아니라 렌더 단계에서 동기적으로 처리한다.
   // 이유: activeKey가 바뀌면 스토어의 세션 Map은 이미 그 세션의 전체 messages를
@@ -68,6 +71,26 @@ export default function ChatView() {
     const el = scrollRef.current;
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
   });
+
+  // 렌더 없이 높이만 변하는 경우의 하단 고정 — 두 가지를 관찰한다:
+  //  1) 내부 콘텐츠(inner): AssistantText의 rAF 페이서는 자기 로컬 state만 갱신해
+  //     ChatView는 리렌더되지 않는다(details 펼침 등 다른 높이 변화도 함께 커버).
+  //  2) 스크롤포트(el) 자체: 컴포저 textarea 자동 확장/축소가 chat-scroll 높이를
+  //     바꾼다 — 고정 상태면 재고정하고, lastClientH도 갱신해 handleScroll의
+  //     레이아웃 가드(아래)와 어긋나지 않게 한다.
+  useEffect(() => {
+    const el = scrollRef.current;
+    const inner = viewRef.current;
+    if (!el || !inner || typeof ResizeObserver === 'undefined') return undefined;
+    lastClientHRef.current = el.clientHeight;
+    const ro = new ResizeObserver(() => {
+      lastClientHRef.current = el.clientHeight;
+      if (pinnedRef.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(inner);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // 세션 전환 시 고정 복원 + 최하단으로 + 뷰 전환 애니 재생
   // (seen 리셋은 위 렌더 단계에서 이미 끝났으므로 여기서는 건드리지 않는다 —
@@ -99,6 +122,15 @@ export default function ChatView() {
   const handleScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
+    // 레이아웃 가드: 스크롤포트 높이가 직전과 다르면 사용자 스크롤이 아니라
+    // 컴포저 확장/축소(전송 직후 textarea 비움 등)로 브라우저가 scrollTop을
+    // 클램프한 이벤트다 — 핀을 풀지 않고, 고정 상태면 하단으로 재고정만 한다.
+    // (전송 직후 이 클램프가 "위로 스크롤"로 오인돼 채팅이 따라오지 않는 버그 실측.)
+    if (el.clientHeight !== lastClientHRef.current) {
+      lastClientHRef.current = el.clientHeight;
+      if (pinnedRef.current) el.scrollTop = el.scrollHeight;
+      return;
+    }
     const atBottom =
       el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
     if (atBottom !== pinnedRef.current) {

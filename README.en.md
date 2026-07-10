@@ -13,7 +13,7 @@ queried with the OAuth token the CLI already stores — not a model call, so it 
 
 ## What you get
 
-- **Streaming markdown chat** — renders partial messages (`--include-partial-messages`) in real time. Code highlighting (highlight.js) + XSS sanitization (DOMPurify).
+- **Streaming markdown chat** — renders partial messages (`--include-partial-messages`) in real time, revealed smoothly by a per-frame pacer (typewriter-style, respects reduced-motion) instead of raw delta chunks. Code highlighting (highlight.js) + XSS sanitization (DOMPurify).
 - **Tool execution cards** — Bash, Edit, Write, Read, Grep and other tool calls rendered as input/result cards; long results collapse.
 - **Thinking blocks** — extended-thinking streams shown as separate, collapsible blocks.
 - **Permission dialog** — `can_use_tool` requests pop up as a modal for allow/deny. Suggestions are labeled by their actual effect, never vague wording like "always allow". New sessions default to **bypassPermissions** (run everything without prompts) — change it anytime in the new-session modal or the composer; the dialog kicks in under confirmation-based modes. Modes are shown with Korean labels and per-mode colors: default (neutral), acceptEdits (blue), plan (green), bypassPermissions (red).

@@ -106,7 +106,8 @@
   --shadow-pop: 0 24px 60px rgba(0, 0, 0, 0.5);
 
   --sidebar-width: 264px;
-  --composer-max: 760px;
+  /* 채팅 목록·컴포저 공용 최대 폭 — 좁은 창에서는 width:100%+패딩이 자연 축소 */
+  --composer-max: 1080px;
 
   /* Motion — refined/fast (tone A) */
   --ease-out: cubic-bezier(0.2, 0, 0, 1);

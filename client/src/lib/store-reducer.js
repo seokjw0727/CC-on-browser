@@ -34,7 +34,8 @@ export function createInitialState() {
     activeKey: null,
     projects: [],
     initInfo: null,
-    // startId -> {cwd, model, permissionMode, effort, resumeSessionId, preloadMessages?, replaceKey?}
+    // startId -> {cwd, model, permissionMode, effort, resumeSessionId,
+    //             preloadMessages?, preloadSessionId?, preloadUsage?, replaceKey?}
     // replaceKey: effort 재시작처럼 기존 탭을 대체하는 시작 — started 도착 시 옛 세션 탭 제거
     pendingStarts: new Map(),
     toasts: [], // [{id, kind: 'info'|'error', text}] — 설정 변경·오류의 일시 알림(자동 소멸)
@@ -81,8 +82,15 @@ function handleServerMessage(state, msg) {
           // 재개로 시작한 세션은 원본 트랜스크립트가 디스크에 있음 — resume 게이트 통과
           hasCompletedTurn: opts.resumeSessionId != null,
           resumeSourceId: opts.resumeSessionId ?? null,
-          // effort 재시작 등 in-memory 이월: 이전 세션의 메시지를 그대로 이어붙인다
+          // 프리로드 이월(effort 재시작의 in-memory 메시지, 재개의 pre-reduce된
+          // 트랜스크립트). 반드시 started 커밋에서 원자적으로 시딩한다 — 세션 생성
+          // 후 별도 커밋으로 주입하면 ChatView의 seenRef 리셋(첫 렌더)이 프리로드를
+          // 못 보고 히스토리 전체가 isNew=true로 등장 애니·타자기 출력을 탄다.
           messages: Array.isArray(opts.preloadMessages) ? [...opts.preloadMessages] : [],
+          // 재개 프리로드의 부속 산출물 — usage(상태줄 CTX% 연속성)와 원본 세션 id
+          // (사이드바/배지 표기 — 이후 system/init의 새 fork id가 덮어쓴다).
+          sessionId: opts.preloadSessionId ?? null,
+          ...(opts.preloadUsage ? { usage: opts.preloadUsage } : {}),
         }),
       );
       return {

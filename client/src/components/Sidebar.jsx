@@ -10,6 +10,7 @@ import {
   fetchTranscript,
 } from '../lib/api.js';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
+import { createSessionState } from '../lib/store-reducer.js';
 import { buildSessionTree } from '../lib/sessionTree.js';
 import { shortPath } from '../lib/format.js';
 import { MODE_LABEL, MODE_CLASS, MODES } from '../lib/permission-modes.js';
@@ -323,8 +324,6 @@ export default function Sidebar({ onCollapse }) {
   const closeModal = () => dispatch({ type: 'close-new-session' });
   const [defaultCwd, setDefaultCwd] = useState('');
   const [expanded, setExpanded] = useState({}); // dirName -> sessions[]|'loading'
-  // 재개 시 transcript 프리로드: started 도착 후 새 세션에 주입
-  const pendingPreloadRef = useRef(null); // {startId, messages, prevKeys}
 
   // 에러는 영구 배너 대신 토스트(자동 소멸)로 — 모달 내부의 폼 검증 문구만 인라인 유지.
   const refreshProjects = async () => {
@@ -343,34 +342,6 @@ export default function Sidebar({ onCollapse }) {
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // startSession('started') 처리 후 transcript 프리로드 적용
-  useEffect(() => {
-    const p = pendingPreloadRef.current;
-    if (!p) return;
-    if (state.pendingStarts.has(p.startId)) return; // 아직 시작 대기 중
-    pendingPreloadRef.current = null;
-    const key = state.activeKey;
-    // start 실패(에러)면 activeKey가 기존 세션 — 프리로드 폐기
-    if (!key || p.prevKeys.has(key)) return;
-    if (!state.sessions.has(key) || p.messages.length === 0) return;
-    dispatch({
-      type: 'update-session',
-      key,
-      fn: (s) => {
-        const base = { ...s, messages: [], streaming: { msgId: null, blocks: {} } };
-        const pre = p.messages.reduce((acc, m) => reduceCliEvent(acc, m), base);
-        return {
-          ...pre,
-          // 프리로드 메시지를 앞에, 라이브 이벤트로 이미 쌓인 메시지를 뒤에
-          messages: [...pre.messages, ...s.messages],
-          streaming: s.streaming,
-          status: s.status,
-          lastSeq: s.lastSeq,
-        };
-      },
-    });
-  }, [state.pendingStarts, state.activeKey, state.sessions, dispatch]);
 
   const toggleProject = async (dirName) => {
     if (expanded[dirName]) {
@@ -398,14 +369,22 @@ export default function Sidebar({ onCollapse }) {
   const resumeSession = async (project, meta) => {
     try {
       const { messages } = await fetchTranscript(project.dirName, meta.sessionId);
-      const prevKeys = new Set(state.sessions.keys());
-      const startId = startSession({
+      // 트랜스크립트를 여기서 미리 reduce해 started 커밋에 원자적으로 시딩한다.
+      // (별도 커밋으로 뒤늦게 주입하면 ChatView seenRef가 히스토리를 신규 메시지로
+      // 오인해 등장 애니·타자기 출력을 탄다 — store-reducer 'started' 주석 참조.)
+      const pre = messages.reduce(
+        (acc, m) => reduceCliEvent(acc, m),
+        createSessionState(),
+      );
+      startSession({
         cwd: project.cwd,
         model: null,
         permissionMode: 'bypassPermissions', // 새 세션 기본과 동일 — 컴포저에서 변경 가능
         resumeSessionId: meta.sessionId,
+        preloadMessages: pre.messages,
+        preloadSessionId: pre.sessionId,
+        preloadUsage: pre.usage,
       });
-      pendingPreloadRef.current = { startId, messages, prevKeys };
     } catch (err) {
       notify(String(err.message ?? err), 'error');
     }
