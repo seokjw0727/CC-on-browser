@@ -395,6 +395,11 @@ export default function Composer({ theme, onToggleTheme }) {
       effort,
       resumeSessionId: canResume ? resumeId : null,
       preloadMessages: session.messages,
+      // 같은 대화로 이어가는 경우(resume)에만 usage·컨텍스트 계보를 이월한다 —
+      // 새 대화로 시작하면 서버측 컨텍스트가 비어 있으므로 옛 CTX%는 오표시.
+      preloadSessionId: canResume ? resumeId : null,
+      preloadUsage: canResume ? session.usage : null,
+      preloadCtxFromCalls: canResume ? session.ctxFromCalls : false,
       replaceKey: session.key,
     });
     const label = EFFORT_LEVELS.find((l) => l.value === effort)?.label ?? effort;
