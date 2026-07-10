@@ -7,6 +7,7 @@
 // 관찰용 env:
 //   FAKE_ECHO_DELAY_MS     echo 응답 전 지연(기본 0 — 즉답, 테스트 계약 유지)
 //   FAKE_SUBAGENT_MS       subagent 도구 실행 시간(기본 1500ms, 0 허용)
+// 지연 중 interrupt가 오면 대기 턴을 취소하고 is_error result로 닫는다(실 CLI 미러).
 import { createJsonlParser } from '../src/jsonl.js';
 
 const scenario = process.env.FAKE_SCENARIO || 'echo';
@@ -25,12 +26,25 @@ if (scenario === 'start-fail') {
 let userCount = 0;
 let permCounter = 0;
 const pendingPermissions = new Map(); // request_id -> { toolUseId }
+// 지연 턴(FAKE_ECHO_DELAY_MS/FAKE_SUBAGENT_MS)의 대기 타이머 — interrupt가
+// 취소한다(실 CLI처럼). 기본 즉답 모드에선 항상 비어 있어 동작 불변.
+const pendingTurnTimers = new Set();
+
+function scheduleTurn(fn, ms) {
+  const t = setTimeout(() => {
+    pendingTurnTimers.delete(t);
+    fn();
+  }, ms);
+  pendingTurnTimers.add(t);
+}
 
 function out(obj) {
   process.stdout.write(JSON.stringify(obj) + '\n');
 }
 
-function emitResult(text, extra = {}) {
+// turn: 지연 콜백이 나중에 실행돼도 자기 턴 번호를 보존한다(전역 userCount는
+// 그 사이 다음 send로 증가했을 수 있다 — codex 지적).
+function emitResult(text, extra = {}, turn = userCount) {
   out({
     type: 'result',
     subtype: 'success',
@@ -43,7 +57,7 @@ function emitResult(text, extra = {}) {
       cache_read_input_tokens: 1200,
       cache_creation_input_tokens: 300,
     },
-    num_turns: userCount,
+    num_turns: turn,
     duration_ms: 42,
     is_error: false,
     ...extra,
@@ -125,6 +139,14 @@ function handle(msg) {
           session_id: SESSION_ID,
         });
       }
+      // interrupt는 지연 턴의 대기 타이머를 취소하고 실 CLI처럼 is_error result로
+      // 턴을 닫는다(codex 지적 — 취소 없이는 지연 응답이 그대로 방출돼 "중단했는데
+      // 성공 result가 오는" 비현실 상태). 즉답 모드에선 타이머가 없어 동작 불변.
+      if (request?.subtype === 'interrupt' && pendingTurnTimers.size > 0) {
+        for (const t of pendingTurnTimers) clearTimeout(t);
+        pendingTurnTimers.clear();
+        emitResult('interrupted', { is_error: true });
+      }
       // interrupt / set_model / set_permission_mode / set_max_thinking_tokens 등 — 성공 응답.
       // echo_request: 받은 요청을 그대로 되돌려주는 픽스처 전용 진단 필드(wire format 검증용).
       out({
@@ -162,6 +184,9 @@ function handle(msg) {
 
   if (msg.type === 'user') {
     userCount += 1;
+    // 지연 콜백이 실행되는 시점엔 전역 userCount가 다음 send로 증가했을 수 있다 —
+    // 이 턴의 번호를 캡처해 message id·num_turns 오염을 막는다(codex 지적).
+    const turn = userCount;
     if (scenario === 'crash') {
       process.exit(3);
     }
@@ -200,7 +225,7 @@ function handle(msg) {
     if (scenario === 'subagent') {
       // Task 도구 실행 재현 — tool_use 확정 후 일정 시간 결과 미도착(서브에이전트
       // 실행 중) 상태를 유지한다. 마스코트 juggle 무드 관찰용.
-      const toolUseId = `toolu_task_${userCount}`;
+      const toolUseId = `toolu_task_${turn}`;
       // 0도 유효한 지연이다 — `|| 1500`은 0을 삼킨다
       const rawMs = process.env.FAKE_SUBAGENT_MS;
       const subagentMs =
@@ -208,13 +233,13 @@ function handle(msg) {
       out({
         type: 'assistant',
         message: {
-          id: `msg_task_${userCount}`,
+          id: `msg_task_${turn}`,
           role: 'assistant',
           content: [{ type: 'tool_use', id: toolUseId, name: 'Task', input: { prompt: '서브에이전트 작업' } }],
         },
         session_id: SESSION_ID,
       });
-      setTimeout(() => {
+      scheduleTurn(() => {
         out({
           type: 'user',
           message: {
@@ -227,13 +252,13 @@ function handle(msg) {
         out({
           type: 'assistant',
           message: {
-            id: `msg_task_sum_${userCount}`,
+            id: `msg_task_sum_${turn}`,
             role: 'assistant',
             content: [{ type: 'text', text: '서브에이전트 완료' }],
           },
           session_id: SESSION_ID,
         });
-        emitResult('subagent turn done');
+        emitResult('subagent turn done', {}, turn);
       }, subagentMs);
       return;
     }
@@ -249,13 +274,13 @@ function handle(msg) {
       }
       out({
         type: 'assistant',
-        message: { id: `msg_fake_${userCount}`, role: 'assistant', content: [{ type: 'text', text: reply }] },
+        message: { id: `msg_fake_${turn}`, role: 'assistant', content: [{ type: 'text', text: reply }] },
         session_id: SESSION_ID,
       });
-      emitResult(reply);
+      emitResult(reply, {}, turn);
     };
     const echoDelay = Number(process.env.FAKE_ECHO_DELAY_MS) || 0;
-    if (echoDelay > 0) setTimeout(respond, echoDelay);
+    if (echoDelay > 0) scheduleTurn(respond, echoDelay);
     else respond();
   }
 }
