@@ -19,6 +19,12 @@ const prefersReducedMotion = () =>
   typeof window.matchMedia === 'function' &&
   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+// 긴 본문은 프레임마다 marked+DOMPurify+hljs로 전체 프리픽스를 재파싱하는 비용이
+// 커진다(파싱량 ∝ 전체 길이 — MAX_LAG는 표시 지연만 제한). 이 길이를 넘으면 틱을
+// ~20fps로 묶어 파싱 횟수를 상한한다 — 페이서가 dt 기반이라 표시 속도는 동일하다.
+const HEAVY_LEN = 8000;
+const HEAVY_TICK_MS = 48;
+
 function AssistantText({ item, enter, isNew }) {
   const full = item.text || '';
   // 라이브로 갓 등장한 블록(isNew)만 0부터 드러낸다 — 과거 대화 프리로드/세션 전환은
@@ -35,16 +41,27 @@ function AssistantText({ item, enter, isNew }) {
       setShown(full.length);
       return undefined;
     }
-    // 프레임당 1회 전진 → setState → 이 effect 재실행이 다음 프레임을 예약한다.
-    // dt는 "예약~발화" 실측치 — 주사율(60/144Hz)과 무관하게 같은 속도로 보이고,
-    // 창 가림 등으로 rAF가 스로틀링돼도 상한(100ms) 안에서만 전진한다
-    // (밀린 분량은 MAX_LAG 클램프가 즉시 건너뛰므로 복귀 시 지연 없음).
+    // 틱당 1회 전진 → setState → 이 effect 재실행이 다음 틱을 예약한다.
+    // dt는 "예약~발화" 실측치 — 주사율(60/144Hz)이나 아래 heavy 지연과 무관하게
+    // 같은 속도로 보이고, 창 가림 등으로 rAF가 스로틀링돼도 상한(100ms) 안에서만
+    // 전진한다(밀린 분량은 MAX_LAG 클램프가 즉시 건너뛰므로 복귀 시 지연 없음).
     const scheduled = performance.now();
-    const raf = requestAnimationFrame((now) => {
+    let raf = 0;
+    const tick = (now) => {
       const dt = Math.min(100, now - scheduled);
       setShown((s) => nextShown(s, full, !!item.streaming, dt));
-    });
-    return () => cancelAnimationFrame(raf);
+    };
+    const timer =
+      full.length > HEAVY_LEN
+        ? setTimeout(() => {
+            raf = requestAnimationFrame(tick);
+          }, HEAVY_TICK_MS)
+        : 0;
+    if (!timer) raf = requestAnimationFrame(tick);
+    return () => {
+      clearTimeout(timer);
+      cancelAnimationFrame(raf);
+    };
   }, [catching, shown, full, item.streaming]);
 
   const html = useMemo(
