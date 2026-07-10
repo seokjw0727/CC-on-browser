@@ -311,6 +311,10 @@
   margin: 8px auto 0;
   padding: 0 4px;
   font-size: 11.5px;
+  /* 마스코트(.composer-mascot, pointer-events:auto)와 겹치는 영역에서도
+     상태줄 컨트롤(테마 버튼 등)이 클릭을 먼저 받도록 위로 올린다 */
+  position: relative;
+  z-index: 1;
   color: var(--text-faint);
   flex-wrap: wrap;
 }
@@ -959,4 +963,49 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .toast { animation: none; }
+}
+
+/* ===== CLAW'D 마스코트 애니메이션 (Clawd.jsx — 무드별 모션, 프레임 스왑은 JS) ===== */
+.clawd { display: inline-block; }
+.clawd .clawd-bob,
+.clawd .clawd-poke { display: inline-block; }
+.clawd .clawd-bob {
+  animation: clawd-bob 3.2s ease-in-out infinite;
+}
+.clawd.mood-busy .clawd-bob {
+  animation: clawd-bob 0.9s ease-in-out infinite;
+}
+.clawd.mood-alert .clawd-bob {
+  animation: clawd-hop 0.7s ease-in-out infinite;
+}
+/* doze 흐림은 내부 레이어에 — 외부(.composer-mascot 0.5)와 곱해져 확실히 더 흐려진다 */
+.clawd.mood-doze .clawd-bob {
+  animation: clawd-bob 4.8s ease-in-out infinite;
+  opacity: 0.55;
+}
+.clawd .clawd-poke.poked {
+  animation: clawd-squish 0.3s ease-out;
+  transform-origin: 50% 100%;
+}
+/* 컴포저 마스코트는 장식이라 클릭 통과였지만, 찌르기 반응을 위해 열어준다 */
+.composer-mascot.clawd { pointer-events: auto; }
+@keyframes clawd-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+@keyframes clawd-hop {
+  0%, 55%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-4px); }
+}
+@keyframes clawd-squish {
+  0% { transform: scale(1, 1); }
+  40% { transform: scale(1.15, 0.78); }
+  100% { transform: scale(1, 1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* 무드별 규칙(.clawd.mood-* .clawd-bob)이 특이도로 이기지 못하게 !important */
+  .clawd .clawd-bob,
+  .clawd .clawd-poke.poked {
+    animation: none !important;
+  }
 }

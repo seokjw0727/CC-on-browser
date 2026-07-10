@@ -26,6 +26,9 @@ endpoint 하나만 조회해 얻습니다 — 모델 호출이 아니므로 과�
   있으면 `--resume`, 첫 턴 전이면 새로 시작), 권한 모드 전환, `/` 슬래시 커맨드 자동완성, 턴 중단(Esc).
   설정 변경 확인과 오류는 채팅 기록에 남지 않고 **토스트 알림**으로 잠시 표시된 뒤 사라집니다.
 - **컴포저 중심 UI** — 상단 바 없이 입력창 한 곳에 레포·권한모드·모델·전송·사용량을 접어 넣은 레이아웃. 라이트/다크 테마, 외부 폰트·이미지 의존 0(브랜드 자산은 자체 내장 SVG — 로컬 CSP 안전).
+- **살아있는 마스코트(CLAW'D)** — 컴포저 우측 하단 픽셀 마스코트가 세션 상태에 반응합니다:
+  대기 중 깜박임, 턴 진행 중 다리 스캐틀, 권한 응답 대기 시 집게 들고 폴짝, 세션 없음·연결 끊김엔 졸기.
+  클릭하면 움찔(찌르기). 전부 자체 SVG 프레임 스왑 + CSS(`prefers-reduced-motion` 존중, 외부 이미지 0).
 
 ## 요구사항
 
@@ -121,7 +124,7 @@ server/src/
 client/src/
   App.jsx            셸 레이아웃·테마 소유
   lib/               store.jsx(상태) · ws.js(자동 재접속) · reduce-cli-event.js(CLI 이벤트→상태) · markdown.js · api.js
-  components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · Toasts · Brand
+  components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · Toasts · Clawd · Brand
 scripts/dev-fake.mjs 구독 미소모 데모 런처(fake CLI)
 server/test/         fake CLI 기반 통합·단위 테스트 (실제 claude 미실행)
 docs/superpowers/    스펙·플랜 문서

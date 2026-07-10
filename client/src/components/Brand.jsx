@@ -1,5 +1,6 @@
 // 자기완결형 브랜드 SVG — 외부 폰트/이미지 의존 없음(로컬 앱 CSP 안전).
 // Sparkle: Claude 스타일 선버스트 스파크. Mascot: 오렌지 픽셀아트.
+import { CLAWD_FRAMES } from '../lib/clawd.js';
 
 // 10방향 선버스트 스파크(오목한 변의 별) — currentColor로 채움.
 export function Sparkle({ size = 22, className = '' }) {
@@ -36,17 +37,8 @@ export function Sparkle({ size = 22, className = '' }) {
   );
 }
 
-// 11x8 픽셀 인베이더 — 1=칠함. 오렌지 마스코트.
-const MASCOT_BITS = [
-  '00100000100',
-  '00010001000',
-  '00111111100',
-  '01101110110',
-  '11111111111',
-  '10111111101',
-  '10100000101',
-  '00011011000',
-];
+// 11x8 픽셀 인베이더 — 단일 소스는 lib/clawd.js의 base 프레임(드리프트 방지).
+const MASCOT_BITS = CLAWD_FRAMES.base;
 
 export function Mascot({ scale = 4, className = '' }) {
   const cols = MASCOT_BITS[0].length;

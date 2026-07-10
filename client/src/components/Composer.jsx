@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
-import { Mascot } from './Brand.jsx';
+import Clawd from './Clawd.jsx';
 import './interact.css';
 
 const MAX_HEIGHT_PX = 200;
@@ -685,7 +685,13 @@ export default function Composer({ theme, onToggleTheme }) {
         </button>
       </div>
 
-      <Mascot className="composer-mascot" scale={4} />
+      {/* CLAW'D — 세션 상태에 따라 움직이는 마스코트 (클릭=찌르기) */}
+      <Clawd
+        className="composer-mascot"
+        scale={4}
+        status={session?.status ?? 'none'}
+        conn={state.conn}
+      />
     </div>
   );
 }

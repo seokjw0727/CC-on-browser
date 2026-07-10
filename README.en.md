@@ -28,6 +28,10 @@ queried with the OAuth token the CLI already stores — not a model call, so it 
   turn interrupt (Esc). Setting-change confirmations and errors show as **transient toasts** — they never
   pollute the chat history.
 - **Composer-centric UI** — no top bar; repo, permission mode, model, send, and usage fold into the composer. Light/dark themes, zero external font/image dependencies (brand assets are self-contained SVGs — safe under a local CSP).
+- **A living mascot (CLAW'D)** — the pixel mascot at the composer's bottom-right reacts to session state:
+  blinking while idle, leg-scuttling during a turn, claws-up hopping while a permission prompt waits,
+  dozing when there is no session or the connection drops. Click it for a poke reaction. All done with
+  self-contained SVG frame swaps + CSS (`prefers-reduced-motion` respected, zero external images).
 
 ## Requirements
 
@@ -124,7 +128,7 @@ server/src/
 client/src/
   App.jsx            Shell layout & theme owner
   lib/               store.jsx (state) · ws.js (auto-reconnect) · reduce-cli-event.js (CLI events→state) · markdown.js · api.js
-  components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · Toasts · Brand
+  components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · Toasts · Clawd · Brand
 scripts/dev-fake.mjs Subscription-free demo launcher (fake CLI)
 server/test/         Integration/unit tests against the fake CLI (never runs the real claude)
 docs/superpowers/    Spec & plan documents
