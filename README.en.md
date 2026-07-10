@@ -33,10 +33,15 @@ queried with the OAuth token the CLI already stores — not a model call, so it 
 - **Composer-centric UI** — no top bar; repo, permission mode, model, send, and usage fold into the composer. Light/dark themes, zero external font/image dependencies (brand assets are self-contained SVGs — safe under a local CSP).
 - **A living mascot (CLAW'D)** — the composer's bottom-right hosts CLAW'D transcribed from the official
   art embedded in the Claude Code CLI itself (orange body rgb(215,119,87), black eyes, quadrant pixels),
-  reacting to session state: blinking while idle, glancing left/right while scuttling during a turn,
-  claws-up hopping (the official arms-up pose) while a permission prompt waits, dozing when there is no
-  session or the connection drops. Click it for a poke reaction. All done with self-contained SVG frame
-  swaps + CSS (`prefers-reduced-motion` respected, zero external images).
+  reacting to session state (mood vocabulary is a scaled-down port of
+  [clawd-on-desk](https://github.com/rullerzhou-afk/clawd-on-desk)'s state mapping): blinking with
+  **cursor-following eyes** while idle, a thought bubble (three dots) while the model generates, glancing
+  left/right while tools run, claws-up juggling while a subagent (Task) runs, claws-up hopping (the
+  official arms-up pose) while a permission prompt waits, cheering when a turn completes (dizzy on error —
+  except turns you interrupted yourself),
+  falling asleep with zzz after 60s of user inactivity (waking on input), and dozing when there is no
+  session or the connection drops. Click it for a poke; four rapid pokes make it dizzy (easter egg). All
+  done with self-contained SVG frame swaps + CSS (`prefers-reduced-motion` respected, zero external images).
 
 ## Requirements
 

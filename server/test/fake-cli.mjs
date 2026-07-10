@@ -3,6 +3,10 @@
 // 시나리오는 환경변수 FAKE_SCENARIO로 선택:
 //   echo(기본) | permission | crash | permission-crash(권한 요청 후 응답 전에 프로세스 사망)
 //   | start-fail(스폰 직후 stderr 출력 후 즉시 종료 — --resume 실패류 재현)
+//   | subagent(Task tool_use → 지연 → tool_result → result — 마스코트 juggle 관찰용)
+// 관찰용 env:
+//   FAKE_ECHO_DELAY_MS     echo 응답 전 지연(기본 0 — 즉답, 테스트 계약 유지)
+//   FAKE_SUBAGENT_MS       subagent 도구 실행 시간(기본 1500ms, 0 허용)
 import { createJsonlParser } from '../src/jsonl.js';
 
 const scenario = process.env.FAKE_SCENARIO || 'echo';
@@ -193,21 +197,66 @@ function handle(msg) {
       }
       return;
     }
-    // echo 시나리오: text_delta ×3 → assistant → result
-    const reply = `echo: ${extractText(msg)}`;
-    for (const part of splitIntoThree(reply)) {
+    if (scenario === 'subagent') {
+      // Task 도구 실행 재현 — tool_use 확정 후 일정 시간 결과 미도착(서브에이전트
+      // 실행 중) 상태를 유지한다. 마스코트 juggle 무드 관찰용.
+      const toolUseId = `toolu_task_${userCount}`;
+      // 0도 유효한 지연이다 — `|| 1500`은 0을 삼킨다
+      const rawMs = process.env.FAKE_SUBAGENT_MS;
+      const subagentMs =
+        rawMs != null && rawMs !== '' && Number.isFinite(Number(rawMs)) ? Number(rawMs) : 1500;
       out({
-        type: 'stream_event',
-        event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: part } },
+        type: 'assistant',
+        message: {
+          id: `msg_task_${userCount}`,
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: toolUseId, name: 'Task', input: { prompt: '서브에이전트 작업' } }],
+        },
         session_id: SESSION_ID,
       });
+      setTimeout(() => {
+        out({
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'subagent done', is_error: false }],
+          },
+          tool_use_result: { success: true },
+          session_id: SESSION_ID,
+        });
+        out({
+          type: 'assistant',
+          message: {
+            id: `msg_task_sum_${userCount}`,
+            role: 'assistant',
+            content: [{ type: 'text', text: '서브에이전트 완료' }],
+          },
+          session_id: SESSION_ID,
+        });
+        emitResult('subagent turn done');
+      }, subagentMs);
+      return;
     }
-    out({
-      type: 'assistant',
-      message: { id: `msg_fake_${userCount}`, role: 'assistant', content: [{ type: 'text', text: reply }] },
-      session_id: SESSION_ID,
-    });
-    emitResult(reply);
+    // echo 시나리오: text_delta ×3 → assistant → result
+    const respond = () => {
+      const reply = `echo: ${extractText(msg)}`;
+      for (const part of splitIntoThree(reply)) {
+        out({
+          type: 'stream_event',
+          event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: part } },
+          session_id: SESSION_ID,
+        });
+      }
+      out({
+        type: 'assistant',
+        message: { id: `msg_fake_${userCount}`, role: 'assistant', content: [{ type: 'text', text: reply }] },
+        session_id: SESSION_ID,
+      });
+      emitResult(reply);
+    };
+    const echoDelay = Number(process.env.FAKE_ECHO_DELAY_MS) || 0;
+    if (echoDelay > 0) setTimeout(respond, echoDelay);
+    else respond();
   }
 }
 

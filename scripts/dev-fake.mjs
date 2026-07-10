@@ -2,7 +2,9 @@
 // 실제 claude.exe를 실행하지 않으므로 구독을 소모하지 않는다.
 //
 // 사용법:
-//   node scripts/dev-fake.mjs [--port 8788] [--scenario echo|permission|crash]
+//   node scripts/dev-fake.mjs [--port 8788] [--scenario echo|permission|crash|subagent]
+// 관찰용 env(선택): FAKE_ECHO_DELAY_MS(echo 응답 지연 — thinking 유지),
+//   FAKE_SUBAGENT_MS(subagent 도구 실행 시간 — 마스코트 juggle 관찰)
 //
 // 시나리오는 fake-cli가 자신의 env(FAKE_SCENARIO)에서 읽으므로(spawn 시 부모 env 상속),
 // --scenario 는 이 프로세스의 FAKE_SCENARIO 를 설정하는 셸 중립적 방법이다.

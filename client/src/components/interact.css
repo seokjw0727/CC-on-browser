@@ -980,6 +980,10 @@ select.mode-trust:focus {
 
 /* ===== CLAW'D 마스코트 애니메이션 (Clawd.jsx — 무드별 모션, 프레임 스왑은 JS) ===== */
 .clawd { display: inline-block; }
+/* 말풍선(.clawd-bubble)·zzz(.clawd-zzz)의 기준 박스. :where(특이도 0)라야
+   .composer-mascot의 position: absolute(같은 단일 클래스 특이도 — 번들 순서로
+   뒤집히는 함정, f80a0d2의 :focus 회귀와 동일 클래스)를 덮지 않는다. */
+:where(.clawd) { position: relative; }
 /* 공식 색 — CLI 바이너리 테마 실측: clawd_body rgb(215,119,87), 눈은 검정(clawd_background) */
 .mascot .px-body { fill: var(--clawd-body, #d77757); }
 .mascot .px-eye { fill: var(--clawd-eye, #141413); }
@@ -994,11 +998,24 @@ select.mode-trust:focus {
 .clawd.mood-busy .clawd-bob {
   animation: clawd-bob 0.9s ease-in-out infinite;
 }
+.clawd.mood-think .clawd-bob {
+  animation: clawd-bob 1.8s ease-in-out infinite;
+}
+.clawd.mood-juggle .clawd-bob {
+  animation: clawd-bob 0.7s ease-in-out infinite;
+}
 .clawd.mood-alert .clawd-bob {
   animation: clawd-hop 0.7s ease-in-out infinite;
 }
-/* doze 흐림 — 무드가 바뀌면 원복되도록 무드 레이어(clawd-bob)에만 건다 */
-.clawd.mood-doze .clawd-bob {
+.clawd.mood-happy .clawd-bob {
+  animation: clawd-cheer 0.55s ease-in-out infinite;
+}
+.clawd.mood-error .clawd-bob {
+  animation: clawd-shake 0.36s linear infinite;
+}
+/* doze/sleep 흐림 — 무드가 바뀌면 원복되도록 무드 레이어(clawd-bob)에만 건다 */
+.clawd.mood-doze .clawd-bob,
+.clawd.mood-sleep .clawd-bob {
   animation: clawd-bob 4.8s ease-in-out infinite;
   opacity: 0.55;
 }
@@ -1023,10 +1040,80 @@ select.mode-trust:focus {
   40% { transform: scale(1.15, 0.78); }
   100% { transform: scale(1, 1); }
 }
+@keyframes clawd-cheer {
+  0%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-6px); }
+}
+@keyframes clawd-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-1.5px); }
+  75% { transform: translateX(1.5px); }
+}
+
+/* think 말풍선 — 점 3개가 번갈아 뜨는 CSS 전용 인디케이터(외부 이미지 없음).
+   마스코트가 채팅 위에 떠 있으므로 클릭은 통과시킨다. */
+.clawd-bubble {
+  position: absolute;
+  right: calc(100% - 10px);
+  bottom: calc(100% - 6px);
+  display: flex;
+  gap: 3px;
+  padding: 5px 7px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px 10px 2px 10px;
+  pointer-events: none;
+}
+.clawd-bubble i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  animation: clawd-dot 1.2s ease-in-out infinite;
+}
+.clawd-bubble i:nth-child(2) { animation-delay: 0.2s; }
+.clawd-bubble i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes clawd-dot {
+  0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+
+/* sleep zzz — 머리 위로 z가 하나씩 떠오르며 사라진다(CSS 텍스트 전용) */
+.clawd-zzz {
+  position: absolute;
+  left: calc(100% - 16px);
+  bottom: calc(100% - 8px);
+  width: 24px;
+  height: 26px;
+  pointer-events: none;
+  color: var(--text-dim);
+  font: 700 11px/1 var(--font-sans);
+}
+.clawd-zzz i {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  font-style: normal;
+  opacity: 0;
+  animation: clawd-zzz 3s ease-in infinite;
+}
+.clawd-zzz i:nth-child(2) { animation-delay: 1s; }
+.clawd-zzz i:nth-child(3) { animation-delay: 2s; }
+@keyframes clawd-zzz {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.8); }
+  25% { opacity: 0.8; }
+  60% { opacity: 0.3; }
+  100% { opacity: 0; transform: translate(9px, -15px) scale(1.2); }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  /* 무드별 규칙(.clawd.mood-* .clawd-bob)이 특이도로 이기지 못하게 !important */
+  /* 무드별 규칙(.clawd.mood-* .clawd-bob)이 특이도로 이기지 못하게 !important.
+     sleep 무드 자체가 reduced에선 발동하지 않으므로(zzz 미렌더) 여기 zzz는
+     방어선일 뿐이다. 말풍선 점은 정지 상태(불투명)로 남는다. */
   .clawd .clawd-bob,
-  .clawd .clawd-poke.poked {
+  .clawd .clawd-poke.poked,
+  .clawd-bubble i,
+  .clawd-zzz i {
     animation: none !important;
   }
 }

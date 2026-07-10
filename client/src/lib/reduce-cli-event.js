@@ -436,6 +436,21 @@ function reduceResult(session, payload) {
     };
   }
 
+  // 결과가 끝내 안 온 열린 tool_use는 턴 종료가 합성 결과로 닫는다(프로토콜상
+  // tool_result는 항상 result보다 먼저다). 안 닫으면 인터럽트/크래시 고아가
+  // hasOpenTool(status)·openSubagentCount(마스코트 juggle)·ToolCard("실행 중" 칩)를
+  // 영구 오염시킨다 (DA #24).
+  if (next.messages.some((m) => m.kind === 'tool_use' && m.result == null)) {
+    next = {
+      ...next,
+      messages: next.messages.map((m) =>
+        m.kind === 'tool_use' && m.result == null
+          ? { ...m, result: { content: '(중단됨 — 결과 미수신)', isError: true, structured: null } }
+          : m,
+      ),
+    };
+  }
+
   const usage = payload.usage || {};
   next = {
     ...next,

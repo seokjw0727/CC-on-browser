@@ -25,6 +25,10 @@ export function createSessionState(partial = {}) {
     ctxFromCalls: false,
     rateLimit: null,
     status: 'idle', // idle | thinking | tool | awaiting-permission | exited
+    // 사용자가 이 턴을 직접 중단했는가 — 마스코트 턴 종료 반응 억제용
+    // (인터럽트도 is_error result로 끝난다). Composer가 인터럽트 전송 시 true,
+    // 다음 doSend가 false로 되돌린다.
+    interruptRequested: false,
     lastSeq: 0,
     ...partial,
   };

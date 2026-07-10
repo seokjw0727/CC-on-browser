@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
+import { openSubagentCount } from '../lib/clawd.js';
 import { fmtTok, shortPath } from '../lib/format.js';
 import { MODES, MODE_LABEL, MODE_CLASS } from '../lib/permission-modes.js';
 import Clawd from './Clawd.jsx';
@@ -294,6 +295,8 @@ export default function Composer({ theme, onToggleTheme }) {
   const quota = gu?.quota;
   const ctxTokens = session?.usage?.contextTokens || 0;
   const ctxPct = (ctxTokens / CONTEXT_WINDOW) * 100;
+  // 실행 중인 서브에이전트(Task/Agent 도구) 수 — 마스코트 juggle 무드 판정
+  const subagents = useMemo(() => openSubagentCount(session?.messages), [session?.messages]);
 
   // ----- `/` 커맨드 드롭다운 -----
   const commands = useMemo(() => {
@@ -343,13 +346,22 @@ export default function Composer({ theme, onToggleTheme }) {
           message: { role: 'user', content: [{ type: 'text', text: t }] },
         }),
         status: s.status === 'idle' ? 'thinking' : s.status,
+        interruptRequested: false, // 새 턴 시작 — 이전 인터럽트 표시 해제
       }),
     });
     setText('');
   };
 
   const doInterrupt = () => {
-    if (busy) send({ type: 'interrupt', key: session.key });
+    if (!busy) return;
+    if (!send({ type: 'interrupt', key: session.key })) return;
+    // 직접 중단한 턴은 마스코트가 실패(error) 연출을 하지 않도록 표시 —
+    // 다음 doSend가 해제한다 (인터럽트도 is_error result로 끝난다).
+    dispatch({
+      type: 'update-session',
+      key: session.key,
+      fn: (s) => ({ ...s, interruptRequested: true }),
+    });
   };
 
   // 낙관적 UI 갱신은 실제 전송이 성공했을 때만 — 끊긴 상태에서 바꾸면
@@ -641,12 +653,16 @@ export default function Composer({ theme, onToggleTheme }) {
         </button>
       </div>
 
-      {/* CLAW'D — 세션 상태에 따라 움직이는 마스코트 (클릭=찌르기) */}
+      {/* CLAW'D — 세션 상태에 따라 움직이는 마스코트 (클릭=찌르기, 4연타=어지럼) */}
       <Clawd
         className="composer-mascot"
         scale={5}
         status={session?.status ?? 'none'}
         conn={state.conn}
+        sessionKey={state.activeKey ?? null}
+        lastResult={session?.lastResult ?? null}
+        interrupted={session?.interruptRequested ?? false}
+        subagents={subagents}
       />
     </div>
   );
