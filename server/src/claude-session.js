@@ -20,6 +20,8 @@ export class ClaudeSession extends EventEmitter {
   #exited = false;
   #stopTimer = null;
   #nextRequestId = 0;
+  /** 최근 stderr 라인(최대 3) — 조기 종료 시 원인("No conversation found…")을 에러 메시지에 싣는다 */
+  #stderrTail = [];
   /** @type {Map<string, object>} requestId -> 원본 can_use_tool 메시지 */
   #pendingPermissions = new Map();
   /** @type {Map<string, {resolve: Function, reject: Function, timer: NodeJS.Timeout}>} */
@@ -79,7 +81,10 @@ export class ClaudeSession extends EventEmitter {
       while ((idx = errBuf.indexOf('\n')) >= 0) {
         const line = errBuf.slice(0, idx).replace(/\r$/, '');
         errBuf = errBuf.slice(idx + 1);
-        if (line) this.emit('raw', line);
+        if (line) {
+          this.#stderrTail = [...this.#stderrTail, line].slice(-3);
+          this.emit('raw', line);
+        }
       }
     });
 
@@ -242,7 +247,8 @@ export class ClaudeSession extends EventEmitter {
       clearTimeout(this.#stopTimer);
       this.#stopTimer = null;
     }
-    this.#failPendingControl(new Error(`claude process exited (code ${code})`));
+    const detail = this.#stderrTail.length ? ` — ${this.#stderrTail.join(' / ')}` : '';
+    this.#failPendingControl(new Error(`claude process exited (code ${code})${detail}`));
     this.#pendingPermissions.clear();
     this.emit('exit', code);
   }

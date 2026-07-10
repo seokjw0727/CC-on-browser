@@ -10,8 +10,12 @@
 //                    result: {content, isError, structured}|null, streaming, parentToolUseId }
 // assistant-text/thinking/tool_use 아이템은 assistant 이벤트로 확정되면 confirmed:true.
 //   notice         { text }           (system/notification)
-//   error          { text }           (result.is_error; store가 직접 추가하기도 함)
+//   error          { text }           (레거시 렌더 호환용 — 신규 에러는 store가 토스트로 표시)
 //   raw            { payload }        (미지의 타입 보존)
+//
+// user 이벤트 분류(실 CLI v2.1.206 실측): isReplay:true(설정 변경 에코·히스토리 재전송)는
+// 채팅에 추가하지 않고, 비-replay <local-command-stdout|stderr> 문자열(슬래시 커맨드 출력)은
+// 태그를 벗겨 notice로 렌더한다. result.is_error도 채팅 대신 store가 토스트로 알린다.
 //
 // session.streaming = { msgId: string|null, blocks: { [contentBlockIndex]: uid } }
 
@@ -332,7 +336,15 @@ function reduceUser(session, payload) {
   const content = msg.content;
   let next = adoptSessionId(session, payload);
 
+  // isReplay:true = CLI가 자기 히스토리를 되쏘는 이벤트(설정 변경 에코, 향후 resume replay
+  // 가능성) — 대화가 아니고 preload와 중복될 수 있으므로 채팅에 추가하지 않는다(파일 헤더 참조).
+  if (payload.isReplay) return next;
   if (typeof content === 'string') {
+    // 비-replay 로컬 커맨드 출력(슬래시 커맨드 결과 등)은 삼키지 않고 notice로 보여준다.
+    if (/^<local-command-(stdout|stderr)>/.test(content)) {
+      const text = content.replace(/<\/?local-command-(stdout|stderr)>/g, '').trim();
+      return text ? append(next, { kind: 'notice', text }) : next;
+    }
     return append(next, { kind: 'user-text', text: content });
   }
   if (!Array.isArray(content)) return next;
@@ -368,6 +380,12 @@ function reduceSystem(session, payload) {
       return {
         ...session,
         statusText: typeof payload.status === 'string' ? payload.status : null,
+        // set_permission_mode 성공 시 CLI가 새 permissionMode를 실어 보낸다(v2.1.206 실측)
+        // — 낙관적 UI 갱신과 어긋나면 CLI 쪽이 권위다.
+        permissionMode:
+          typeof payload.permissionMode === 'string'
+            ? payload.permissionMode
+            : session.permissionMode,
       };
     case 'thinking_tokens':
       return { ...session, thinkingTokens: payload.estimated_tokens ?? null };
@@ -423,17 +441,15 @@ function reduceResult(session, payload) {
       durationMs: payload.duration_ms ?? null,
       numTurns: payload.num_turns ?? null,
     },
+    // 완결 턴 ≥1 = CLI가 트랜스크립트를 디스크에 남겼다는 뜻 — --resume 재시작 가능
+    // (무턴 세션은 jsonl이 없어 --resume이 실패한다 — v2.1.206 실측).
+    // is_error 결과라도 num_turns>0이면 유저 턴이 접수·기록된 것이므로 게이트를 연다
+    // (resume 실패류 error_during_execution은 num_turns:0 — 실측 — 이라 계속 닫힌다).
+    hasCompletedTurn:
+      next.hasCompletedTurn || !payload.is_error || (payload.num_turns ?? 0) > 0,
   };
 
-  if (payload.is_error) {
-    next = append(next, {
-      kind: 'error',
-      text:
-        typeof payload.result === 'string' && payload.result
-          ? payload.result
-          : `턴 실패 (${payload.subtype ?? 'unknown'})`,
-    });
-  }
+  // is_error 결과는 채팅에 남기지 않는다 — store('event' 처리)가 토스트로 알린다.
 
   return { ...next, status: next.status === 'exited' ? 'exited' : 'idle' };
 }

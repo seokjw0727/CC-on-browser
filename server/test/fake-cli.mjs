@@ -2,10 +2,21 @@
 // 가짜 claude CLI — stream-json 프로토콜 모사 (계획서 "검증된 CLI 프로토콜" 절과 필드 동일).
 // 시나리오는 환경변수 FAKE_SCENARIO로 선택:
 //   echo(기본) | permission | crash | permission-crash(권한 요청 후 응답 전에 프로세스 사망)
+//   | start-fail(스폰 직후 stderr 출력 후 즉시 종료 — --resume 실패류 재현)
 import { createJsonlParser } from '../src/jsonl.js';
 
 const scenario = process.env.FAKE_SCENARIO || 'echo';
 const SESSION_ID = 'fake-session-1';
+// 실 CLI처럼 system/init이 스폰된 --model을 보고하도록 argv를 미러링 (기본 sonnet)
+const modelIdx = process.argv.indexOf('--model');
+const SPAWNED_MODEL = modelIdx >= 0 ? process.argv[modelIdx + 1] : 'sonnet';
+
+// start-fail: 실 CLI가 잘못된 --resume 대상 등으로 initialize 응답 전에 죽는 상황
+// (stderr "No conversation found with session ID: …" 후 exit 1 — v2.1.206 실측) 재현.
+if (scenario === 'start-fail') {
+  process.stderr.write('fake start failure: no conversation found\n');
+  process.exit(1);
+}
 
 let userCount = 0;
 let permCounter = 0;
@@ -84,9 +95,32 @@ function handle(msg) {
         session_id: SESSION_ID,
         cwd: process.cwd(),
         tools: ['Bash', 'Read', 'Write'],
-        model: 'sonnet',
+        model: SPAWNED_MODEL,
       });
     } else {
+      // 실 CLI v2.1.206 실측 미러: set_model은 로컬 커맨드 에코(user 이벤트, isReplay),
+      // set_permission_mode는 system/status 이벤트를 성공 응답과 함께 방출한다.
+      if (request?.subtype === 'set_model') {
+        out({
+          type: 'user',
+          message: {
+            role: 'user',
+            content: `<local-command-stdout>Set model to ${request.model}</local-command-stdout>`,
+          },
+          session_id: SESSION_ID,
+          parent_tool_use_id: null,
+          isReplay: true,
+        });
+      }
+      if (request?.subtype === 'set_permission_mode') {
+        out({
+          type: 'system',
+          subtype: 'status',
+          status: null,
+          permissionMode: request.mode,
+          session_id: SESSION_ID,
+        });
+      }
       // interrupt / set_model / set_permission_mode / set_max_thinking_tokens 등 — 성공 응답.
       // echo_request: 받은 요청을 그대로 되돌려주는 픽스처 전용 진단 필드(wire format 검증용).
       out({

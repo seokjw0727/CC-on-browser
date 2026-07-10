@@ -1,6 +1,7 @@
 // Global store: React context + useReducer.
-// Owns the WS connection, reduces server messages into state, and
-// re-sends `attach` for every known session after a reconnect.
+// Owns the WS connection and re-sends `attach` for every known session after
+// a reconnect. 순수 상태 로직(리듀서·세션 상태)은 store-reducer.js로 분리 —
+// node --test 단위 테스트 대상.
 
 import React, {
   createContext,
@@ -11,7 +12,7 @@ import React, {
   useRef,
 } from 'react';
 import { connect } from './ws.js';
-import { reduceCliEvent } from './reduce-cli-event.js';
+import { createInitialState, reducer } from './store-reducer.js';
 
 const TOKEN_KEY = 'ccob-token';
 
@@ -27,176 +28,6 @@ export function getToken() {
     );
   }
   return sessionStorage.getItem(TOKEN_KEY) || '';
-}
-
-export function createSessionState(partial = {}) {
-  return {
-    key: null,
-    cwd: null,
-    sessionId: null,
-    model: null,
-    permissionMode: 'default',
-    maxThinkingTokens: null, // 사고 예산 — 서버 setThinking 채널용으로 유지(현재 UI 미노출)
-    effort: null, // 노력 수준(low|medium|high|xhigh|max) — null=CLI 기본(high), spawn 전용
-    messages: [],
-    streaming: {},
-    pendingPermissions: [],
-    usage: { cost: 0, inTok: 0, outTok: 0, contextTokens: 0 },
-    rateLimit: null,
-    status: 'idle', // idle | thinking | tool | awaiting-permission | exited
-    lastSeq: 0,
-    ...partial,
-  };
-}
-
-function createInitialState() {
-  return {
-    conn: 'connecting', // connecting | open | closed
-    sessions: new Map(), // key -> SessionState
-    activeKey: null,
-    projects: [],
-    initInfo: null,
-    pendingStarts: new Map(), // startId -> {cwd, model, permissionMode, effort, resumeSessionId, preloadMessages?}
-    lastError: null,
-    newSessionOpen: false, // 새 세션(레포 선택) 모달 표시 여부 — Sidebar/Composer 공용
-    globalUsage: null, // /api/usage 폴링 결과 — 로컬 5h/7d 집계 + 공식 quota(실패 시 null), 상태줄 표시용
-  };
-}
-
-function updateSession(state, key, fn) {
-  const cur = state.sessions.get(key);
-  if (!cur) return state;
-  const sessions = new Map(state.sessions);
-  sessions.set(key, fn(cur));
-  return { ...state, sessions };
-}
-
-function handleServerMessage(state, msg) {
-  switch (msg.type) {
-    case 'started': {
-      const opts = state.pendingStarts.get(msg.startId) || {};
-      const pendingStarts = new Map(state.pendingStarts);
-      pendingStarts.delete(msg.startId);
-      const sessions = new Map(state.sessions);
-      sessions.set(
-        msg.key,
-        createSessionState({
-          key: msg.key,
-          cwd: opts.cwd ?? null,
-          model: opts.model ?? null,
-          permissionMode: opts.permissionMode ?? 'default',
-          effort: opts.effort ?? null,
-          // effort 재시작 등 in-memory 이월: 이전 세션의 메시지를 그대로 이어붙인다
-          messages: Array.isArray(opts.preloadMessages) ? [...opts.preloadMessages] : [],
-        }),
-      );
-      return {
-        ...state,
-        sessions,
-        pendingStarts,
-        activeKey: msg.key,
-        initInfo: msg.initInfo ?? state.initInfo,
-      };
-    }
-
-    case 'event':
-      return updateSession(state, msg.key, (s) => {
-        if (typeof msg.seq === 'number' && msg.seq <= s.lastSeq) return s; // replay dedupe
-        const next = reduceCliEvent(s, msg.payload);
-        return { ...next, lastSeq: msg.seq ?? s.lastSeq };
-      });
-
-    case 'permission_request':
-      return updateSession(state, msg.key, (s) => ({
-        ...s,
-        status: 'awaiting-permission',
-        pendingPermissions: [
-          ...s.pendingPermissions,
-          {
-            requestId: msg.requestId,
-            toolName: msg.toolName,
-            displayName: msg.displayName,
-            input: msg.input,
-            description: msg.description,
-            suggestions: msg.suggestions,
-            toolUseId: msg.toolUseId,
-          },
-        ],
-      }));
-
-    case 'permission_resolved':
-      return updateSession(state, msg.key, (s) => {
-        const pendingPermissions = s.pendingPermissions.filter(
-          (p) => p.requestId !== msg.requestId,
-        );
-        return {
-          ...s,
-          pendingPermissions,
-          status:
-            pendingPermissions.length === 0 && s.status === 'awaiting-permission'
-              ? 'thinking'
-              : s.status,
-        };
-      });
-
-    case 'exit':
-      // 프로세스가 죽으면 대기 중이던 권한 요청은 더 이상 응답할 수 없고(서버도
-      // 이미 정리함), 답할 수 없는 권한 모달이 화면에 고착되므로 함께 비운다.
-      return updateSession(state, msg.key, (s) => ({
-        ...s,
-        status: 'exited',
-        pendingPermissions: [],
-      }));
-
-    case 'error': {
-      let next = { ...state, lastError: msg.message ?? 'unknown error' };
-      if (msg.startId) {
-        const pendingStarts = new Map(next.pendingStarts);
-        pendingStarts.delete(msg.startId);
-        next = { ...next, pendingStarts };
-      }
-      if (msg.key && next.sessions.has(msg.key)) {
-        next = updateSession(next, msg.key, (s) => ({
-          ...s,
-          messages: [...s.messages, { kind: 'error', text: msg.message }],
-        }));
-      }
-      return next;
-    }
-
-    default:
-      return state;
-  }
-}
-
-export function reducer(state, action) {
-  switch (action.type) {
-    case 'conn':
-      return { ...state, conn: action.status };
-    case 'server-message':
-      return handleServerMessage(state, action.message);
-    case 'register-start': {
-      const pendingStarts = new Map(state.pendingStarts);
-      pendingStarts.set(action.startId, action.opts);
-      return { ...state, pendingStarts };
-    }
-    case 'set-active':
-      return { ...state, activeKey: action.key };
-    case 'open-new-session':
-      return { ...state, newSessionOpen: true };
-    case 'close-new-session':
-      return { ...state, newSessionOpen: false };
-    case 'set-projects':
-      return { ...state, projects: action.projects };
-    case 'set-usage':
-      return { ...state, globalUsage: action.usage };
-    case 'update-session':
-      return updateSession(state, action.key, action.fn);
-    case 'clear-error':
-      return { ...state, lastError: null };
-    default:
-      return state;
-  }
 }
 
 const StoreContext = createContext(null);
@@ -256,6 +87,8 @@ export function StoreProvider({ children }) {
       },
       /** Stop a session's CLI process (client->server contract 'stop'). Server replies with exit. */
       stopSession: (key) => (wsRef.current ? wsRef.current.send({ type: 'stop', key }) : false),
+      /** 일시 토스트 알림 — 설정 변경 확인·오류 표시용(자동 소멸). */
+      notify: (text, kind = 'info') => dispatch({ type: 'add-toast', text, kind }),
     }),
     [],
   );

@@ -235,6 +235,54 @@ test('(h) effort 옵션이 spawn argv에 --effort로 전달된다', async () => 
   }
 });
 
+test('(i) start-fail: initialize 전에 죽으면 start()가 stderr 원인을 담아 거부한다', async () => {
+  const session = makeSession('start-fail');
+  const exit = trackExit(session);
+  await assert.rejects(
+    () => session.start(),
+    (err) => {
+      assert.match(err.message, /claude process exited \(code 1\)/);
+      // stderr 꼬리가 에러 메시지에 실린다 — 사용자 토스트에 원인이 그대로 보이도록
+      assert.match(err.message, /no conversation found/);
+      return true;
+    },
+  );
+  await exit.promise;
+});
+
+test('(j) set_model은 로컬 커맨드 에코(user, isReplay)를 방출한다 — v2.1.206 미러 고정', async () => {
+  const session = makeSession('echo');
+  const exit = trackExit(session);
+  try {
+    await session.start();
+    const echoP = waitForEvent(
+      session,
+      (m) => m.type === 'user' && typeof m.message?.content === 'string',
+    );
+    await session.setModel('sonnet');
+    const echo = await echoP;
+    assert.equal(echo.isReplay, true);
+    assert.match(echo.message.content, /^<local-command-stdout>Set model to sonnet/);
+  } finally {
+    await shutdown(session, exit);
+  }
+});
+
+test('(k) set_permission_mode는 system/status(permissionMode)를 방출한다 — v2.1.206 미러 고정', async () => {
+  const session = makeSession('echo');
+  const exit = trackExit(session);
+  try {
+    await session.start();
+    const statusP = waitForEvent(session, (m) => m.type === 'system' && m.subtype === 'status');
+    await session.setPermissionMode('plan');
+    const status = await statusP;
+    assert.equal(status.permissionMode, 'plan');
+    assert.equal(status.status, null);
+  } finally {
+    await shutdown(session, exit);
+  }
+});
+
 test('(g2) setMaxThinkingTokens wire format — subtype/필드명이 실측 프로토콜과 일치', async () => {
   const session = makeSession('echo');
   const exit = trackExit(session);

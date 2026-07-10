@@ -9,6 +9,7 @@ import ChatView from './components/ChatView.jsx';
 import Composer from './components/Composer.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import PermissionDialog from './components/PermissionDialog.jsx';
+import Toasts from './components/Toasts.jsx';
 
 const THEME_KEY = 'ccob-theme';
 const USAGE_POLL_MS = 60_000;
@@ -64,6 +65,7 @@ function Shell() {
       </main>
 
       <PermissionDialog />
+      <Toasts />
     </div>
   );
 }

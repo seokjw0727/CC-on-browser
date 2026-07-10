@@ -49,6 +49,17 @@ spawn: `claude.exe -p --input-format stream-json --output-format stream-json --v
 - `result`: 턴 종료. `subtype:"success"|...`, `result`(최종 텍스트), `session_id`, `total_cost_usd`, `usage{input_tokens,output_tokens,...}`, `num_turns`, `duration_ms`, `is_error`.
 - 멀티턴: result 후 같은 stdin에 다음 user 메시지. 세션 종료는 stdin.end().
 
+**2026-07-10 v2.1.206 handshake 프로브 추가 실측 (유저 메시지 미전송 — 토큰 소모 0):**
+- `system/init`은 **첫 user 메시지 전에는 오지 않는다** (initialize 응답·hook 이벤트만 도착). 무턴 세션은
+  `~/.claude/projects`에 **트랜스크립트(jsonl)를 만들지 않는다** → 그런 세션 id로 `--resume`하면 stderr
+  `No conversation found with session ID: …` + `result/error_during_execution` 후 exit 1.
+  ⇒ 클라이언트는 **완결 턴 ≥1(result 관측) 또는 재개로 시작한 세션만** `--resume` 대상으로 삼는다(hasCompletedTurn 게이트).
+- `set_model` 성공 시 CLI가 `user` 이벤트(`message.content`가 문자열 `<local-command-stdout>Set model to …</local-command-stdout>`,
+  `isReplay:true`)를 함께 방출한다 — 대화가 아니므로 클라이언트가 채팅에서 걸러낸다.
+- `set_permission_mode` 성공 시 `system/status`(`status:null`, `permissionMode:<새 모드>`) 이벤트 동반.
+  4개 모드(default/acceptEdits/plan/bypassPermissions) 전부 런타임 전환 성공, spawn `--permission-mode bypassPermissions`도 정상.
+- 실존 세션 `--resume`은 과거 대화를 **replay하지 않는다**(isReplay 이벤트 0) — 메모리 이월(preloadMessages)과 중복되지 않음.
+
 ## WS 프로토콜 (서버 ↔ 브라우저, 이 스키마가 계약)
 
 연결: `ws://127.0.0.1:<port>/ws?token=<token>`. token 불일치/Origin 불일치 시 즉시 close.

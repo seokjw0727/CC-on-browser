@@ -148,7 +148,9 @@ function DirTree({ root, selected, onSelect }) {
 function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose, presenceStatus }) {
   const [cwd, setCwd] = useState(defaultCwd || '');
   const [model, setModel] = useState('');
-  const [mode, setMode] = useState('default');
+  // 기본 권한 모드 = 전체 허용(bypassPermissions) — 사용자 요청(2026-07-10).
+  // 모달의 셀렉트에서 세션별로 변경할 수 있고, 경고 문구가 항상 함께 표시된다.
+  const [mode, setMode] = useState('bypassPermissions');
   const [treeRoot, setTreeRoot] = useState(null); // 트리 기준 경로 ('' = 드라이브 목록)
   const [error, setError] = useState(null);
   // 포커스 트랩 — 모달이 열린 동안 Tab을 안에 가두고, 닫히면 여는 버튼으로 복원.
@@ -310,23 +312,22 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose, pre
 
 // ----- 사이드바 본체 -----
 export default function Sidebar({ onCollapse }) {
-  const { state, dispatch, startSession, stopSession } = useStore();
+  const { state, dispatch, startSession, stopSession, notify } = useStore();
   const modalOpen = state.newSessionOpen;
   const openModal = () => dispatch({ type: 'open-new-session' });
   const closeModal = () => dispatch({ type: 'close-new-session' });
   const [defaultCwd, setDefaultCwd] = useState('');
   const [expanded, setExpanded] = useState({}); // dirName -> sessions[]|'loading'
-  const [error, setError] = useState(null);
   // 재개 시 transcript 프리로드: started 도착 후 새 세션에 주입
   const pendingPreloadRef = useRef(null); // {startId, messages, prevKeys}
 
+  // 에러는 영구 배너 대신 토스트(자동 소멸)로 — 모달 내부의 폼 검증 문구만 인라인 유지.
   const refreshProjects = async () => {
     try {
       const projects = await fetchProjects();
       dispatch({ type: 'set-projects', projects });
-      setError(null);
     } catch (err) {
-      setError(String(err.message ?? err));
+      notify(String(err.message ?? err), 'error');
     }
   };
 
@@ -380,7 +381,7 @@ export default function Sidebar({ onCollapse }) {
       const sessions = await fetchSessions(dirName);
       setExpanded((prev) => ({ ...prev, [dirName]: sessions }));
     } catch (err) {
-      setError(String(err.message ?? err));
+      notify(String(err.message ?? err), 'error');
       setExpanded((prev) => {
         const next = { ...prev };
         delete next[dirName];
@@ -396,13 +397,12 @@ export default function Sidebar({ onCollapse }) {
       const startId = startSession({
         cwd: project.cwd,
         model: null,
-        permissionMode: 'default',
+        permissionMode: 'bypassPermissions', // 새 세션 기본과 동일 — 컴포저에서 변경 가능
         resumeSessionId: meta.sessionId,
       });
       pendingPreloadRef.current = { startId, messages, prevKeys };
-      setError(null);
     } catch (err) {
-      setError(String(err.message ?? err));
+      notify(String(err.message ?? err), 'error');
     }
   };
 
@@ -548,8 +548,6 @@ export default function Sidebar({ onCollapse }) {
             {liveOthers.map((n) => dirGroup(n, true))}
           </>
         )}
-
-        {error && <div className="sidebar-error">{error}</div>}
 
         {openSessions.length === 0 && (
           <div className="sidebar-empty">

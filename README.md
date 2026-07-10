@@ -16,14 +16,15 @@ endpoint 하나만 조회해 얻습니다 — 모델 호출이 아니므로 과�
 - **스트리밍 마크다운 채팅** — 부분 메시지(`--include-partial-messages`)를 실시간 렌더. 코드 하이라이트(highlight.js) + XSS 정화(DOMPurify).
 - **도구 실행 카드** — Bash·Edit·Write·Read·Grep 등 도구 호출을 입력/결과 카드로, 긴 결과는 접기.
 - **사고(thinking) 블록** — 확장 사고 스트림을 별도 블록으로 표시.
-- **권한 다이얼로그** — `can_use_tool` 요청을 모달로 띄워 허용/거부. 제안(suggestion)은 "항상 허용" 같은 모호한 문구 대신 실제 효과를 그대로 서술.
+- **권한 다이얼로그** — `can_use_tool` 요청을 모달로 띄워 허용/거부. 제안(suggestion)은 "항상 허용" 같은 모호한 문구 대신 실제 효과를 그대로 서술. 새 세션의 기본 권한 모드는 **전체 허용(bypassPermissions)** — 새 세션 모달·컴포저에서 언제든 바꿀 수 있고, 다이얼로그는 확인이 필요한 모드에서 동작합니다.
 - **세션 재개** — 현재 프로젝트의 과거 세션 목록에서 트랜스크립트를 불러와 이어가기(`--resume`).
 - **작업 디렉터리 지정** — 새 세션 모달에서 경로를 직접 입력·붙여넣고, 그 아래 하위 폴더 트리에서 클릭으로 선택.
 - **상태줄(statusline)** — 세션 컨텍스트(200k 대비)와 계정의 공식 5시간·7일 사용률(%)을 원형
   게이지로 표시. 공식 수치는 `/usage` 패널과 동일하고, 로컬 트랜스크립트 집계는 툴팁 참고치로 제공.
 - **런타임 컨트롤** — claude.ai식 모델 피커(Haiku 4.5 / Sonnet 5 / Opus 4.8 / Fable 5 — 버전·설명 표기)와
-  노력 수준 진행 바(low~max, `--effort`가 시작 시 전용이라 변경 시 같은 대화로 `--resume` 재시작),
-  권한 모드 전환, `/` 슬래시 커맨드 자동완성, 턴 중단(Esc).
+  노력 수준 진행 바(low~max, `--effort`가 시작 시 전용이라 변경 시 같은 대화로 재시작 — 대화가 디스크에
+  있으면 `--resume`, 첫 턴 전이면 새로 시작), 권한 모드 전환, `/` 슬래시 커맨드 자동완성, 턴 중단(Esc).
+  설정 변경 확인과 오류는 채팅 기록에 남지 않고 **토스트 알림**으로 잠시 표시된 뒤 사라집니다.
 - **컴포저 중심 UI** — 상단 바 없이 입력창 한 곳에 레포·권한모드·모델·전송·사용량을 접어 넣은 레이아웃. 라이트/다크 테마, 외부 폰트·이미지 의존 0(브랜드 자산은 자체 내장 SVG — 로컬 CSP 안전).
 
 ## 요구사항
@@ -120,7 +121,7 @@ server/src/
 client/src/
   App.jsx            셸 레이아웃·테마 소유
   lib/               store.jsx(상태) · ws.js(자동 재접속) · reduce-cli-event.js(CLI 이벤트→상태) · markdown.js · api.js
-  components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · Brand
+  components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · Toasts · Brand
 scripts/dev-fake.mjs 구독 미소모 데모 런처(fake CLI)
 server/test/         fake CLI 기반 통합·단위 테스트 (실제 claude 미실행)
 docs/superpowers/    스펙·플랜 문서

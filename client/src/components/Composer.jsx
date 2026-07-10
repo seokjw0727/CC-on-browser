@@ -1,6 +1,6 @@
 // 컴포저(레퍼런스 충실) — 상단 pill 행(레포·권한모드), 입력, 하단 컨트롤(모델 피커 +
 // 노력 수준 진행 바 + 전송), 그 아래 상태줄(컨텍스트·5h/7d 사용량·비용·rate limit·연결·테마).
-// 상단 바를 대체한다.
+// 상단 바를 대체한다. 설정 변경(모델·권한 모드·노력)은 채팅 기록 대신 토스트로 알린다.
 // Enter 전송/Shift+Enter 개행, `/` 커맨드 드롭다운, Esc/버튼 interrupt.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
@@ -307,7 +307,7 @@ function EffortPicker({ session, options, disabled, onSelect }) {
 }
 
 export default function Composer({ theme, onToggleTheme }) {
-  const { state, dispatch, send, startSession, stopSession } = useStore();
+  const { state, dispatch, send, startSession, stopSession, notify } = useStore();
   const session = useActiveSession();
   const [text, setText] = useState('');
   const [selIdx, setSelIdx] = useState(0);
@@ -388,39 +388,56 @@ export default function Composer({ theme, onToggleTheme }) {
 
   // 낙관적 UI 갱신은 실제 전송이 성공했을 때만 — 끊긴 상태에서 바꾸면
   // CLI에 전달되지 않는데 UI만 바뀌어 모델/권한모드가 desync되는 것을 막는다.
+  // 변경 확인은 채팅 기록이 아니라 토스트로 알린다(CLI의 로컬 커맨드 에코는
+  // reduce-cli-event가 채팅에서 걸러낸다).
   const changeModel = (model) => {
     if (!session || !model) return;
     if (!send({ type: 'setModel', key: session.key, model })) return;
     dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, model }) });
+    const opt = modelOptions.find((o) => o.value === model);
+    notify(`모델 변경: ${opt ? `Claude ${opt.name} ${opt.version}` : model}`);
   };
   const changeMode = (mode) => {
     if (!session || !mode) return;
     if (!send({ type: 'setPermissionMode', key: session.key, mode })) return;
     dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, permissionMode: mode }) });
+    notify(`권한 모드 변경: ${MODE_LABEL[mode] ?? mode}`);
   };
   // effort(--effort)는 spawn 전용 — 런타임 변경 채널이 없어(바이너리 실측) 같은
-  // 대화로 재시작한다: 기존 프로세스 정지 → --resume + --effort 재스폰, 메시지는
-  // 메모리에서 이월(preloadMessages).
+  // 대화로 재시작한다: 기존 프로세스 정지 → --effort 재스폰, 메시지는 메모리에서
+  // 이월(preloadMessages), 새 탭이 옛 탭을 대체(replaceKey).
+  // --resume은 트랜스크립트가 실제로 존재할 때만 붙인다: 완결 턴 ≥1 또는 재개로
+  // 시작한 세션. 무턴 세션은 jsonl이 없어 --resume이 "No conversation found"로
+  // 실패한다(실 CLI v2.1.206 실측) — 이때는 그냥 새로 시작해도 잃을 서버측 맥락이 없다.
   const changeEffort = (effort) => {
     // 트리거 disabled와 동일한 불변식을 여기서도 강제한다 — 팝오버가 열린 채로
-    // 상태가 바뀌면(턴 시작·세션 전환·init 미도착) 버튼 잠금만으로는 못 막는다.
+    // 상태가 바뀌면(턴 시작·세션 전환) 버튼 잠금만으로는 못 막는다.
     // 연타(pendingStarts) 가드는 고아 세션 방지.
     if (
       !session ||
       state.conn !== 'open' ||
       state.pendingStarts.size > 0 ||
-      session.status !== 'idle' ||
-      !session.sessionId
+      session.status !== 'idle'
     ) return;
+    const resumeId = session.sessionId ?? session.resumeSourceId;
+    const canResume = session.hasCompletedTurn && resumeId != null;
     stopSession(session.key);
     startSession({
       cwd: session.cwd,
       model: session.model,
       permissionMode: session.permissionMode,
       effort,
-      resumeSessionId: session.sessionId ?? null,
+      resumeSessionId: canResume ? resumeId : null,
       preloadMessages: session.messages,
+      replaceKey: session.key,
     });
+    const label = EFFORT_LEVELS.find((l) => l.value === effort)?.label ?? effort;
+    // 문구는 실제 동작과 일치시킨다 — resume이 아닐 때 "같은 대화"라고 말하지 않는다.
+    notify(
+      canResume
+        ? `노력 수준 변경: ${label} — 같은 대화로 세션을 재시작합니다`
+        : `노력 수준 변경: ${label} — 완결된 턴이 없어 새 세션으로 시작합니다`,
+    );
   };
 
   const onKeyDown = (e) => {
@@ -557,11 +574,9 @@ export default function Composer({ theme, onToggleTheme }) {
                   session={session}
                   options={modelOptions}
                   // 진행 중 턴이 있으면 잠근다 — effort 변경은 재시작이라 진행분을 파괴한다.
-                  // sessionId 확보 전(init 도착 전)에도 잠근다 — 이때 재시작하면 --resume
-                  // 대상이 없어 이월된 화면과 달리 새 대화로 시작해 버린다.
-                  disabled={
-                    !live || state.conn !== 'open' || session.status !== 'idle' || !session.sessionId
-                  }
+                  // (첫 턴 전에는 --resume 없이 새로 시작하므로 sessionId 잠금은 불필요 —
+                  // changeEffort의 resume 게이트 주석 참조)
+                  disabled={!live || state.conn !== 'open' || session.status !== 'idle'}
                   onSelect={changeEffort}
                 />
               </>
@@ -656,14 +671,6 @@ export default function Composer({ theme, onToggleTheme }) {
           <span className="meta-item danger">연결 끊김 — 재접속 중…</span>
         )}
         <span className="spacer" />
-        {state.lastError && (
-          <span className="meta-item danger" title={state.lastError}>
-            {state.lastError}
-            <button type="button" className="meta-x" onClick={() => dispatch({ type: 'clear-error' })} aria-label="오류 지우기">
-              ✕
-            </button>
-          </span>
-        )}
         <span className="meta-item" title={`WebSocket: ${state.conn}`}>
           <span className={`conn-dot ${state.conn}`} /> {CONN_LABEL[state.conn] ?? state.conn}
         </span>
