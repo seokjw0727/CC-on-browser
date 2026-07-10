@@ -95,7 +95,7 @@ Node 서버 (ESM, http + ws)
 - `PermissionDialog`: can_use_tool 표시 — 도구명, 입력(명령/파일/diff), [허용]/[항상 허용(제안 적용)]/[거부+사유]. 응답 전까지 해당 세션 턴은 대기 상태 표시.
 - `Sidebar`: 프로젝트(cwd) 선택, 새 세션, 최근 세션 목록(재개).
 - `Composer`: 멀티라인 입력, Enter 전송/Shift+Enter 줄바꿈, `/` 자동완성(initialize의 commands), Esc=interrupt.
-- `StatusBar`: 컨텍스트·5h/7d 사용률 게이지, 연결 상태, 테마. 모델·권한 모드는 컴포저 컨트롤로 이동, 턴별 토큰은 채팅의 usage 꼬리표로 표시(비용·rate limit 상시 표시는 제거, 2026-07-10).
+- `StatusBar`: 컨텍스트·5h/7d 사용률 게이지, 연결 상태, 테마. 모델·권한 모드는 컴포저 컨트롤로 이동, 턴별 토큰은 채팅의 usage 꼬리표로 표시(비용·rate limit 상시 표시는 제거, 2026-07-10). 컨텍스트(CTX%)는 assistant 이벤트의 호출별 usage(입력+캐시) 마지막 값 — result.usage는 턴 내 전 호출 합산이라 도구 왕복 수만큼 인플레(실측 9회 호출 턴 245%)해 폴백(호출별 usage 부재 시)으로만 사용(2026-07-10 수정).
 - 테마: 다크 기본 + 라이트, CSS 변수.
 
 ### 4.4 데이터 흐름 (한 턴)

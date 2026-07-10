@@ -306,6 +306,28 @@ function reduceAssistant(session, payload) {
   content.forEach((block, i) => {
     next = confirmBlock(next, block, msgId, i, parent);
   });
+
+  // 컨텍스트 크기(CTX%) 추적: assistant 이벤트의 호출별 usage에서 입력+캐시가
+  // 곧 그 호출 시점의 컨텍스트다 — 마지막 호출 값이 권위. result.usage는 턴 내
+  // 모든 API 호출(도구 왕복마다 1회)의 합산이라 컨텍스트로 쓰면 호출 수에 비례해
+  // 인플레된다(실측: 9회 호출 턴에서 489,886 = 245%, 실제는 63,270 = 31.6%).
+  // 서브에이전트 트래픽은 본선 컨텍스트가 아니므로 제외
+  // (라이브: parent_tool_use_id, 재개 트랜스크립트: isSidechain).
+  const u = msg.usage;
+  if (u && typeof u === 'object' && parent == null && !payload.isSidechain) {
+    const ctx =
+      (u.input_tokens || 0) +
+      (u.cache_creation_input_tokens || 0) +
+      (u.cache_read_input_tokens || 0);
+    if (ctx > 0) {
+      next = {
+        ...next,
+        ctxFromCalls: true,
+        usage: { ...next.usage, contextTokens: ctx },
+      };
+    }
+  }
+
   return setStatus(next, hasOpenTool(next) ? 'tool' : 'thinking');
 }
 
@@ -428,13 +450,17 @@ function reduceResult(session, payload) {
           : next.usage.cost,
       inTok: (next.usage.inTok || 0) + (usage.input_tokens || 0),
       outTok: (next.usage.outTok || 0) + (usage.output_tokens || 0),
-      // 마지막 턴의 프롬프트측 토큰(입력+캐시) ≈ 현재 컨텍스트 크기 — 상태줄 표시용
-      contextTokens:
-        (usage.input_tokens || 0) +
-          (usage.cache_read_input_tokens || 0) +
-          (usage.cache_creation_input_tokens || 0) ||
-        next.usage.contextTokens ||
-        0,
+      // 컨텍스트 크기는 reduceAssistant가 호출별 usage로 추적한다(그쪽 주석 참조 —
+      // result.usage는 턴 합산이라 인플레). 여기서는 호출별 usage를 한 번도 못 본
+      // 세션(fake-cli 등 usage 없는 assistant)의 폴백으로만 쓴다 — 단일 호출 턴은
+      // 합산==마지막 호출이라 그 경우엔 정확하다.
+      contextTokens: session.ctxFromCalls
+        ? next.usage.contextTokens
+        : (usage.input_tokens || 0) +
+            (usage.cache_read_input_tokens || 0) +
+            (usage.cache_creation_input_tokens || 0) ||
+          next.usage.contextTokens ||
+          0,
     },
     lastResult: {
       subtype: payload.subtype ?? null,

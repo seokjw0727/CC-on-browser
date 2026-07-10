@@ -384,6 +384,9 @@ export default function Sidebar({ onCollapse }) {
         preloadMessages: pre.messages,
         preloadSessionId: pre.sessionId,
         preloadUsage: pre.usage,
+        // 트랜스크립트에 호출별 usage가 있었다면 그 사실도 이월 — 시딩 직후의
+        // result성 이벤트가 합산 usage로 컨텍스트를 덮는 경로를 원천 차단(방어).
+        preloadCtxFromCalls: pre.ctxFromCalls,
       });
     } catch (err) {
       notify(String(err.message ?? err), 'error');

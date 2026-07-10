@@ -582,7 +582,7 @@ export default function Composer({ theme, onToggleTheme }) {
           <RingStat
             label="CTX"
             pct={ctxPct}
-            title={`현재 세션 컨텍스트(마지막 턴 기준): ${ctxTokens.toLocaleString()} / ${CONTEXT_WINDOW.toLocaleString()} tok (${Math.round(ctxPct)}%)`}
+            title={`현재 세션 컨텍스트(마지막 API 호출 기준, 턴 중 실시간 갱신): ${ctxTokens.toLocaleString()} / ${CONTEXT_WINDOW.toLocaleString()} tok (${Math.round(ctxPct)}%)`}
           />
         )}
         {quota?.fiveHour ? (

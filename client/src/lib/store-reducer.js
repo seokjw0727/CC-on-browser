@@ -20,6 +20,9 @@ export function createSessionState(partial = {}) {
     streaming: {},
     pendingPermissions: [],
     usage: { cost: 0, inTok: 0, outTok: 0, contextTokens: 0 },
+    // contextTokens가 assistant 이벤트의 호출별 usage에서 왔는지 — true면 result의
+    // 턴 합산 usage로 덮어쓰지 않는다(합산은 호출 수만큼 인플레 — reduce-cli-event 참조).
+    ctxFromCalls: false,
     rateLimit: null,
     status: 'idle', // idle | thinking | tool | awaiting-permission | exited
     lastSeq: 0,
@@ -35,7 +38,8 @@ export function createInitialState() {
     projects: [],
     initInfo: null,
     // startId -> {cwd, model, permissionMode, effort, resumeSessionId,
-    //             preloadMessages?, preloadSessionId?, preloadUsage?, replaceKey?}
+    //             preloadMessages?, preloadSessionId?, preloadUsage?,
+    //             preloadCtxFromCalls?, replaceKey?}
     // replaceKey: effort 재시작처럼 기존 탭을 대체하는 시작 — started 도착 시 옛 세션 탭 제거
     pendingStarts: new Map(),
     toasts: [], // [{id, kind: 'info'|'error', text}] — 설정 변경·오류의 일시 알림(자동 소멸)
@@ -89,8 +93,10 @@ function handleServerMessage(state, msg) {
           messages: Array.isArray(opts.preloadMessages) ? [...opts.preloadMessages] : [],
           // 재개 프리로드의 부속 산출물 — usage(상태줄 CTX% 연속성)와 원본 세션 id
           // (사이드바/배지 표기 — 이후 system/init의 새 fork id가 덮어쓴다).
+          // ctxFromCalls도 이월: true면 result의 턴 합산 usage가 컨텍스트를 못 덮는다.
           sessionId: opts.preloadSessionId ?? null,
           ...(opts.preloadUsage ? { usage: opts.preloadUsage } : {}),
+          ...(opts.preloadCtxFromCalls ? { ctxFromCalls: true } : {}),
         }),
       );
       return {

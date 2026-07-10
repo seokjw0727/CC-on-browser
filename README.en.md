@@ -21,6 +21,8 @@ queried with the OAuth token the CLI already stores — not a model call, so it 
 - **Working-directory picker** — type or paste a path in the new-session modal, then click-select from the folder tree underneath.
 - **Statusline** — circular gauges for session context (vs the 200k window) and your account's official
   5-hour / 7-day usage (%) — the same numbers as the `/usage` panel; local transcript aggregates in tooltips.
+  Context is taken from the latest per-API-call usage (input + cache) — the turn-aggregated `result.usage`
+  is not used, as it inflates with every tool round-trip.
   Per-turn token usage lands in the chat as a small CLI-style tail (`↑ 12 ↓ 345 tok · 5.3s`) instead of the statusline.
 - **Runtime controls** — a claude.ai-style model picker (Haiku 4.5 / Sonnet 5 / Opus 4.8 / Fable 5, with
   versions and descriptions) and an effort-level progress bar (low–max; `--effort` is spawn-only, so changing

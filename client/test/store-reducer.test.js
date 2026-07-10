@@ -53,6 +53,7 @@ test('started(재개 프리로드): 메시지·sessionId·usage가 started 커�
     ],
     preloadSessionId: 'sess-old',
     preloadUsage: { cost: 0.5, inTok: 100, outTok: 50, contextTokens: 1234 },
+    preloadCtxFromCalls: true,
   });
   s = reducer(s, serverMsg({ type: 'started', startId: 'cl_r', key: 'r1' }));
 
@@ -60,6 +61,7 @@ test('started(재개 프리로드): 메시지·sessionId·usage가 started 커�
   assert.deepEqual(ns.messages.map((m) => m.uid), ['p1', 'p2'], '히스토리가 생성 시점에 존재');
   assert.equal(ns.sessionId, 'sess-old', '원본 세션 id 표기 이월');
   assert.equal(ns.usage.contextTokens, 1234, 'usage(CTX%) 연속성');
+  assert.equal(ns.ctxFromCalls, true, '호출별 usage 출처 플래그 이월 — result 합산이 못 덮는다');
   assert.equal(ns.hasCompletedTurn, true);
   assert.equal(s.activeKey, 'r1');
 });
