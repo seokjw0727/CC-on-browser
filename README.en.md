@@ -56,7 +56,7 @@ queried with the OAuth token the CLI already stores — not a model call, so it 
 Grab `cc-on-browser-<version>.tgz` from [GitHub Releases](https://github.com/seokjw0727/CC-on-browser/releases) and install it globally:
 
 ```sh
-npm install -g ./cc-on-browser-1.1.0.tgz
+npm install -g ./cc-on-browser-1.1.1.tgz
 cc-on-browser                # default port 8787 (the PORT env var works too)
 cc-on-browser --port 9000    # pick a port (-p); see --help for all options
 ```
@@ -74,7 +74,7 @@ npm start             # = node bin/cc-on-browser.mjs
 On startup the console prints the access URL:
 
 ```
-Claude Code on Browser v1.1.0 — http://127.0.0.1:8787/#token=<random-token>
+Claude Code on Browser v1.1.1 — http://127.0.0.1:8787/#token=<random-token>
 ```
 
 Open that URL (token included) in your browser. If the `claude` CLI cannot be found, a warning with
