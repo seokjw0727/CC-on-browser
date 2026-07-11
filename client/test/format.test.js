@@ -91,4 +91,35 @@ test('통합: 재개 preloadModel이 started 커밋에 시딩된다(표시 전�
   const sess = st.sessions.get('k1');
   assert.equal(sess.model, 'claude-fable-5');
   assert.equal(contextWindowFor(sess.model, CATALOG), CONTEXT_WINDOW_1M);
+  // 스폰 계보는 표시용 preload와 분리 — 실제 --model 인자(null)만 남는다.
+  // (해석 id를 재시작 스폰 인자로 재사용하면 구식·[1m] 탈락 위험 — codex 지적)
+  assert.equal(sess.spawnModel, null);
+});
+
+test('통합: 명시 모델로 시작하면 spawnModel 계보가 남는다', () => {
+  let st = createInitialState();
+  st = reducer(st, {
+    type: 'register-start',
+    startId: 'c2',
+    opts: { cwd: 'C:\\p', model: 'opus[1m]' },
+  });
+  st = reducer(st, {
+    type: 'server-message',
+    message: { type: 'started', startId: 'c2', key: 'k2' },
+  });
+  let sess = st.sessions.get('k2');
+  assert.equal(sess.spawnModel, 'opus[1m]');
+  // init이 model을 해석 id로 덮어써도 스폰 계보는 불변 — effort 재시작이 이 값을 쓴다
+  st = reducer(st, {
+    type: 'server-message',
+    message: {
+      type: 'event',
+      key: 'k2',
+      seq: 1,
+      payload: { type: 'system', subtype: 'init', session_id: 's2', model: 'claude-opus-4-8[1m]' },
+    },
+  });
+  sess = st.sessions.get('k2');
+  assert.equal(sess.model, 'claude-opus-4-8[1m]');
+  assert.equal(sess.spawnModel, 'opus[1m]');
 });

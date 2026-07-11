@@ -8,6 +8,10 @@ export function createSessionState(partial = {}) {
     cwd: null,
     sessionId: null,
     model: null,
+    // 스폰 계보 — 실제 --model 인자로 썼거나(started) set_model로 성공 적용된
+    // 카탈로그 value만 담는다. model 필드(init/assistant가 보고한 해석 id —
+    // 구식·[1m] 접미사 탈락 가능)와 달리 재시작 스폰 인자로 재사용해도 안전.
+    spawnModel: null,
     permissionMode: 'default',
     maxThinkingTokens: null, // 사고 예산 — 서버 setThinking 채널용으로 유지(현재 UI 미노출)
     effort: null, // 노력 수준(low|medium|high|xhigh|max) — null=CLI 기본(high), spawn 전용
@@ -87,6 +91,8 @@ function handleServerMessage(state, msg) {
           // preloadModel: 재개 트랜스크립트가 복원한 표시 전용 모델(스폰 인자 아님)
           // — 피커 라벨·CTX 분모([1m]→1M)가 재개 직후부터 맞고, init이 실제값으로 덮어쓴다.
           model: opts.model ?? opts.preloadModel ?? null,
+          spawnModel: opts.model ?? null, // 실제 스폰 인자만 계보에 남긴다
+
           permissionMode: opts.permissionMode ?? 'default',
           effort: opts.effort ?? null,
           // 재개로 시작한 세션은 원본 트랜스크립트가 디스크에 있음 — resume 게이트 통과

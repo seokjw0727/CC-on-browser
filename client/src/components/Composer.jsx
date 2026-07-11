@@ -372,7 +372,7 @@ export default function Composer({ theme, onToggleTheme }) {
   const changeModel = (model) => {
     if (!session || !model) return;
     if (!send({ type: 'setModel', key: session.key, model })) return;
-    dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, model }) });
+    dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, model, spawnModel: model }) });
     const opt = modelOptions.find((o) => o.value === model);
     notify(`모델 변경: ${opt ? `Claude ${opt.name} ${opt.version}` : model}`);
   };
@@ -403,11 +403,12 @@ export default function Composer({ theme, onToggleTheme }) {
     stopSession(session.key);
     startSession({
       cwd: session.cwd,
-      // 스폰 --model은 카탈로그 value로 확인된 값만 — session.model엔 init/assistant가
-      // 보고한 해석 id(구식·[1m] 접미사 탈락 가능)도 들어오는데, 그걸 스폰 인자로
-      // 넘기면 1M 세션의 무언 다운그레이드나 스폰 실패가 된다(Sidebar 재개와 동일
-      // 불변식). 미확인 값은 --model 생략(CLI가 결정)하고 표시만 preloadModel로 잇는다.
-      model: models.some((m) => m?.value === session.model) ? session.model : null,
+      // 스폰 --model은 검증된 계보(spawnModel: 시작 인자·set_model 성공값)만 —
+      // session.model엔 init/assistant가 보고한 해석 id(구식·[1m] 접미사 탈락 가능)도
+      // 들어오는데, 그걸 스폰 인자로 넘기면 1M 세션의 무언 다운그레이드나 스폰 실패가
+      // 된다(Sidebar 재개와 동일 불변식). null이면 --model 생략(CLI가 결정 — 재개는
+      // 트랜스크립트의 모델로 이어진다). 표시는 preloadModel로 잇는다.
+      model: session.spawnModel,
       preloadModel: session.model,
       permissionMode: session.permissionMode,
       effort,
