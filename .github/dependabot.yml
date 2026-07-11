@@ -1,0 +1,15 @@
+# 의존성 자동 범프 — actions v4→v5(2026-07-11) 같은 수동 갱신을 PR로 대체.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /client
+    schedule:
+      interval: weekly
