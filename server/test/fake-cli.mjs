@@ -26,12 +26,20 @@ const MODELS = [
 //   assistant message.model = 해석 id, [1m] 접미사 탈락('claude-opus-4-8')
 // --model 생략 기본은 'default' — 자기 카탈로그의 default 행과 일관(DA #22).
 const resolveModel = (v) => MODELS.find((m) => m.value === v)?.resolvedModel ?? v;
+// 1M 여부는 선택된 카탈로그 행의 양쪽 필드로 판정 — fable처럼 resolvedModel에서
+// 접미사가 탈락하는 행은 문자열 검사만으론 자기 카탈로그와 모순된다(codex 지적).
+const is1mModel = (v) => {
+  const e = MODELS.find((m) => m.value === v || m.resolvedModel === v);
+  const fields = e ? [e.value, e.resolvedModel] : [v];
+  return fields.some((s) => String(s ?? '').includes('[1m]'));
+};
 const modelIdx = process.argv.indexOf('--model');
 const SPAWNED_MODEL = (modelIdx >= 0 ? process.argv[modelIdx + 1] : null) ?? 'default';
 const INIT_MODEL = resolveModel(SPAWNED_MODEL);
 // set_model이 갱신하므로 let — 이후 assistant는 새 모델의 bare id를,
 // result.modelUsage는 접미사 유지 해석 id 키를 보고(실 CLI 미러).
 let currentModel = INIT_MODEL;
+let currentIs1m = is1mModel(SPAWNED_MODEL);
 let assistantModel = INIT_MODEL.replace(/\[1m\]$/, '');
 
 // start-fail: 실 CLI가 잘못된 --resume 대상 등으로 initialize 응답 전에 죽는 상황
@@ -85,7 +93,7 @@ function emitResult(text, extra = {}, turn = userCount) {
         cacheCreationInputTokens: 300,
         webSearchRequests: 0,
         costUSD: 0.001,
-        contextWindow: currentModel.includes('[1m]') ? 1_000_000 : 200_000,
+        contextWindow: currentIs1m ? 1_000_000 : 200_000,
         maxOutputTokens: 64000,
       },
     },
@@ -148,6 +156,7 @@ function handle(msg) {
         // 이후 턴의 assistant·result가 새 모델을 보고하도록 갱신 —
         // 스테일 모델 경로를 픽스처로 재현 가능하게(DA #22 codex 교차검증).
         currentModel = resolveModel(request.model);
+        currentIs1m = is1mModel(request.model);
         assistantModel = currentModel.replace(/\[1m\]$/, '');
         out({
           type: 'user',

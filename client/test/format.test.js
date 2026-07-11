@@ -153,6 +153,40 @@ test('통합: result.modelUsage의 contextWindow가 1차 출처로 수확된다'
     },
   });
   assert.equal(t.contextWindow, null);
+  // 같은 base의 [1m]·비[1m] 키가 공존하면 정확 키가 이긴다 — 순서 무관(codex 지적)
+  let u = reduceCliEvent(createSessionState({ model: 'claude-opus-4-8' }), {
+    type: 'result',
+    subtype: 'success',
+    usage: { input_tokens: 1, output_tokens: 1 },
+    modelUsage: {
+      'claude-opus-4-8[1m]': { contextWindow: 1_000_000 },
+      'claude-opus-4-8': { contextWindow: 200_000 },
+    },
+  });
+  assert.equal(u.contextWindow, 200_000);
+});
+
+test('통합: 대역외 모델 전환은 이전 result의 contextWindow도 리셋한다', () => {
+  // 전환 후 다음 result 전까지는 카탈로그 휴리스틱으로 폴백해야 한다(codex 지적)
+  let s = reduceCliEvent(createSessionState(), {
+    type: 'system',
+    subtype: 'init',
+    session_id: 's1',
+    model: 'claude-opus-4-8[1m]',
+  });
+  s = reduceCliEvent(s, {
+    type: 'result',
+    subtype: 'success',
+    usage: { input_tokens: 1, output_tokens: 1 },
+    modelUsage: { 'claude-opus-4-8[1m]': { contextWindow: 1_000_000 } },
+  });
+  assert.equal(s.contextWindow, 1_000_000);
+  s = reduceCliEvent(s, {
+    type: 'assistant',
+    message: { id: 'm1', model: 'claude-sonnet-5', content: [], usage: { input_tokens: 1 } },
+  });
+  assert.equal(s.model, 'claude-sonnet-5');
+  assert.equal(s.contextWindow, null);
 });
 
 test('통합: 다른 base의 assistant 모델은 덮어쓴다 — 대역외 모델 전환 추적', () => {

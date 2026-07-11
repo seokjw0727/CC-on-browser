@@ -337,8 +337,12 @@ function reduceAssistant(session, payload) {
   // 불가(스트림 고유 모호성 — DA #22). 서브에이전트 모델은 제외.
   if (parent == null && !payload.isSidechain && typeof msg.model === 'string' && msg.model) {
     const curBase = String(next.model ?? '').replace(/\[1m\]$/, '');
-    if (next.model == null || curBase !== msg.model) {
+    if (next.model == null) {
       next = { ...next, model: msg.model };
+    } else if (curBase !== msg.model) {
+      // 진짜 모델 전환 — 이전 모델의 result가 보고한 창 크기는 무효가 되므로
+      // 함께 리셋한다(다음 result까지 카탈로그 휴리스틱 폴백 — codex 지적).
+      next = { ...next, model: msg.model, contextWindow: null };
     }
   }
 
@@ -514,9 +518,12 @@ function reduceResult(session, payload) {
   if (mu && typeof mu === 'object') {
     const entries = Object.entries(mu).filter(([, v]) => Number.isFinite(v?.contextWindow));
     const strip = (v) => String(v ?? '').replace(/\[1m\]$/, '');
-    const match = entries.find(
-      ([k]) => k === next.model || strip(k) === strip(next.model),
-    );
+    // 정확 키 우선, base 일치는 유일할 때만 — 같은 base의 [1m]·비[1m] 키가
+    // 공존하면 순서에 따라 오판할 수 있다(codex 지적).
+    const baseHits = entries.filter(([k]) => strip(k) === strip(next.model));
+    const match =
+      entries.find(([k]) => k === next.model) ??
+      (baseHits.length === 1 ? baseHits[0] : null);
     const chosen = match ?? (entries.length === 1 ? entries[0] : null);
     if (chosen && chosen[1].contextWindow > 0) {
       next = { ...next, contextWindow: chosen[1].contextWindow };
