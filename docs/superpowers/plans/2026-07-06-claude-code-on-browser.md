@@ -60,6 +60,16 @@ spawn: `claude.exe -p --input-format stream-json --output-format stream-json --v
   4개 모드(default/acceptEdits/plan/bypassPermissions) 전부 런타임 전환 성공, spawn `--permission-mode bypassPermissions`도 정상.
 - 실존 세션 `--resume`은 과거 대화를 **replay하지 않는다**(isReplay 이벤트 0) — 메모리 이월(preloadMessages)과 중복되지 않음.
 
+**2026-07-11 [1m](1M 컨텍스트) 모델 보고 형상 실측 (`--model opus[1m]` 1턴 캡처):**
+- initialize `models[]` 카탈로그는 fake-cli 픽스처와 완전 일치. `[1m]` 접미사가 실리는 필드는
+  행마다 다르다: `default`→resolvedModel에만(`claude-opus-4-8[1m]`), `claude-fable-5[1m]`→value에만
+  (resolvedModel은 `claude-fable-5`).
+- `system/init.model` = **별칭을 해석한 id, 접미사 유지** — `opus[1m]` 스폰 → `"claude-opus-4-8[1m]"`.
+- `assistant message.model` = **접미사 탈락 bare id** — `"claude-opus-4-8"`. ⇒ 클라이언트는 init 값을
+  assistant 값으로 덮지 않는다(base 동일 시 유지, 다르면 모델 전환으로 채택 — reduce-cli-event.js).
+- `result.modelUsage` 키는 접미사 유지(`["claude-opus-4-8[1m]"]`).
+- CTX 분모 판별은 문자열+카탈로그 양방향·base 매칭(client/src/lib/format.js `contextWindowFor`).
+
 ## WS 프로토콜 (서버 ↔ 브라우저, 이 스키마가 계약)
 
 연결: `ws://127.0.0.1:<port>/ws?token=<token>`. token 불일치/Origin 불일치 시 즉시 close.

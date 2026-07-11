@@ -1,14 +1,16 @@
 // 공용 표시 포매터(lib/format.js) 테스트 — 특히 컨텍스트 창 판별.
-// CLI의 '[1m]' 접미사는 실리는 필드가 일정하지 않다(fake-cli의 v2.1.205 initialize
-// 캡처 미러 참조): value 'default'→resolvedModel에만, value 'claude-fable-5[1m]'→
-// resolvedModel에선 탈락. 판별은 문자열+카탈로그 양쪽 필드를 모두 본다.
+// '[1m]' 접미사가 실리는 자리는 보고 경로마다 다르다(실측 2026-07-11, opus[1m] 캡처):
+// 카탈로그 value 'default'→resolvedModel에만 / value 'claude-fable-5[1m]'→해석 id에선
+// 탈락 / init은 접미사 유지('claude-opus-4-8[1m]') / assistant는 탈락 bare id
+// ('claude-opus-4-8'). 판별은 정확 일치 → base(접미사 제거) 일치 → 문자열 순.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { contextWindowFor, CONTEXT_WINDOW, CONTEXT_WINDOW_1M } from '../src/lib/format.js';
 import { reduceCliEvent } from '../src/lib/reduce-cli-event.js';
 import { createSessionState, reducer, createInitialState } from '../src/lib/store-reducer.js';
 
-// fake-cli.mjs initialize 응답의 models 미러(관심 행만) — 픽스처가 곧 실측 계약
+// fake-cli.mjs initialize 응답의 models 미러(관심 행만) — 실 캡처(2026-07-11)와
+// 완전 일치 확인됨: 픽스처가 곧 실측 계약
 const CATALOG = [
   { value: 'default', resolvedModel: 'claude-opus-4-8[1m]' },
   { value: 'opus[1m]', resolvedModel: 'claude-opus-4-8[1m]' },
@@ -16,14 +18,19 @@ const CATALOG = [
   { value: 'sonnet', resolvedModel: 'claude-sonnet-5' },
 ];
 
-test('contextWindowFor: 기본은 200k — null/미상/표준 모델(카탈로그 유무 무관)', () => {
+test('contextWindowFor: 기본은 200k — 미상/표준 모델', () => {
   assert.equal(CONTEXT_WINDOW, 200_000);
-  assert.equal(contextWindowFor(null), CONTEXT_WINDOW);
+  assert.equal(contextWindowFor(null), CONTEXT_WINDOW); // 카탈로그 없으면 200k
   assert.equal(contextWindowFor(undefined), CONTEXT_WINDOW);
-  assert.equal(contextWindowFor(''), CONTEXT_WINDOW);
   assert.equal(contextWindowFor('claude-sonnet-4-5-20250929'), CONTEXT_WINDOW);
   assert.equal(contextWindowFor('sonnet', CATALOG), CONTEXT_WINDOW);
   assert.equal(contextWindowFor('claude-sonnet-5', CATALOG), CONTEXT_WINDOW);
+});
+
+test('contextWindowFor: 모델 미지정(null/"")은 카탈로그 default 항목으로 해석', () => {
+  // "(기본 모델)" 시작 = CLI 기본 — 계정 기본이 [1m]이면 첫 init 전에도 1M이 맞다
+  assert.equal(contextWindowFor(null, CATALOG), CONTEXT_WINDOW_1M);
+  assert.equal(contextWindowFor('', CATALOG), CONTEXT_WINDOW_1M);
 });
 
 test('contextWindowFor: 문자열 자체에 [1m] — 카탈로그 없이도 1M', () => {
@@ -43,6 +50,22 @@ test('contextWindowFor: 역방향 — [1m]이 탈락한 해석 id도 value 쪽 �
   assert.equal(contextWindowFor('claude-fable-5', CATALOG), CONTEXT_WINDOW_1M);
 });
 
+test('contextWindowFor: assistant의 bare id는 base 일치로 1M (실측 형상)', () => {
+  // 실측: assistant message.model = 'claude-opus-4-8' — 정확 일치 항목이 없어도
+  // 접미사를 벗긴 base가 같은 후보(default·opus[1m])가 전부 [1m]이면 1M.
+  assert.equal(contextWindowFor('claude-opus-4-8', CATALOG), CONTEXT_WINDOW_1M);
+});
+
+test('contextWindowFor: [1m]·비[1m] 변형 혼재 시 bare id는 보수적으로 200k', () => {
+  const mixed = [
+    { value: 'opus', resolvedModel: 'claude-opus-4-8' },
+    { value: 'opus[1m]', resolvedModel: 'claude-opus-4-8[1m]' },
+  ];
+  // 'claude-opus-4-8'은 두 변형 어느 쪽 세션인지 문자열만으론 알 수 없다 —
+  // 분모 과대(1M 오판)보다 과소(200k)가 안전하다.
+  assert.equal(contextWindowFor('claude-opus-4-8', mixed), CONTEXT_WINDOW);
+});
+
 test('통합: system/init이 보고한 [1m] 모델이 컨텍스트 창 선택으로 이어진다', () => {
   // Composer의 계산 경로 그대로: init → session.model → contextWindowFor
   const s = reduceCliEvent(createSessionState(), {
@@ -55,12 +78,13 @@ test('통합: system/init이 보고한 [1m] 모델이 컨텍스트 창 선택으
 });
 
 test('통합: 본선 assistant의 message.model 수확 — 사이드체인은 제외', () => {
-  // 재개 트랜스크립트엔 init이 없어 assistant.message.model이 유일한 모델 출처
+  // 재개 트랜스크립트엔 init이 없어 assistant.message.model이 유일한 모델 출처.
+  // 실측 형상 그대로 bare id를 쓴다.
   let s = reduceCliEvent(createSessionState(), {
     type: 'assistant',
-    message: { id: 'm1', model: 'claude-opus-4-8[1m]', content: [], usage: { input_tokens: 10 } },
+    message: { id: 'm1', model: 'claude-opus-4-8', content: [], usage: { input_tokens: 10 } },
   });
-  assert.equal(s.model, 'claude-opus-4-8[1m]');
+  assert.equal(s.model, 'claude-opus-4-8');
   assert.equal(contextWindowFor(s.model, CATALOG), CONTEXT_WINDOW_1M);
   // 서브에이전트(사이드체인) 모델은 본선 모델을 덮지 않는다
   s = reduceCliEvent(s, {
@@ -68,13 +92,47 @@ test('통합: 본선 assistant의 message.model 수확 — 사이드체인은 �
     isSidechain: true,
     message: { id: 'm2', model: 'claude-haiku-4-5', content: [] },
   });
-  assert.equal(s.model, 'claude-opus-4-8[1m]');
+  assert.equal(s.model, 'claude-opus-4-8');
   s = reduceCliEvent(s, {
     type: 'assistant',
     parent_tool_use_id: 'tu1',
     message: { id: 'm3', model: 'claude-haiku-4-5', content: [] },
   });
+  assert.equal(s.model, 'claude-opus-4-8');
+});
+
+test('통합: 라이브 무강등 — 같은 base의 assistant bare id는 init의 [1m] id를 덮지 않는다', () => {
+  // 실측(2026-07-11): init 'claude-opus-4-8[1m]' → assistant 'claude-opus-4-8'.
+  // 무조건 덮어쓰면 첫 assistant에서 [1m] 정밀도를 잃는다 — base 동일 시 유지 검증.
+  let s = reduceCliEvent(createSessionState(), {
+    type: 'system',
+    subtype: 'init',
+    session_id: 's1',
+    model: 'claude-opus-4-8[1m]',
+  });
+  s = reduceCliEvent(s, {
+    type: 'assistant',
+    message: { id: 'm1', model: 'claude-opus-4-8', content: [], usage: { input_tokens: 10 } },
+  });
   assert.equal(s.model, 'claude-opus-4-8[1m]');
+  assert.equal(contextWindowFor(s.model, CATALOG), CONTEXT_WINDOW_1M);
+});
+
+test('통합: 다른 base의 assistant 모델은 덮어쓴다 — 대역외 모델 전환 추적', () => {
+  // 채팅 /model 입력·CLI측 폴백처럼 UI 피커를 거치지 않는 전환은 assistant의
+  // 새 bare id가 유일한 신호 — base가 다르면 진짜 전환이므로 채택한다(DA #22).
+  let s = reduceCliEvent(createSessionState(), {
+    type: 'system',
+    subtype: 'init',
+    session_id: 's1',
+    model: 'claude-opus-4-8[1m]',
+  });
+  s = reduceCliEvent(s, {
+    type: 'assistant',
+    message: { id: 'm1', model: 'claude-sonnet-5', content: [], usage: { input_tokens: 10 } },
+  });
+  assert.equal(s.model, 'claude-sonnet-5');
+  assert.equal(contextWindowFor(s.model, CATALOG), CONTEXT_WINDOW);
 });
 
 test('통합: 재개 preloadModel이 started 커밋에 시딩된다(표시 전용 이월)', () => {

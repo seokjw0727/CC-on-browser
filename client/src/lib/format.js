@@ -11,23 +11,37 @@ export function fmtTok(n) {
 }
 
 // 세션 컨텍스트 창 크기 — CLI는 1M 컨텍스트 모델을 '[1m]' 접미사로 표기하지만,
-// 접미사가 실리는 필드는 일정하지 않다(v2.1.205 initialize 캡처: value 'default'→
-// resolvedModel 'claude-opus-4-8[1m]', 반대로 value 'claude-fable-5[1m]'→
-// resolvedModel 'claude-fable-5'). 그래서 모델 문자열 자체와, 카탈로그(models)에서
-// 그 문자열이 별칭(value)이든 해석 id(resolvedModel)든 매칭된 항목의 양쪽 필드를
-// 모두 보고 어느 하나라도 '[1m]'이면 1M로 판별한다. 카탈로그 없이도 동작(문자열만).
+// 접미사가 실리는 자리는 보고 경로마다 다르다(실측 2026-07-11, opus[1m] 캡처):
+//   카탈로그: value 'default'→resolvedModel 'claude-opus-4-8[1m]',
+//             반대로 value 'claude-fable-5[1m]'→resolvedModel 'claude-fable-5'
+//   system/init.model = 'claude-opus-4-8[1m]' (접미사 유지)
+//   assistant message.model = 'claude-opus-4-8' (접미사 탈락 bare id)
+// 판별: ① 정확 일치(별칭 value 우선 → 해석 id) 항목의 양쪽 필드에 [1m]이 있으면 1M
+//       ② bare id는 접미사를 벗긴 base로 후보를 모아, 전부 [1m]이면 1M —
+//          비[1m] 변형과 혼재하면 어느 쪽인지 알 수 없으므로 보수적으로 200k
+//       ③ 카탈로그 불일치는 문자열 자체의 [1m]로만 판별.
+// 모델 미지정(null/'')은 CLI 기본 = 카탈로그의 'default' 항목으로 해석한다.
 export const CONTEXT_WINDOW = 200_000;
 export const CONTEXT_WINDOW_1M = 1_000_000;
 export function contextWindowFor(model, models = []) {
-  const s = String(model ?? '');
+  const s = String(model ?? '') || 'default';
   const list = Array.isArray(models) ? models : [];
-  // 별칭 일치 우선 — 해석 id는 [1m]·비[1m] 변형이 공유할 수 있어 뒤로 미룬다
+  const has1m = (v) => String(v ?? '').includes('[1m]');
   const entry =
     list.find((m) => m?.value === s) ?? list.find((m) => m?.resolvedModel === s) ?? null;
-  const fields = entry ? [s, entry.value, entry.resolvedModel] : [s];
-  return fields.some((f) => String(f ?? '').includes('[1m]'))
-    ? CONTEXT_WINDOW_1M
-    : CONTEXT_WINDOW;
+  if (entry) {
+    return [s, entry.value, entry.resolvedModel].some(has1m)
+      ? CONTEXT_WINDOW_1M
+      : CONTEXT_WINDOW;
+  }
+  const strip = (v) => String(v ?? '').replace(/\[1m\]$/, '');
+  const cands = list.filter((m) => strip(m?.value) === s || strip(m?.resolvedModel) === s);
+  if (cands.length > 0) {
+    return cands.every((m) => has1m(m?.value) || has1m(m?.resolvedModel))
+      ? CONTEXT_WINDOW_1M
+      : CONTEXT_WINDOW;
+  }
+  return has1m(s) ? CONTEXT_WINDOW_1M : CONTEXT_WINDOW;
 }
 
 // 경로 꼬리 2단 축약 — 세션 이름 표기 관례 (레포 pill·사이드바·접힘 배지 공통)

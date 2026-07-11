@@ -12,9 +12,25 @@ import { createJsonlParser } from '../src/jsonl.js';
 
 const scenario = process.env.FAKE_SCENARIO || 'echo';
 const SESSION_ID = 'fake-session-1';
-// 실 CLI처럼 system/init이 스폰된 --model을 보고하도록 argv를 미러링 (기본 sonnet)
+// 실 CLI v2.1.205 initialize 응답 미러(2026-07-08 E2E 캡처, 2026-07-11 실 캡처로 재확인 —
+// 완전 일치). init/assistant의 모델 해석에도 재사용하므로 상수로 분리.
+const MODELS = [
+  { value: 'default', resolvedModel: 'claude-opus-4-8[1m]', displayName: 'Default (recommended)', description: 'Opus 4.8 with 1M context · Best for everyday, complex tasks', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  { value: 'opus[1m]', resolvedModel: 'claude-opus-4-8[1m]', displayName: 'Opus', description: 'Opus 4.8 with 1M context · Best for everyday, complex tasks', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  { value: 'claude-fable-5[1m]', resolvedModel: 'claude-fable-5', displayName: 'Fable', description: 'Fable 5 · Most capable for your hardest and longest-running tasks', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet', description: 'Sonnet 5 · Efficient for routine tasks', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  { value: 'haiku', resolvedModel: 'claude-haiku-4-5-20251001', displayName: 'Haiku', description: 'Haiku 4.5 · Fastest for quick answers' },
+];
+// 모델 보고 형상 — 실 CLI 실측(2026-07-11, opus[1m] 캡처):
+//   system/init.model = 해석 id, [1m] 접미사 유지('claude-opus-4-8[1m]')
+//   assistant message.model = 해석 id, [1m] 접미사 탈락('claude-opus-4-8')
+// --model 생략 기본은 'default' — 자기 카탈로그의 default 행과 일관(DA #22).
+const resolveModel = (v) => MODELS.find((m) => m.value === v)?.resolvedModel ?? v;
 const modelIdx = process.argv.indexOf('--model');
-const SPAWNED_MODEL = modelIdx >= 0 ? process.argv[modelIdx + 1] : 'sonnet';
+const SPAWNED_MODEL = (modelIdx >= 0 ? process.argv[modelIdx + 1] : null) ?? 'default';
+const INIT_MODEL = resolveModel(SPAWNED_MODEL);
+// set_model이 갱신하므로 let — 이후 assistant는 새 모델의 bare id를 보고(실 CLI 미러)
+let assistantModel = INIT_MODEL.replace(/\[1m\]$/, '');
 
 // start-fail: 실 CLI가 잘못된 --resume 대상 등으로 initialize 응답 전에 죽는 상황
 // (stderr "No conversation found with session ID: …" 후 exit 1 — v2.1.206 실측) 재현.
@@ -92,14 +108,7 @@ function handle(msg) {
           request_id: requestId,
           response: {
             commands: [{ name: 'help', description: 'Show help' }],
-            // 실 CLI v2.1.205 initialize 응답을 미러링 (2026-07-08 E2E 캡처와 동일 형태)
-            models: [
-              { value: 'default', resolvedModel: 'claude-opus-4-8[1m]', displayName: 'Default (recommended)', description: 'Opus 4.8 with 1M context · Best for everyday, complex tasks', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
-              { value: 'opus[1m]', resolvedModel: 'claude-opus-4-8[1m]', displayName: 'Opus', description: 'Opus 4.8 with 1M context · Best for everyday, complex tasks', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
-              { value: 'claude-fable-5[1m]', resolvedModel: 'claude-fable-5', displayName: 'Fable', description: 'Fable 5 · Most capable for your hardest and longest-running tasks', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
-              { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet', description: 'Sonnet 5 · Efficient for routine tasks', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
-              { value: 'haiku', resolvedModel: 'claude-haiku-4-5-20251001', displayName: 'Haiku', description: 'Haiku 4.5 · Fastest for quick answers' },
-            ],
+            models: MODELS,
             account: { email: 'fake@example.com', subscriptionType: 'pro' },
             output_style: 'default',
             // 픽스처 전용 진단: spawn argv 에코 (--effort 등 플래그 전달 검증용)
@@ -113,12 +122,16 @@ function handle(msg) {
         session_id: SESSION_ID,
         cwd: process.cwd(),
         tools: ['Bash', 'Read', 'Write'],
-        model: SPAWNED_MODEL,
+        // 실 CLI는 별칭을 해석해 보고한다 — 'opus[1m]' 스폰 → 'claude-opus-4-8[1m]' (실측)
+        model: INIT_MODEL,
       });
     } else {
       // 실 CLI v2.1.206 실측 미러: set_model은 로컬 커맨드 에코(user 이벤트, isReplay),
       // set_permission_mode는 system/status 이벤트를 성공 응답과 함께 방출한다.
       if (request?.subtype === 'set_model') {
+        // 이후 턴의 assistant가 새 모델의 bare id를 보고하도록 갱신 —
+        // 스테일 모델 경로를 픽스처로 재현 가능하게(DA #22 codex 교차검증).
+        assistantModel = resolveModel(request.model).replace(/\[1m\]$/, '');
         out({
           type: 'user',
           message: {
@@ -235,6 +248,7 @@ function handle(msg) {
         message: {
           id: `msg_task_${turn}`,
           role: 'assistant',
+          model: assistantModel, // 실 CLI 미러: assistant엔 [1m] 탈락 bare id (실측)
           content: [{ type: 'tool_use', id: toolUseId, name: 'Task', input: { prompt: '서브에이전트 작업' } }],
         },
         session_id: SESSION_ID,
@@ -254,6 +268,7 @@ function handle(msg) {
           message: {
             id: `msg_task_sum_${turn}`,
             role: 'assistant',
+            model: assistantModel,
             content: [{ type: 'text', text: '서브에이전트 완료' }],
           },
           session_id: SESSION_ID,
@@ -274,7 +289,7 @@ function handle(msg) {
       }
       out({
         type: 'assistant',
-        message: { id: `msg_fake_${turn}`, role: 'assistant', content: [{ type: 'text', text: reply }] },
+        message: { id: `msg_fake_${turn}`, role: 'assistant', model: assistantModel, content: [{ type: 'text', text: reply }] },
         session_id: SESSION_ID,
       });
       emitResult(reply, {}, turn);

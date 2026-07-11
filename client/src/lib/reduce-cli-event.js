@@ -328,12 +328,18 @@ function reduceAssistant(session, payload) {
     }
   }
 
-  // 본선 assistant의 message.model이 곧 세션의 실사용 모델 — init 없는 재개
-  // 트랜스크립트 리플레이에서 모델(→CTX 분모)을 복원하는 유일한 출처. 라이브에선
-  // init과 같은 값일 것으로 기대(미검증 — 실 [1m] 세션의 init·assistant 캡처 필요).
-  // 서브에이전트 모델은 제외(위 게이트와 동일).
+  // 본선 assistant의 message.model 수확 — init 없는 재개 트랜스크립트 복원과
+  // 대역외 모델 전환(채팅 /model, CLI측 폴백) 추적의 출처. 실측(2026-07-11,
+  // opus[1m] 캡처): assistant는 [1m] 접미사가 탈락한 bare id('claude-opus-4-8')를
+  // 보고하고 init은 접미사를 유지('claude-opus-4-8[1m]')한다 — 그래서 **base
+  // (접미사 제거)가 다를 때만 덮어쓴다**: 같은 base면 기존 값이 더 정밀([1m] 보존),
+  // 다른 base면 진짜 모델 전환. 같은 base의 [1m]→비[1m] 전환만은 bare id로 구별
+  // 불가(스트림 고유 모호성 — DA #22). 서브에이전트 모델은 제외.
   if (parent == null && !payload.isSidechain && typeof msg.model === 'string' && msg.model) {
-    next = next.model === msg.model ? next : { ...next, model: msg.model };
+    const curBase = String(next.model ?? '').replace(/\[1m\]$/, '');
+    if (next.model == null || curBase !== msg.model) {
+      next = { ...next, model: msg.model };
+    }
   }
 
   return setStatus(next, hasOpenTool(next) ? 'tool' : 'thinking');
