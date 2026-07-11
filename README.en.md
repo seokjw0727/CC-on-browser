@@ -98,6 +98,35 @@ PowerShell uses `$env:FAKE_SCENARIO='permission'; node scripts/dev-fake.mjs`.
 
 Tests also run exclusively against the fake CLI, so they never consume your subscription: `npm test`
 
+## How to use
+
+1. **Open the app** — open the URL printed at startup (`http://127.0.0.1:8787/#token=…`) as-is.
+   A token-less address fails authentication.
+2. **Start a new session** — click **새 세션** (new session) in the sidebar. In the modal, type/paste
+   a working directory or click one from the folder tree / recent projects, optionally change the
+   model, permission mode, and effort level, then start. Defaults: your account's default model +
+   bypassPermissions.
+3. **Chat** — **Enter** sends, **Shift+Enter** inserts a newline. Responses stream as markdown, tool
+   calls render as input/result cards, extended thinking as collapsible blocks. Interrupt a running
+   turn with **Esc** or the stop button.
+4. **Slash commands** — type `/` in the composer for an autocomplete dropdown (pick with Tab/Enter).
+   Commands like `/compact` are passed through to the CLI.
+5. **Permission prompts** — under confirmation-based permission modes, a dialog pops up before a tool
+   runs; choose allow/deny. Switch the permission mode anytime from the composer.
+6. **Model & effort changes** — switch models mid-conversation from the composer's model picker.
+   Changing the effort level restarts the session into the same conversation (`--effort` is
+   spawn-only — via `--resume` when the conversation exists on disk, or as a fresh start before the
+   first turn).
+7. **Resume sessions** — expand a project in the sidebar and click a past session to preload its
+   transcript and continue. Conversations live in the CLI's `~/.claude` transcripts, so they survive
+   server restarts.
+8. **Reading the statusline** — the CTX gauge shows the current session's context usage against the
+   model's window (200k, or 1M for `[1m]` models); the other gauges show your account's official
+   5-hour / 7-day usage (%). Per-turn tokens appear as a small CLI-style tail in the chat
+   (`↑ 12 ↓ 345 tok · 5.3s`).
+9. **Shut down** — `Ctrl+C` in the terminal running the server. Conversations remain in the CLI
+   transcripts and can be resumed after the next start.
+
 ## Architecture
 
 ```
