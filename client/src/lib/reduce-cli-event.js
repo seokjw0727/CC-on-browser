@@ -328,6 +328,14 @@ function reduceAssistant(session, payload) {
     }
   }
 
+  // 본선 assistant의 message.model이 곧 세션의 실사용 모델 — init 없는 재개
+  // 트랜스크립트 리플레이에서 모델(→CTX 분모)을 복원하는 유일한 출처. 라이브에선
+  // init과 같은 값일 것으로 기대(미검증 — 실 [1m] 세션의 init·assistant 캡처 필요).
+  // 서브에이전트 모델은 제외(위 게이트와 동일).
+  if (parent == null && !payload.isSidechain && typeof msg.model === 'string' && msg.model) {
+    next = next.model === msg.model ? next : { ...next, model: msg.model };
+  }
+
   return setStatus(next, hasOpenTool(next) ? 'tool' : 'thinking');
 }
 

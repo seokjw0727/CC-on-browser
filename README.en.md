@@ -19,7 +19,7 @@ queried with the OAuth token the CLI already stores — not a model call, so it 
 - **Permission dialog** — `can_use_tool` requests pop up as a modal for allow/deny. Suggestions are labeled by their actual effect, never vague wording like "always allow". New sessions default to **bypassPermissions** (run everything without prompts) — change it anytime in the new-session modal or the composer; the dialog kicks in under confirmation-based modes. Modes are shown with Korean labels and per-mode colors: default (neutral), acceptEdits (blue), plan (green), bypassPermissions (red).
 - **Session resume** — resume past sessions of the current project; the transcript is preloaded and continued (`--resume`).
 - **Working-directory picker** — type or paste a path in the new-session modal, then click-select from the folder tree underneath.
-- **Statusline** — circular gauges for session context (vs the 200k window) and your account's official
+- **Statusline** — circular gauges for session context (vs the model's window — 200k, or 1M for `[1m]` models) and your account's official
   5-hour / 7-day usage (%) — the same numbers as the `/usage` panel; local transcript aggregates in tooltips.
   Context is taken from the latest per-API-call usage (input + cache) — the turn-aggregated `result.usage`
   is not used, as it inflates with every tool round-trip.

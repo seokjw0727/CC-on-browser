@@ -381,6 +381,10 @@ export default function Sidebar({ onCollapse }) {
         model: null,
         permissionMode: 'bypassPermissions', // 새 세션 기본과 동일 — 컴포저에서 변경 가능
         resumeSessionId: meta.sessionId,
+        // 표시 전용 모델 이월(스폰 --model엔 불사용 — 트랜스크립트의 해석 id는
+        // 구식이거나 [1m] 접미사가 탈락했을 수 있어 스폰 인자로는 위험).
+        // 재개 직후 피커 라벨·CTX 분모가 맞고, init의 실제값이 곧 덮어쓴다.
+        preloadModel: pre.model,
         preloadMessages: pre.messages,
         preloadSessionId: pre.sessionId,
         preloadUsage: pre.usage,

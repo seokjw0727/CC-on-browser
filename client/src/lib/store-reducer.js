@@ -43,7 +43,7 @@ export function createInitialState() {
     initInfo: null,
     // startId -> {cwd, model, permissionMode, effort, resumeSessionId,
     //             preloadMessages?, preloadSessionId?, preloadUsage?,
-    //             preloadCtxFromCalls?, replaceKey?}
+    //             preloadCtxFromCalls?, preloadModel?, replaceKey?}
     // replaceKey: effort 재시작처럼 기존 탭을 대체하는 시작 — started 도착 시 옛 세션 탭 제거
     pendingStarts: new Map(),
     toasts: [], // [{id, kind: 'info'|'error', text}] — 설정 변경·오류의 일시 알림(자동 소멸)
@@ -84,7 +84,9 @@ function handleServerMessage(state, msg) {
         createSessionState({
           key: msg.key,
           cwd: opts.cwd ?? null,
-          model: opts.model ?? null,
+          // preloadModel: 재개 트랜스크립트가 복원한 표시 전용 모델(스폰 인자 아님)
+          // — 피커 라벨·CTX 분모([1m]→1M)가 재개 직후부터 맞고, init이 실제값으로 덮어쓴다.
+          model: opts.model ?? opts.preloadModel ?? null,
           permissionMode: opts.permissionMode ?? 'default',
           effort: opts.effort ?? null,
           // 재개로 시작한 세션은 원본 트랜스크립트가 디스크에 있음 — resume 게이트 통과

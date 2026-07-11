@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
 import { openSubagentCount } from '../lib/clawd.js';
-import { fmtTok, shortPath } from '../lib/format.js';
+import { fmtTok, shortPath, contextWindowFor } from '../lib/format.js';
 import { MODES, MODE_LABEL, MODE_CLASS } from '../lib/permission-modes.js';
 import Clawd from './Clawd.jsx';
 import './interact.css';
@@ -16,7 +16,6 @@ const MAX_HEIGHT_PX = 200;
 
 const CONN_LABEL = { connecting: '연결 중', open: '연결됨', closed: '연결 끊김' };
 
-const CONTEXT_WINDOW = 200_000; // Claude 표준 컨텍스트 창(200k tok) 기준 사용률
 function usageWindowTitle(label, b) {
   return (
     `${label} — 입력 ${b.inputTokens.toLocaleString()}` +
@@ -294,7 +293,9 @@ export default function Composer({ theme, onToggleTheme }) {
   const gu = state.globalUsage;
   const quota = gu?.quota;
   const ctxTokens = session?.usage?.contextTokens || 0;
-  const ctxPct = (ctxTokens / CONTEXT_WINDOW) * 100;
+  // [1m] 모델은 1M, 그 외 200k — 별칭('default' 등)은 카탈로그로 해석해 판별
+  const ctxWindow = contextWindowFor(session?.model, models);
+  const ctxPct = (ctxTokens / ctxWindow) * 100;
   // 실행 중인 서브에이전트(Task/Agent 도구) 수 — 마스코트 juggle 무드 판정
   const subagents = useMemo(() => openSubagentCount(session?.messages), [session?.messages]);
 
@@ -402,7 +403,12 @@ export default function Composer({ theme, onToggleTheme }) {
     stopSession(session.key);
     startSession({
       cwd: session.cwd,
-      model: session.model,
+      // 스폰 --model은 카탈로그 value로 확인된 값만 — session.model엔 init/assistant가
+      // 보고한 해석 id(구식·[1m] 접미사 탈락 가능)도 들어오는데, 그걸 스폰 인자로
+      // 넘기면 1M 세션의 무언 다운그레이드나 스폰 실패가 된다(Sidebar 재개와 동일
+      // 불변식). 미확인 값은 --model 생략(CLI가 결정)하고 표시만 preloadModel로 잇는다.
+      model: models.some((m) => m?.value === session.model) ? session.model : null,
+      preloadModel: session.model,
       permissionMode: session.permissionMode,
       effort,
       resumeSessionId: canResume ? resumeId : null,
@@ -599,7 +605,7 @@ export default function Composer({ theme, onToggleTheme }) {
           <RingStat
             label="CTX"
             pct={ctxPct}
-            title={`현재 세션 컨텍스트(마지막 API 호출 기준, 턴 중 실시간 갱신): ${ctxTokens.toLocaleString()} / ${CONTEXT_WINDOW.toLocaleString()} tok (${Math.round(ctxPct)}%)`}
+            title={`현재 세션 컨텍스트(마지막 API 호출 기준, 턴 중 실시간 갱신): ${ctxTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} tok (${Math.round(ctxPct)}%)`}
           />
         )}
         {quota?.fiveHour ? (
