@@ -27,10 +27,18 @@ export function contextWindowFor(model, models = []) {
   const s = String(model ?? '') || 'default';
   const list = Array.isArray(models) ? models : [];
   const has1m = (v) => String(v ?? '').includes('[1m]');
-  const entry =
-    list.find((m) => m?.value === s) ?? list.find((m) => m?.resolvedModel === s) ?? null;
-  if (entry) {
-    return [s, entry.value, entry.resolvedModel].some(has1m)
+  // 별칭(value)은 카탈로그의 고유 키 — 단일 일치로 충분
+  const valueHit = list.find((m) => m?.value === s);
+  if (valueHit) {
+    return [s, valueHit.value, valueHit.resolvedModel].some(has1m)
+      ? CONTEXT_WINDOW_1M
+      : CONTEXT_WINDOW;
+  }
+  // 해석 id는 [1m]·비[1m] 변형이 공유할 수 있다 — 전 일치 항목을 모아
+  // base 분기와 같은 규칙(전부 [1m]일 때만 1M, 혼재 시 보수적 200k)을 적용
+  const resolvedHits = list.filter((m) => m?.resolvedModel === s);
+  if (resolvedHits.length > 0) {
+    return has1m(s) || resolvedHits.every((m) => has1m(m?.value) || has1m(m?.resolvedModel))
       ? CONTEXT_WINDOW_1M
       : CONTEXT_WINDOW;
   }

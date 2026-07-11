@@ -12,6 +12,9 @@ export function createSessionState(partial = {}) {
     // 카탈로그 value만 담는다. model 필드(init/assistant가 보고한 해석 id —
     // 구식·[1m] 접미사 탈락 가능)와 달리 재시작 스폰 인자로 재사용해도 안전.
     spawnModel: null,
+    // CLI가 직접 보고한 컨텍스트 창 크기 — result.modelUsage[<id>].contextWindow
+    // (실측 2026-07-11: 1M 모델에서 1000000). null이면 카탈로그 휴리스틱으로 폴백.
+    contextWindow: null,
     permissionMode: 'default',
     maxThinkingTokens: null, // 사고 예산 — 서버 setThinking 채널용으로 유지(현재 UI 미노출)
     effort: null, // 노력 수준(low|medium|high|xhigh|max) — null=CLI 기본(high), spawn 전용

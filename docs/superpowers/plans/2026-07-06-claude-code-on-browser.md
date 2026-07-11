@@ -67,8 +67,11 @@ spawn: `claude.exe -p --input-format stream-json --output-format stream-json --v
 - `system/init.model` = **별칭을 해석한 id, 접미사 유지** — `opus[1m]` 스폰 → `"claude-opus-4-8[1m]"`.
 - `assistant message.model` = **접미사 탈락 bare id** — `"claude-opus-4-8"`. ⇒ 클라이언트는 init 값을
   assistant 값으로 덮지 않는다(base 동일 시 유지, 다르면 모델 전환으로 채택 — reduce-cli-event.js).
-- `result.modelUsage` 키는 접미사 유지(`["claude-opus-4-8[1m]"]`).
-- CTX 분모 판별은 문자열+카탈로그 양방향·base 매칭(client/src/lib/format.js `contextWindowFor`).
+- `result.modelUsage`는 접미사 유지 해석 id를 키로, 값에 **`contextWindow`(1M 모델에서 1000000)를
+  직접 싣는다** — `{inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens,
+  webSearchRequests, costUSD, contextWindow, maxOutputTokens}`. ⇒ CTX 분모의 1차 출처는 이 값이고,
+  문자열+카탈로그 양방향·base 매칭(client/src/lib/format.js `contextWindowFor`)은 첫 result 전·재개
+  직후의 폴백이다.
 
 ## WS 프로토콜 (서버 ↔ 브라우저, 이 스키마가 계약)
 

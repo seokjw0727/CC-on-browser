@@ -293,8 +293,9 @@ export default function Composer({ theme, onToggleTheme }) {
   const gu = state.globalUsage;
   const quota = gu?.quota;
   const ctxTokens = session?.usage?.contextTokens || 0;
-  // [1m] 모델은 1M, 그 외 200k — 별칭('default' 등)은 카탈로그로 해석해 판별
-  const ctxWindow = contextWindowFor(session?.model, models);
+  // CLI가 result.modelUsage로 직접 보고한 창 크기가 1차 출처 — 없으면(첫 결과 전·
+  // 재개 직후) 카탈로그 휴리스틱으로 판별([1m]→1M, 별칭은 카탈로그 해석)
+  const ctxWindow = session?.contextWindow ?? contextWindowFor(session?.model, models);
   const ctxPct = (ctxTokens / ctxWindow) * 100;
   // 실행 중인 서브에이전트(Task/Agent 도구) 수 — 마스코트 juggle 무드 판정
   const subagents = useMemo(() => openSubagentCount(session?.messages), [session?.messages]);
@@ -372,7 +373,9 @@ export default function Composer({ theme, onToggleTheme }) {
   const changeModel = (model) => {
     if (!session || !model) return;
     if (!send({ type: 'setModel', key: session.key, model })) return;
-    dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, model, spawnModel: model }) });
+    // contextWindow도 리셋 — 이전 모델의 result가 보고한 창은 새 모델에 무효,
+    // 다음 result까지 카탈로그 휴리스틱으로 폴백한다.
+    dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, model, spawnModel: model, contextWindow: null }) });
     const opt = modelOptions.find((o) => o.value === model);
     notify(`모델 변경: ${opt ? `Claude ${opt.name} ${opt.version}` : model}`);
   };

@@ -29,7 +29,9 @@ const resolveModel = (v) => MODELS.find((m) => m.value === v)?.resolvedModel ?? 
 const modelIdx = process.argv.indexOf('--model');
 const SPAWNED_MODEL = (modelIdx >= 0 ? process.argv[modelIdx + 1] : null) ?? 'default';
 const INIT_MODEL = resolveModel(SPAWNED_MODEL);
-// set_model이 갱신하므로 let — 이후 assistant는 새 모델의 bare id를 보고(실 CLI 미러)
+// set_model이 갱신하므로 let — 이후 assistant는 새 모델의 bare id를,
+// result.modelUsage는 접미사 유지 해석 id 키를 보고(실 CLI 미러).
+let currentModel = INIT_MODEL;
 let assistantModel = INIT_MODEL.replace(/\[1m\]$/, '');
 
 // start-fail: 실 CLI가 잘못된 --resume 대상 등으로 initialize 응답 전에 죽는 상황
@@ -72,6 +74,20 @@ function emitResult(text, extra = {}, turn = userCount) {
       output_tokens: 5,
       cache_read_input_tokens: 1200,
       cache_creation_input_tokens: 300,
+    },
+    // 실 CLI 미러(2026-07-11 캡처): 키 = 접미사 유지 해석 id, 값에 contextWindow가
+    // 직접 실린다 — 클라이언트 CTX 분모의 1차 출처.
+    modelUsage: {
+      [currentModel]: {
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadInputTokens: 1200,
+        cacheCreationInputTokens: 300,
+        webSearchRequests: 0,
+        costUSD: 0.001,
+        contextWindow: currentModel.includes('[1m]') ? 1_000_000 : 200_000,
+        maxOutputTokens: 64000,
+      },
     },
     num_turns: turn,
     duration_ms: 42,
@@ -129,9 +145,10 @@ function handle(msg) {
       // 실 CLI v2.1.206 실측 미러: set_model은 로컬 커맨드 에코(user 이벤트, isReplay),
       // set_permission_mode는 system/status 이벤트를 성공 응답과 함께 방출한다.
       if (request?.subtype === 'set_model') {
-        // 이후 턴의 assistant가 새 모델의 bare id를 보고하도록 갱신 —
+        // 이후 턴의 assistant·result가 새 모델을 보고하도록 갱신 —
         // 스테일 모델 경로를 픽스처로 재현 가능하게(DA #22 codex 교차검증).
-        assistantModel = resolveModel(request.model).replace(/\[1m\]$/, '');
+        currentModel = resolveModel(request.model);
+        assistantModel = currentModel.replace(/\[1m\]$/, '');
         out({
           type: 'user',
           message: {

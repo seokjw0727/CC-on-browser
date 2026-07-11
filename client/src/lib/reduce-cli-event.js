@@ -505,6 +505,24 @@ function reduceResult(session, payload) {
       next.hasCompletedTurn || !payload.is_error || (payload.num_turns ?? 0) > 0,
   };
 
+  // 컨텍스트 창 크기 — result.modelUsage[<id>].contextWindow가 1차 출처(실측
+  // 2026-07-11: 'claude-opus-4-8[1m]' 키에 contextWindow: 1000000). 세션 모델과
+  // base가 일치하는 항목을 채택하고, 없으면 단일 항목일 때만 신뢰(서브에이전트
+  // 모델이 키로 혼입될 가능성 대비). 문자열/카탈로그 휴리스틱(format.js)은 이
+  // 값이 없을 때의 폴백이 된다.
+  const mu = payload.modelUsage;
+  if (mu && typeof mu === 'object') {
+    const entries = Object.entries(mu).filter(([, v]) => Number.isFinite(v?.contextWindow));
+    const strip = (v) => String(v ?? '').replace(/\[1m\]$/, '');
+    const match = entries.find(
+      ([k]) => k === next.model || strip(k) === strip(next.model),
+    );
+    const chosen = match ?? (entries.length === 1 ? entries[0] : null);
+    if (chosen && chosen[1].contextWindow > 0) {
+      next = { ...next, contextWindow: chosen[1].contextWindow };
+    }
+  }
+
   // is_error 결과는 채팅에 남기지 않는다 — store('event' 처리)가 토스트로 알린다.
 
   // 턴별 토큰 사용량을 CLI풍으로 채팅에 남긴다(상태줄 대신). 토큰이 0인 결과

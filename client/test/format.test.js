@@ -64,6 +64,13 @@ test('contextWindowFor: [1m]·비[1m] 변형 혼재 시 bare id는 보수적으�
   // 'claude-opus-4-8'은 두 변형 어느 쪽 세션인지 문자열만으론 알 수 없다 —
   // 분모 과대(1M 오판)보다 과소(200k)가 안전하다.
   assert.equal(contextWindowFor('claude-opus-4-8', mixed), CONTEXT_WINDOW);
+  // 같은 해석 id를 공유하는 혼재도 순서 무관 보수 판정 — 카탈로그 순서 의존 금지
+  const mixedShared = [
+    { value: 'fable', resolvedModel: 'claude-fable-5' },
+    { value: 'claude-fable-5[1m]', resolvedModel: 'claude-fable-5' },
+  ];
+  assert.equal(contextWindowFor('claude-fable-5', mixedShared), CONTEXT_WINDOW);
+  assert.equal(contextWindowFor('claude-fable-5', [...mixedShared].reverse()), CONTEXT_WINDOW);
 });
 
 test('통합: system/init이 보고한 [1m] 모델이 컨텍스트 창 선택으로 이어진다', () => {
@@ -116,6 +123,36 @@ test('통합: 라이브 무강등 — 같은 base의 assistant bare id는 init�
   });
   assert.equal(s.model, 'claude-opus-4-8[1m]');
   assert.equal(contextWindowFor(s.model, CATALOG), CONTEXT_WINDOW_1M);
+});
+
+test('통합: result.modelUsage의 contextWindow가 1차 출처로 수확된다', () => {
+  // 실측(2026-07-11): result.modelUsage['claude-opus-4-8[1m]'].contextWindow = 1000000
+  let s = reduceCliEvent(createSessionState(), {
+    type: 'system',
+    subtype: 'init',
+    session_id: 's1',
+    model: 'claude-opus-4-8[1m]',
+  });
+  s = reduceCliEvent(s, {
+    type: 'result',
+    subtype: 'success',
+    usage: { input_tokens: 2, output_tokens: 226 },
+    modelUsage: {
+      'claude-opus-4-8[1m]': { inputTokens: 2, outputTokens: 226, contextWindow: 1_000_000 },
+    },
+  });
+  assert.equal(s.contextWindow, 1_000_000);
+  // 세션 모델과 무관한 다중 키(서브에이전트 혼입)는 신뢰하지 않는다
+  let t = reduceCliEvent(createSessionState({ model: 'claude-sonnet-5' }), {
+    type: 'result',
+    subtype: 'success',
+    usage: { input_tokens: 1, output_tokens: 1 },
+    modelUsage: {
+      'claude-opus-4-8[1m]': { contextWindow: 1_000_000 },
+      'claude-haiku-4-5-20251001': { contextWindow: 200_000 },
+    },
+  });
+  assert.equal(t.contextWindow, null);
 });
 
 test('통합: 다른 base의 assistant 모델은 덮어쓴다 — 대역외 모델 전환 추적', () => {
