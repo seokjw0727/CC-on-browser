@@ -51,7 +51,7 @@ endpoint 하나만 조회해 얻습니다 — 모델 호출이 아니므로 과�
 [GitHub Releases](https://github.com/seokjw0727/CC-on-browser/releases)에서 `cc-on-browser-<버전>.tgz`를 받아 전역 설치합니다:
 
 ```sh
-npm install -g ./cc-on-browser-1.0.0.tgz
+npm install -g ./cc-on-browser-1.1.0.tgz
 cc-on-browser                # 기본 포트 8787 (PORT 환경변수로도 변경 가능)
 cc-on-browser --port 9000    # 포트 지정 (-p), --help 로 전체 옵션 확인
 ```
@@ -69,7 +69,7 @@ npm start             # = node bin/cc-on-browser.mjs
 기동하면 콘솔에 접속 URL이 출력됩니다:
 
 ```
-Claude Code on Browser v1.0.0 — http://127.0.0.1:8787/#token=<랜덤토큰>
+Claude Code on Browser v1.1.0 — http://127.0.0.1:8787/#token=<랜덤토큰>
 ```
 
 이 URL(토큰 포함)로 브라우저에서 접속하세요. `claude` CLI를 찾지 못하면 설치·PATH 안내 경고가
