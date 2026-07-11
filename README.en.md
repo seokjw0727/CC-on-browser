@@ -104,8 +104,8 @@ Tests also run exclusively against the fake CLI, so they never consume your subs
    A token-less address fails authentication.
 2. **Start a new session** — click **새 세션** (new session) in the sidebar. In the modal, type/paste
    a working directory or click one from the folder tree / recent projects, optionally change the
-   model, permission mode, and effort level, then start. Defaults: your account's default model +
-   bypassPermissions.
+   model and permission mode, then start (the effort level is adjusted from the composer after the
+   session starts — see step 6). Defaults: your account's default model + bypassPermissions.
 3. **Chat** — **Enter** sends, **Shift+Enter** inserts a newline. Responses stream as markdown, tool
    calls render as input/result cards, extended thinking as collapsible blocks. Interrupt a running
    turn with **Esc** or the stop button.
