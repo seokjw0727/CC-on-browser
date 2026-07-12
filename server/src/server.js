@@ -43,6 +43,7 @@ export async function startServer({
   staticDir,
   exitedRetentionMs,
   quotaFetcher, // 테스트 주입용 — 기본은 quota.js의 공식 사용률 조회
+  onClientCountChange, // WS 클라이언트 수 변화 알림 — bin이 브라우저 생존 신호로 쓴다
 } = {}) {
   if (!token) throw new TypeError('token is required');
   if (!cliPath) throw new TypeError('cliPath is required');
@@ -380,7 +381,11 @@ export async function startServer({
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
       sockets.add(ws);
-      ws.on('close', () => sockets.delete(ws));
+      onClientCountChange?.(sockets.size);
+      ws.on('close', () => {
+        sockets.delete(ws);
+        onClientCountChange?.(sockets.size);
+      });
       ws.on('error', () => { /* 소켓 오류는 close로 정리 */ });
       ws.on('message', (data) => handleWsMessage(ws, data));
     });

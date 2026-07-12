@@ -488,6 +488,34 @@ test('/api/usage quota 실패 → quota:null + 로컬 집계 보존 + 요청마�
   }
 });
 
+test('onClientCountChange fires on WS connect/disconnect (browser-presence signal)', async () => {
+  const counts = [];
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    onClientCountChange: (n) => counts.push(n),
+  });
+  try {
+    const client = await TestClient.connect(`ws://127.0.0.1:${h.port}/ws?token=${TOKEN}`);
+    assert.deepEqual(counts, [1]);
+    const client2 = await TestClient.connect(`ws://127.0.0.1:${h.port}/ws?token=${TOKEN}`);
+    assert.deepEqual(counts, [1, 2]);
+    client.close();
+    client2.close();
+    const deadline = Date.now() + 5000;
+    while (counts[counts.length - 1] !== 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.deepEqual(counts, [1, 2, 1, 0]);
+  } finally {
+    await h.close();
+  }
+});
+
 test('static serving + SPA fallback (no auth required)', async () => {
   const index = await fetch(`${base}/`);
   assert.equal(index.status, 200);

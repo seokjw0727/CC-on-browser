@@ -32,6 +32,7 @@ test('--help prints usage and exits 0', async () => {
   assert.equal(r.code, 0);
   assert.match(r.stdout, /Usage: cc-on-browser/);
   assert.match(r.stdout, /--port/);
+  assert.match(r.stdout, /--no-open/);
   assert.match(r.stdout, /CLAUDE_WEB_CLI_PATH/);
 });
 

@@ -52,8 +52,9 @@ endpoint 하나만 조회해 얻습니다 — 모델 호출이 아니므로 과�
 
 ```sh
 npm install -g ./cc-on-browser-1.1.1.tgz
-cc-on-browser                # 기본 포트 8787 (PORT 환경변수로도 변경 가능)
+cc-on-browser                # 브라우저 자동 실행, 서버는 백그라운드 (기본 포트 8787)
 cc-on-browser --port 9000    # 포트 지정 (-p), --help 로 전체 옵션 확인
+cc-on-browser --no-open      # 브라우저 없이 포그라운드 콘솔 서버 (Ctrl+C로 종료)
 ```
 
 ### B. 소스에서 실행
@@ -66,14 +67,19 @@ npm run build         # client → client/dist
 npm start             # = node bin/cc-on-browser.mjs
 ```
 
-기동하면 콘솔에 접속 URL이 출력됩니다:
+기본 실행은 접속 URL을 출력한 뒤 **기본 브라우저를 자동으로 열고, 서버는 콘솔 창 없이
+백그라운드로 돌아갑니다**. 브라우저 탭을 모두 닫으면 약 10초 뒤 서버가 스스로 종료되므로
+따로 끌 필요가 없습니다(새로고침은 유예 안에 재접속되므로 안전).
 
 ```
 Claude Code on Browser v1.1.1 — http://127.0.0.1:8787/#token=<랜덤토큰>
+Opening your browser... The server runs in the background (127.0.0.1 only)
+and stops automatically once every tab is closed. (--no-open for a foreground server)
 ```
 
-이 URL(토큰 포함)로 브라우저에서 접속하세요. `claude` CLI를 찾지 못하면 설치·PATH 안내 경고가
-출력됩니다(서버는 뜨지만 세션 시작은 실패).
+콘솔 로그를 보며 띄우고 싶으면 `--no-open`을 쓰세요 — 브라우저를 열지 않고 예전처럼
+포그라운드 서버로 남으며, 출력된 URL(토큰 포함)로 직접 접속하고 `Ctrl+C`로 종료합니다.
+`claude` CLI를 찾지 못하면 설치·PATH 안내 경고가 출력됩니다(서버는 뜨지만 세션 시작은 실패).
 
 **CLI 경로 해석 순서**: `CLAUDE_WEB_CLI_PATH` 환경변수(설정 시) → OS `PATH`의 `claude`(Windows는
 `claude.exe`). `claude`가 PATH에 있으면 추가 설정이 필요 없고, 특이한 위치에 설치했다면
@@ -96,7 +102,8 @@ PowerShell은 `$env:FAKE_SCENARIO='permission'; node scripts/dev-fake.mjs` 로�
 
 ## 사용 방법
 
-1. **접속** — 기동 시 콘솔에 출력된 `http://127.0.0.1:8787/#token=…` URL을 그대로 브라우저에 엽니다.
+1. **접속** — 기본 실행은 브라우저가 자동으로 열립니다. 수동 접속(`--no-open` 또는 다른
+   브라우저)은 기동 시 출력된 `http://127.0.0.1:8787/#token=…` URL을 그대로 엽니다.
    토큰이 빠진 주소로는 인증에 실패합니다.
 2. **새 세션 시작** — 사이드바의 **새 세션** 버튼 → 모달에서 작업 디렉터리를 직접 입력·붙여넣거나
    하위 폴더 트리·최근 프로젝트에서 클릭으로 선택합니다. 필요하면 모델·권한 모드를 바꾼 뒤
@@ -118,7 +125,8 @@ PowerShell은 `$env:FAKE_SCENARIO='permission'; node scripts/dev-fake.mjs` 로�
 8. **상태줄 읽기** — CTX 게이지는 현재 세션의 컨텍스트 사용률(모델 창 대비 — 200k, `[1m]` 모델은 1M),
    나머지 게이지는 계정 공식 5시간·7일 사용률(%)입니다. 턴별 토큰은 채팅의 작은 꼬리표
    (`↑ 12 ↓ 345 tok · 5.3s`)로 확인합니다.
-9. **종료** — 서버를 띄운 터미널에서 `Ctrl+C`. 대화 기록은 CLI 트랜스크립트로 남아 있어
+9. **종료** — 브라우저 탭을 모두 닫으면 약 10초 뒤 서버가 자동 종료됩니다(`--no-open`
+   포그라운드 모드는 터미널에서 `Ctrl+C`). 대화 기록은 CLI 트랜스크립트로 남아 있어
    다음 기동 후 재개할 수 있습니다.
 
 ## 아키텍처
@@ -147,7 +155,8 @@ Node 서버 (server/src/server.js — http + ws)
 ## 프로젝트 구조
 
 ```
-bin/cc-on-browser.mjs  CLI 진입점 — 인자 파싱·사전 점검 후 서버 기동 (npm start·전역 설치 공용)
+bin/cc-on-browser.mjs  CLI 진입점 — 인자 파싱·사전 점검 후 백그라운드 서버 기동 + 브라우저 실행,
+                       브라우저(WS 클라이언트) 전부 종료 시 자동 셧다운 (npm start·전역 설치 공용)
 server/src/
   server.js          HTTP(REST + 정적 서빙) + WebSocket 허브. 127.0.0.1 전용, 토큰·Origin 인증
   session-hub.js     세션 레지스트리 — 키↔ClaudeSession, 이벤트 브로드캐스트/리플레이 중계

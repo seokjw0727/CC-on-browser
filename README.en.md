@@ -57,8 +57,9 @@ Grab `cc-on-browser-<version>.tgz` from [GitHub Releases](https://github.com/seo
 
 ```sh
 npm install -g ./cc-on-browser-1.1.1.tgz
-cc-on-browser                # default port 8787 (the PORT env var works too)
+cc-on-browser                # opens your browser; server runs in the background (default port 8787)
 cc-on-browser --port 9000    # pick a port (-p); see --help for all options
+cc-on-browser --no-open      # plain foreground console server, no browser (Ctrl+C to stop)
 ```
 
 ### Option B — run from source
@@ -71,14 +72,21 @@ npm run build         # client → client/dist
 npm start             # = node bin/cc-on-browser.mjs
 ```
 
-On startup the console prints the access URL:
+By default the command prints the access URL, **opens your default browser, and keeps the server
+running in the background with no console window**. Once every browser tab is closed, the server
+shuts itself down after a ~10-second grace period (page reloads reconnect well within it), so there
+is nothing to stop manually.
 
 ```
 Claude Code on Browser v1.1.1 — http://127.0.0.1:8787/#token=<random-token>
+Opening your browser... The server runs in the background (127.0.0.1 only)
+and stops automatically once every tab is closed. (--no-open for a foreground server)
 ```
 
-Open that URL (token included) in your browser. If the `claude` CLI cannot be found, a warning with
-install/PATH guidance is printed (the server still starts, but sessions will fail).
+Prefer watching the logs? Use `--no-open` — no browser is launched and the process stays in the
+foreground like a regular server: open the printed URL (token included) yourself and stop it with
+`Ctrl+C`. If the `claude` CLI cannot be found, a warning with install/PATH guidance is printed
+(the server still starts, but sessions will fail).
 
 **CLI path resolution order**: the `CLAUDE_WEB_CLI_PATH` environment variable (if set) → `claude` on the
 OS `PATH` (`claude.exe` on Windows). If `claude` is on your PATH no extra setup is needed; if it lives
@@ -101,8 +109,9 @@ Tests also run exclusively against the fake CLI, so they never consume your subs
 
 ## How to use
 
-1. **Open the app** — open the URL printed at startup (`http://127.0.0.1:8787/#token=…`) as-is.
-   A token-less address fails authentication.
+1. **Open the app** — by default the browser opens automatically. To connect manually (`--no-open`,
+   or from another browser), open the URL printed at startup (`http://127.0.0.1:8787/#token=…`)
+   as-is. A token-less address fails authentication.
 2. **Start a new session** — click **새 세션** (new session) in the sidebar. In the modal, type/paste
    a working directory or click one from the folder tree / recent projects, optionally change the
    model and permission mode, then start (the effort level is adjusted from the composer after the
@@ -127,7 +136,8 @@ Tests also run exclusively against the fake CLI, so they never consume your subs
    model's window (200k, or 1M for `[1m]` models); the other gauges show your account's official
    5-hour / 7-day usage (%). Per-turn tokens appear as a small CLI-style tail in the chat
    (`↑ 12 ↓ 345 tok · 5.3s`).
-9. **Shut down** — `Ctrl+C` in the terminal running the server. Conversations remain in the CLI
+9. **Shut down** — close every browser tab and the server exits on its own about 10 seconds later
+   (in `--no-open` foreground mode, `Ctrl+C` in the terminal). Conversations remain in the CLI
    transcripts and can be resumed after the next start.
 
 ## Architecture
@@ -157,7 +167,8 @@ Node server (server/src/server.js — http + ws)
 ## Project layout
 
 ```
-bin/cc-on-browser.mjs  CLI entry point — arg parsing & preflight checks, then starts the server (npm start / global install)
+bin/cc-on-browser.mjs  CLI entry point — arg parsing & preflight checks, then a background server + browser launch;
+                       auto-shutdown once every browser (WS client) is gone (npm start / global install)
 server/src/
   server.js          HTTP (REST + static) + WebSocket hub. 127.0.0.1-only, token/Origin auth
   session-hub.js     Session registry — key↔ClaudeSession, event broadcast/replay relay
