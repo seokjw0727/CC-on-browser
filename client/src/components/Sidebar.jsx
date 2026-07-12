@@ -11,6 +11,7 @@ import {
 } from '../lib/api.js';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
 import { createSessionState } from '../lib/store-reducer.js';
+import { isQuestionRequest } from '../lib/ask-user-question.js';
 import { buildSessionTree } from '../lib/sessionTree.js';
 import { shortPath } from '../lib/format.js';
 import { MODE_LABEL, MODE_CLASS, MODES } from '../lib/permission-modes.js';
@@ -410,7 +411,13 @@ export default function Sidebar({ onCollapse }) {
   // 라이브 세션 행 — 렌더 헬퍼(요소 인스턴스화가 아니라 호출)로 두어 DOM을 안정화.
   // 매 렌더마다 새 컴포넌트 타입이 생기지 않으므로 React가 remount 없이 patch한다.
   const liveRow = (row, node) => {
-    const badge = STATUS_BADGE[row.status] ?? { label: row.status, cls: '' };
+    // 대기 중인 요청의 앞머리가 AskUserQuestion이면 '권한 대기' 대신 '질문 대기' —
+    // 다이얼로그(QuestionDialog/PermissionPrompt) 분기와 같은 판별을 쓴다.
+    const badge =
+      row.status === 'awaiting-permission' &&
+      isQuestionRequest(state.sessions.get(row.key)?.pendingPermissions?.[0])
+        ? { label: '질문 대기', cls: 'warn' }
+        : STATUS_BADGE[row.status] ?? { label: row.status, cls: '' };
     const label = row.sessionId ? row.sessionId.slice(0, 8) : '새 세션';
     return (
       <div key={row.key} className={`sess-row live${row.active ? ' active' : ''}`}>

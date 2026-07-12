@@ -4,6 +4,7 @@
 //   echo(기본) | permission | crash | permission-crash(권한 요청 후 응답 전에 프로세스 사망)
 //   | start-fail(스폰 직후 stderr 출력 후 즉시 종료 — --resume 실패류 재현)
 //   | subagent(Task tool_use → 지연 → tool_result → result — 마스코트 juggle 관찰용)
+//   | question(AskUserQuestion — can_use_tool에 requires_user_interaction:true, 실 CLI 2026-07-12 실측 미러)
 // 관찰용 env:
 //   FAKE_ECHO_DELAY_MS     echo 응답 전 지연(기본 0 — 즉답, 테스트 계약 유지)
 //   FAKE_SUBAGENT_MS       subagent 도구 실행 시간(기본 1500ms, 0 허용)
@@ -203,6 +204,33 @@ function handle(msg) {
     if (!pending) return;
     pendingPermissions.delete(requestId);
     const permissionResponse = msg.response?.response;
+    if (pending.question) {
+      // AskUserQuestion 응답 — 실 CLI 미러(2026-07-12 실측): allow의 updatedInput.answers
+      // (질문 텍스트 → 답변 문자열)로 CLI가 tool_result 텍스트를 합성한다.
+      // answers가 비면 비-오류 "did not answer" 결과(건너뛰기 경로).
+      if (permissionResponse?.behavior === 'allow') {
+        const answers = permissionResponse.updatedInput?.answers ?? {};
+        const pairs = Object.entries(answers)
+          .map(([q, a]) => `"${q}"="${a}"`)
+          .join(', ');
+        const content = pairs
+          ? `Your questions have been answered: ${pairs}. You can now continue with these answers in mind.`
+          : 'The user did not answer the questions.';
+        out({
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: pending.toolUseId, content, is_error: false }],
+          },
+          tool_use_result: { questions: permissionResponse.updatedInput?.questions ?? [], answers },
+          session_id: SESSION_ID,
+        });
+        emitResult('question answered', { echo_response: permissionResponse });
+      } else {
+        emitResult('question denied', { echo_response: permissionResponse });
+      }
+      return;
+    }
     if (permissionResponse?.behavior === 'allow') {
       out({
         type: 'user',
@@ -259,6 +287,40 @@ function handle(msg) {
       if (scenario === 'permission-crash') {
         setTimeout(() => process.exit(3), Number(process.env.FAKE_CRASH_DELAY_MS) || 250);
       }
+      return;
+    }
+    if (scenario === 'question') {
+      // AskUserQuestion — 실 CLI v2.1.207 실측(2026-07-12) 미러: 권한 요청과 같은
+      // can_use_tool 채널로 오되 requires_user_interaction:true가 실리고,
+      // input.questions[]에 질문/선택지가 담긴다. permission_suggestions는 없다.
+      permCounter += 1;
+      const requestId = `q_${permCounter}`;
+      const toolUseId = `toolu_q_${permCounter}`;
+      pendingPermissions.set(requestId, { toolUseId, question: true });
+      out({
+        type: 'control_request',
+        request_id: requestId,
+        request: {
+          subtype: 'can_use_tool',
+          tool_name: 'AskUserQuestion',
+          display_name: 'AskUserQuestion',
+          input: {
+            questions: [
+              {
+                question: '좋아하는 색은?',
+                header: '색상',
+                options: [
+                  { label: '빨강', description: '따뜻한 색상' },
+                  { label: '파랑', description: '시원한 색상' },
+                ],
+                multiSelect: false,
+              },
+            ],
+          },
+          tool_use_id: toolUseId,
+          requires_user_interaction: true,
+        },
+      });
       return;
     }
     if (scenario === 'subagent') {

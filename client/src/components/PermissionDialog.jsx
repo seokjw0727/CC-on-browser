@@ -1,8 +1,12 @@
 // 권한 다이얼로그 — permission_request 큐를 순차 표시하는 모달.
 // Esc로 닫히지 않음(명시적 허용/거부 강제). 입력 렌더는 ToolCard 재사용.
+// 큐 앞머리가 AskUserQuestion이면 권한 프롬프트 대신 QuestionDialog로 위임한다 —
+// 같은 can_use_tool 채널이지만 권한 상승이 아니라 질문이다(ask-user-question.js).
 import { useEffect, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
 import ToolCard from './ToolCard.jsx';
+import QuestionDialog from './QuestionDialog.jsx';
+import { isQuestionRequest } from '../lib/ask-user-question.js';
 import { useFocusTrap } from '../lib/useFocusTrap.js';
 import './interact.css';
 
@@ -58,8 +62,9 @@ function suggestionLabel(s) {
   return `제안 적용: ${JSON.stringify(s)}`;
 }
 
+// 디스패처 — 큐 앞머리 요청의 종류에 따라 질문/권한 프롬프트를 고른다.
+// (자식이 각자 훅을 소유하므로 여기서 분기해도 훅 순서가 안 깨진다.)
 export default function PermissionDialog() {
-  const { send } = useStore();
   const session = useActiveSession();
   // attach 리플레이가 pending 요청을 재전송할 수 있어 requestId로 dedupe
   // (해결 시 store가 같은 requestId 전부 제거하므로 표시만 정리하면 됨)
@@ -74,33 +79,42 @@ export default function PermissionDialog() {
     }
   }
   const req = queue[0] ?? null;
-  const requestId = req?.requestId ?? null;
+  if (!session || !req) return null;
+  const Dialog = isQuestionRequest(req) ? QuestionDialog : PermissionPrompt;
+  return (
+    <Dialog
+      key={req.requestId}
+      req={req}
+      sessionKey={session.key}
+      queueCount={queue.length}
+    />
+  );
+}
 
+function PermissionPrompt({ req, sessionKey, queueCount }) {
+  const { send } = useStore();
   const [reason, setReason] = useState('');
   const [checked, setChecked] = useState(() => new Set());
   const [submitted, setSubmitted] = useState(false);
   // 포커스 트랩 — 열려 있는 동안 Tab이 배경(컴포저/사이드바)으로 새지 않게 가둔다.
   const allowRef = useRef(null);
-  const dialogRef = useFocusTrap(!!req, allowRef);
+  const dialogRef = useFocusTrap(true, allowRef);
 
   // 다음 요청으로 넘어가면 입력 초기화
   useEffect(() => {
     setReason('');
     setChecked(new Set());
     setSubmitted(false);
-  }, [requestId]);
-
-  if (!session || !req) return null;
+  }, [req.requestId]);
 
   const suggestions = Array.isArray(req.suggestions) ? req.suggestions : [];
-  const queueCount = queue.length;
 
   const respond = (payload) => {
     if (submitted) return;
     setSubmitted(true);
     const ok = send({
       type: 'permission',
-      key: session.key,
+      key: sessionKey,
       requestId: req.requestId,
       ...payload,
     });

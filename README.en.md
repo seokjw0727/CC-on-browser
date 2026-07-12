@@ -91,6 +91,7 @@ You can bring up the whole stack with a fake CLI that mimics the protocol instea
 ```sh
 node scripts/dev-fake.mjs                       # echo scenario (default port 8788)
 node scripts/dev-fake.mjs --scenario permission # permission-dialog scenario (works in any shell)
+node scripts/dev-fake.mjs --scenario question   # AskUserQuestion (question-dialog) scenario
 ```
 
 If you prefer environment variables: POSIX shells use `FAKE_SCENARIO=permission node scripts/dev-fake.mjs`,
@@ -112,7 +113,9 @@ Tests also run exclusively against the fake CLI, so they never consume your subs
 4. **Slash commands** — type `/` in the composer for an autocomplete dropdown (pick with Tab/Enter).
    Commands like `/compact` are passed through to the CLI.
 5. **Permission prompts** — under confirmation-based permission modes, a dialog pops up before a tool
-   runs; choose allow/deny. Switch the permission mode anytime from the composer.
+   runs; choose allow/deny. Switch the permission mode anytime from the composer. When Claude asks
+   you something via **AskUserQuestion**, a question dialog (options, free-text input, skip) appears
+   instead of the permission dialog.
 6. **Model & effort changes** — switch models mid-conversation from the composer's model picker.
    Changing the effort level restarts the session into the same conversation (`--effort` is
    spawn-only — via `--resume` when the conversation exists on disk, or as a fresh start before the
@@ -167,7 +170,7 @@ server/src/
 client/src/
   App.jsx            Shell layout & theme owner
   lib/               store.jsx (state) · ws.js (auto-reconnect) · reduce-cli-event.js (CLI events→state) · markdown.js · api.js
-  components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · Toasts · Clawd · Brand
+  components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · QuestionDialog · Toasts · Clawd · Brand
 scripts/dev-fake.mjs Subscription-free demo launcher (fake CLI)
 server/test/         Integration/unit tests against the fake CLI (never runs the real claude)
 docs/superpowers/    Spec & plan documents

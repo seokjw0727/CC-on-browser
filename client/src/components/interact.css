@@ -840,6 +840,79 @@ select.mode-trust:focus {
   width: 100%;
 }
 
+/* ============ Question dialog (AskUserQuestion — 권한 아님) ============ */
+.q-dialog {
+  max-width: 560px;
+}
+.q-block {
+  margin-bottom: 18px;
+}
+.q-block:last-child {
+  margin-bottom: 4px;
+}
+.q-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.q-chip {
+  font-size: 11px;
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  border-radius: var(--r-pill);
+  padding: 2px 9px;
+}
+.q-multi-note {
+  font-size: 11.5px;
+}
+.q-text {
+  font-size: 14.5px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.q-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.q-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text);
+  cursor: pointer;
+}
+.q-opt:hover {
+  border-color: var(--border-strong);
+}
+.q-opt.sel {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.q-opt.sel .q-opt-label {
+  color: var(--accent);
+  font-weight: 600;
+}
+.q-opt-label {
+  font-size: 13.5px;
+}
+.q-opt-desc {
+  font-size: 12px;
+}
+.q-free {
+  width: 100%;
+  margin-top: 8px;
+}
+
 /* ===== 통합 세션 트리 ===== */
 .pin-box {
   margin: 4px 0 10px;

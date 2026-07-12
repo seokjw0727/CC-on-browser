@@ -220,6 +220,10 @@ export class ClaudeSession extends EventEmitter {
         description: msg.request.description,
         suggestions: msg.request.permission_suggestions ?? [],
         toolUseId: msg.request.tool_use_id,
+        // 실 CLI v2.1.207 실측(2026-07-12): AskUserQuestion처럼 "사용자에게 묻는" 요청은
+        // 같은 can_use_tool 채널에 requires_user_interaction:true가 실려 온다 —
+        // 권한 상승 요청(이 필드 없음)과의 구분 신호. 없으면 false로 정규화.
+        requiresUserInteraction: msg.request.requires_user_interaction === true,
       });
       return;
     }

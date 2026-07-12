@@ -86,6 +86,7 @@ Claude Code on Browser v1.1.1 — http://127.0.0.1:8787/#token=<랜덤토큰>
 ```sh
 node scripts/dev-fake.mjs                       # echo 시나리오 (기본 포트 8788)
 node scripts/dev-fake.mjs --scenario permission # 권한 다이얼로그 시나리오 (모든 셸 공통)
+node scripts/dev-fake.mjs --scenario question   # Claude의 질문(AskUserQuestion) 다이얼로그 시나리오
 ```
 
 환경변수를 선호하면 POSIX 셸은 `FAKE_SCENARIO=permission node scripts/dev-fake.mjs`,
@@ -107,7 +108,8 @@ PowerShell은 `$env:FAKE_SCENARIO='permission'; node scripts/dev-fake.mjs` 로�
 4. **슬래시 커맨드** — 입력창에서 `/`를 치면 자동완성 드롭다운이 뜹니다(Tab/Enter로 선택).
    `/compact` 같은 커맨드가 CLI에 그대로 전달됩니다.
 5. **권한 응답** — 확인이 필요한 권한 모드에서는 도구 실행 전에 다이얼로그가 떠 허용/거부를
-   선택합니다. 권한 모드는 컴포저에서 언제든 전환할 수 있습니다.
+   선택합니다. 권한 모드는 컴포저에서 언제든 전환할 수 있습니다. Claude가 **AskUserQuestion**으로
+   질문할 때는 권한 다이얼로그 대신 선택지·직접 입력·건너뛰기를 갖춘 질문 다이얼로그가 뜹니다.
 6. **모델·노력 수준 변경** — 컴포저의 모델 피커로 대화 중에도 모델을 바꿉니다. 노력 수준을 바꾸면
    같은 대화로 세션이 재시작됩니다(`--effort`는 시작 시 전용 — 대화가 디스크에 있으면 `--resume`,
    첫 턴 전이면 새로 시작).
@@ -158,7 +160,7 @@ server/src/
 client/src/
   App.jsx            셸 레이아웃·테마 소유
   lib/               store.jsx(상태) · ws.js(자동 재접속) · reduce-cli-event.js(CLI 이벤트→상태) · markdown.js · api.js
-  components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · Toasts · Clawd · Brand
+  components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · QuestionDialog · Toasts · Clawd · Brand
 scripts/dev-fake.mjs 구독 미소모 데모 런처(fake CLI)
 server/test/         fake CLI 기반 통합·단위 테스트 (실제 claude 미실행)
 docs/superpowers/    스펙·플랜 문서

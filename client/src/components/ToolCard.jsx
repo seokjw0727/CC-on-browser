@@ -124,6 +124,25 @@ function DefaultBody({ input }) {
   );
 }
 
+// AskUserQuestion — 질문·선택지를 읽히게 요약(답변은 tool_result 텍스트에 실려 온다).
+function AskUserQuestionBody({ input }) {
+  const questions = Array.isArray(input?.questions) ? input.questions : null;
+  if (!questions || questions.length === 0) return <DefaultBody input={input} />;
+  return (
+    <div className="tool-kv">
+      {questions.map((q, i) => (
+        <div key={i}>
+          {q.header && <span className="dim">{q.header}: </span>}
+          {q.question}
+          {Array.isArray(q.options) && q.options.length > 0 && (
+            <span className="dim"> — {q.options.map((o) => o.label).join(' / ')}</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const BODY_BY_TOOL = {
   Bash: BashBody,
   Edit: EditBody,
@@ -133,6 +152,7 @@ const BODY_BY_TOOL = {
   Glob: QueryBody,
   WebFetch: QueryBody,
   WebSearch: QueryBody,
+  AskUserQuestion: AskUserQuestionBody,
 };
 
 // 결과를 기본 접힘으로 두는 도구들

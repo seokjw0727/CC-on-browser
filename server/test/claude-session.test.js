@@ -119,6 +119,8 @@ test('(c) permission allow: permission_request -> respondPermission -> tool_resu
     assert.deepEqual(perm.suggestions, [
       { type: 'addRules', rules: [{ toolName: 'Write' }], behavior: 'allow', destination: 'localSettings' },
     ]);
+    // 일반 권한 요청은 requires_user_interaction이 없다 → false로 정규화
+    assert.equal(perm.requiresUserInteraction, false);
 
     // pending에 없는 requestId는 false
     assert.equal(session.respondPermission('nonexistent', { behavior: 'allow' }), false);
@@ -278,6 +280,48 @@ test('(k) set_permission_mode는 system/status(permissionMode)를 방출한다 �
     const status = await statusP;
     assert.equal(status.permissionMode, 'plan');
     assert.equal(status.status, null);
+  } finally {
+    await shutdown(session, exit);
+  }
+});
+
+test('(l) question: AskUserQuestion 요청은 requiresUserInteraction=true, allow+answers가 tool_result로 반영된다', async () => {
+  const session = makeSession('question');
+  const exit = trackExit(session);
+  try {
+    await session.start();
+    const events = [];
+    session.on('event', (m) => events.push(m));
+    const permP = new Promise((resolve) => session.once('permission_request', resolve));
+    const resultP = waitForEvent(session, (m) => m.type === 'result');
+    session.sendUserText('색을 물어봐');
+    const perm = await permP;
+    assert.equal(perm.toolName, 'AskUserQuestion');
+    // 질문/권한 구분 신호 — 실 CLI v2.1.207 실측(2026-07-12)
+    assert.equal(perm.requiresUserInteraction, true);
+    assert.ok(Array.isArray(perm.input.questions));
+    const q = perm.input.questions[0];
+    assert.equal(q.question, '좋아하는 색은?');
+    assert.equal(q.options.length, 2);
+
+    // 실측 응답 형식: allow + updatedInput{...input, answers:{질문: 라벨}}
+    assert.equal(
+      session.respondPermission(perm.requestId, {
+        behavior: 'allow',
+        updatedInput: { ...perm.input, answers: { [q.question]: q.options[0].label } },
+      }),
+      true,
+    );
+    const result = await resultP;
+    assert.equal(result.echo_response.behavior, 'allow');
+    assert.deepEqual(result.echo_response.updatedInput.answers, { '좋아하는 색은?': '빨강' });
+    const toolResult = events.find(
+      (m) => m.type === 'user' && Array.isArray(m.message?.content)
+        && m.message.content.some((c) => c.type === 'tool_result'),
+    );
+    assert.ok(toolResult, 'tool_result user event should arrive before result');
+    assert.match(toolResult.message.content[0].content, /Your questions have been answered/);
+    assert.deepEqual(toolResult.tool_use_result.answers, { '좋아하는 색은?': '빨강' });
   } finally {
     await shutdown(session, exit);
   }

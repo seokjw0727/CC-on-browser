@@ -40,7 +40,7 @@ spawn: `claude.exe -p --input-format stream-json --output-format stream-json --v
 
 **CLI → 서버 (stdout), type별:**
 - `control_response`: initialize 응답. `response.response`에 `commands[]`, `models[]`(value/displayName/description), `account{email,subscriptionType}`, `output_style`.
-- `control_request`: `request.subtype==="can_use_tool"`, `request`에 `tool_name`, `display_name`, `input`, `description?`, `permission_suggestions?[]`, `tool_use_id`. 최상위 `request_id`를 에코해 응답.
+- `control_request`: `request.subtype==="can_use_tool"`, `request`에 `tool_name`, `display_name`, `input`, `description?`, `permission_suggestions?[]`, `tool_use_id`, `requires_user_interaction?`(AskUserQuestion류 질문 요청에만 true — 2026-07-12 실측, 아래 절). 최상위 `request_id`를 에코해 응답.
 - `system`: subtype `init`(session_id, cwd, tools[], model...), `status`, `thinking_tokens`(estimated_tokens), `hook_started`/`hook_response`, `notification`.
 - `stream_event`: `event`가 Anthropic 스트림 이벤트(`content_block_start`/`content_block_delta`(delta.type: text_delta|thinking_delta|input_json_delta)/`content_block_stop`/`message_start`/`message_delta`). `parent_tool_use_id` 있을 수 있음(서브에이전트).
 - `assistant`: 완성된 content block 배열(`thinking`|`text`|`tool_use`). 같은 message id로 여러 번 올 수 있음(블록 단위 — id+content로 병합).
@@ -73,6 +73,22 @@ spawn: `claude.exe -p --input-format stream-json --output-format stream-json --v
   문자열+카탈로그 양방향·base 매칭(client/src/lib/format.js `contextWindowFor`)은 첫 result 전·재개
   직후의 폴백이다.
 
+**2026-07-12 AskUserQuestion 실측 (v2.1.207, haiku 1턴 프로브 — 질문/권한 구분):**
+- AskUserQuestion도 **같은 `can_use_tool` 채널**로 온다. 차이는 (a) `tool_name:"AskUserQuestion"`,
+  (b) `requires_user_interaction:true` 필드(일반 권한 요청엔 없음), (c) `input.questions[]`
+  (`{question, header, options:[{label, description}], multiSelect}`, 1–4개, 옵션 ≤4),
+  (d) `permission_suggestions` 없음. ⇒ 이것은 권한 상승이 아니라 "사용자에게 묻기" — 클라이언트는
+  `isQuestionRequest`(toolName+input 형상)로 분기해 QuestionDialog를 띄운다.
+- **답변 응답**: 표준 permission 채널 그대로 `behavior:"allow"` +
+  `updatedInput:{...원본 input, answers:{"<질문 텍스트>":"<답변 문자열>"}}`.
+  CLI가 tool_result 텍스트를 합성한다(`Your questions have been answered: "…"="…". …`,
+  `tool_use_result`에 `{questions, answers}` 구조화 결과 동반). multiSelect 답변은 라벨을
+  `", "`로 조인, 자유 입력은 라벨 대신 원문 문자열(TUI 바이너리 동작 미러).
+- **건너뛰기**: `behavior:"allow"` + `answers:{}` → 비-오류 tool_result
+  `"The user did not answer the questions."` (deny는 오류 tool_result라 건너뛰기엔 쓰지 않는다).
+  자유 응답 전용 최상위 `response?` 필드(문자열)도 스키마에 존재 —
+  `"The user responded: …"`로 합성된다(현 UI는 질문별 answers만 사용).
+
 ## WS 프로토콜 (서버 ↔ 브라우저, 이 스키마가 계약)
 
 연결: `ws://127.0.0.1:<port>/ws?token=<token>`. token 불일치/Origin 불일치 시 즉시 close.
@@ -94,7 +110,7 @@ spawn: `claude.exe -p --input-format stream-json --output-format stream-json --v
 ```json
 {"type":"started","startId":"cl_1","key":"s_1","initInfo":{"commands":[],"models":[],"account":{},"output_style":"default"}}
 {"type":"event","key":"s_1","seq":1,"payload":{"...CLI stdout 메시지 원본..."}}
-{"type":"permission_request","key":"s_1","requestId":"<uuid>","toolName":"Write","displayName":"Write","input":{},"description":"...","suggestions":[],"toolUseId":"..."}
+{"type":"permission_request","key":"s_1","requestId":"<uuid>","toolName":"Write","displayName":"Write","input":{},"description":"...","suggestions":[],"toolUseId":"...","requiresUserInteraction":false}  // AskUserQuestion류 질문이면 true (2026-07-12 추가)
 {"type":"permission_resolved","key":"s_1","requestId":"<uuid>"}
 {"type":"exit","key":"s_1","code":0}
 {"type":"error","key":"s_1","message":"...","startId":null}
