@@ -2,7 +2,7 @@
 // 같은 can_use_tool 채널로 오지만 이건 권한 상승이 아니라 "사용자에게 묻기"다:
 // 허용/거부 대신 선택지·자유 입력·건너뛰기를 제공한다.
 // 응답 형식 근거: 실 CLI v2.1.207 실측(2026-07-12) — lib/ask-user-question.js 참조.
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useStore } from '../lib/store.jsx';
 import { useFocusTrap } from '../lib/useFocusTrap.js';
 import {
@@ -22,12 +22,6 @@ export default function QuestionDialog({ req, sessionKey, queueCount }) {
   const firstOptRef = useRef(null);
   const dialogRef = useFocusTrap(true, firstOptRef);
 
-  // 다음 질문 요청으로 넘어가면 입력 초기화
-  useEffect(() => {
-    setSelections({});
-    setSubmitted(false);
-  }, [req.requestId]);
-
   const selAt = (i) => selections[i] ?? { labels: [], text: '' };
   const selArray = questions.map((_, i) => selAt(i));
   const ready = allAnswered(questions, selArray);
@@ -43,14 +37,18 @@ export default function QuestionDialog({ req, sessionKey, queueCount }) {
         : has
           ? []
           : [label];
-      return { ...prev, [i]: { ...cur, labels } };
+      // 단일 선택은 라벨/자유 입력이 상호 배타적 — 라벨 선택 시 자유 입력을 지운다.
+      const text = multi ? cur.text : '';
+      return { ...prev, [i]: { ...cur, labels, text } };
     });
   };
 
-  const setText = (i, text) => {
+  const setText = (i, text, multi) => {
     setSelections((prev) => {
       const cur = prev[i] ?? { labels: [], text: '' };
-      return { ...prev, [i]: { ...cur, text } };
+      // 단일 선택은 자유 입력 시 기존 라벨 선택을 지운다(위 toggleLabel과 대칭).
+      const labels = multi ? cur.labels : [];
+      return { ...prev, [i]: { ...cur, labels, text } };
     });
   };
 
@@ -134,7 +132,7 @@ export default function QuestionDialog({ req, sessionKey, queueCount }) {
                   aria-label={`직접 입력 (선택) — ${q.question}`}
                   placeholder="직접 입력…"
                   value={sel.text ?? ''}
-                  onChange={(e) => setText(i, e.target.value)}
+                  onChange={(e) => setText(i, e.target.value, multi)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();

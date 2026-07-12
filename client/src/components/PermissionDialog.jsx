@@ -2,7 +2,7 @@
 // Esc로 닫히지 않음(명시적 허용/거부 강제). 입력 렌더는 ToolCard 재사용.
 // 큐 앞머리가 AskUserQuestion이면 권한 프롬프트 대신 QuestionDialog로 위임한다 —
 // 같은 can_use_tool 채널이지만 권한 상승이 아니라 질문이다(ask-user-question.js).
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
 import ToolCard from './ToolCard.jsx';
 import QuestionDialog from './QuestionDialog.jsx';
@@ -99,13 +99,6 @@ function PermissionPrompt({ req, sessionKey, queueCount }) {
   // 포커스 트랩 — 열려 있는 동안 Tab이 배경(컴포저/사이드바)으로 새지 않게 가둔다.
   const allowRef = useRef(null);
   const dialogRef = useFocusTrap(true, allowRef);
-
-  // 다음 요청으로 넘어가면 입력 초기화
-  useEffect(() => {
-    setReason('');
-    setChecked(new Set());
-    setSubmitted(false);
-  }, [req.requestId]);
 
   const suggestions = Array.isArray(req.suggestions) ? req.suggestions : [];
 

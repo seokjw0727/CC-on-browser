@@ -159,7 +159,8 @@ function handleServerMessage(state, msg) {
             suggestions: msg.suggestions,
             toolUseId: msg.toolUseId,
             // AskUserQuestion류 "사용자에게 묻기" 신호(실 CLI 실측 2026-07-12) —
-            // 렌더 분기 자체는 toolName+input 형상(isQuestionRequest)으로 한다.
+            // 렌더 분기 자체는 toolName+input 형상(isQuestionRequest)으로 하므로
+            // 현재 소비처는 없다 — 서버 프로토콜과의 계약 패리티 목적으로 보관.
             requiresUserInteraction: msg.requiresUserInteraction === true,
           },
         ],

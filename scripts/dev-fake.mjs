@@ -2,7 +2,7 @@
 // 실제 claude.exe를 실행하지 않으므로 구독을 소모하지 않는다.
 //
 // 사용법:
-//   node scripts/dev-fake.mjs [--port 8788] [--scenario echo|permission|crash|subagent]
+//   node scripts/dev-fake.mjs [--port 8788] [--scenario echo|permission|question|crash|subagent]
 // 관찰용 env(선택): FAKE_ECHO_DELAY_MS(echo 응답 지연 — thinking 유지),
 //   FAKE_SUBAGENT_MS(subagent 도구 실행 시간 — 마스코트 juggle 관찰)
 //
