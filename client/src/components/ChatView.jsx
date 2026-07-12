@@ -172,7 +172,9 @@ export default function ChatView() {
                 </div>
               )}
               {session.status === 'exited' && (
-                <div className="status-line dim">세션이 종료되었습니다.</div>
+                <div className="status-line dim">
+                  세션이 종료되었습니다 — 잠시 후 목록에서 사라집니다.
+                </div>
               )}
             </div>
           )}

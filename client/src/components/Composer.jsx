@@ -339,14 +339,28 @@ export default function Composer({ theme, onToggleTheme }) {
     const t = text;
     const ok = send({ type: 'send', key: session.key, text: t });
     if (!ok) return;
+    // 알려진 슬래시 커맨드는 커맨드 칩/초기화 구분선/압축 카드로 낙관 렌더 —
+    // reduceUser의 <command-name> 경로를 태워 CLI 에코와 자연히 중복 제거된다.
+    const cmd = /^\/([\w:.-]+)(?:\s+([\s\S]*))?$/.exec(t.trim());
+    const known = cmd && commands.some((c) => c.name === cmd[1]);
+    const userEvent = known
+      ? {
+          type: 'user',
+          optimistic: true, // reduceUser가 CLI 에코와 짝지어 중복 흡수하도록 표시
+          message: {
+            role: 'user',
+            content: `<command-name>/${cmd[1]}</command-name>\n<command-message>${cmd[1]}</command-message>\n<command-args>${cmd[2] ?? ''}</command-args>`,
+          },
+        }
+      : {
+          type: 'user',
+          message: { role: 'user', content: [{ type: 'text', text: t }] },
+        };
     dispatch({
       type: 'update-session',
       key: session.key,
       fn: (s) => ({
-        ...reduceCliEvent(s, {
-          type: 'user',
-          message: { role: 'user', content: [{ type: 'text', text: t }] },
-        }),
+        ...reduceCliEvent(s, userEvent),
         status: s.status === 'idle' ? 'thinking' : s.status,
         interruptRequested: false, // 새 턴 시작 — 이전 인터럽트 표시 해제
       }),

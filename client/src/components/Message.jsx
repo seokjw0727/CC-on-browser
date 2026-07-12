@@ -77,6 +77,72 @@ function AssistantText({ item, enter, isNew }) {
   );
 }
 
+// /compact 진행/완료 카드 — 진행 중엔 부정형(indeterminate) 진행바, 완료 시엔
+// 채워진 바 + 토큰 감소량으로 "압축이 끝났음"을 명확히 보여준다.
+function CompactionCard({ item }) {
+  const running = item.state === 'running';
+  const canceled = item.state === 'canceled'; // 인터럽트/실패로 끝난 압축
+  const pre = item.preTokens;
+  const post = item.postTokens;
+  const hasNums = Number.isFinite(pre) && Number.isFinite(post) && pre > 0;
+  const reducedPct = hasNums ? Math.max(0, Math.round((1 - post / pre) * 100)) : null;
+  const stateCls = running ? ' running' : canceled ? ' canceled' : ' done';
+  // 완료 바는 감소율(%)을 채움으로 시각화한다(숫자를 모르면 100% = 그냥 "완료").
+  const fillPct = reducedPct ?? 100;
+  return (
+    <div className={`compaction-card${stateCls}`}>
+      <div className="compaction-head">
+        <span className="compaction-ico" aria-hidden="true">
+          {running ? '🗜' : canceled ? '⊘' : '✓'}
+        </span>
+        <span className="compaction-title">
+          {running ? '컨텍스트 압축 중…' : canceled ? '컨텍스트 압축 중단됨' : '컨텍스트 압축 완료'}
+        </span>
+        <span className="spacer" />
+        {!running && !canceled && reducedPct != null && (
+          <span className="compaction-pct">{reducedPct}% 감소</span>
+        )}
+      </div>
+      <div
+        className="compaction-bar"
+        role="progressbar"
+        aria-label={
+          running
+            ? '컨텍스트 압축 진행 중'
+            : canceled
+              ? '컨텍스트 압축 중단됨'
+              : `컨텍스트 압축 완료 — ${reducedPct ?? 0}% 감소`
+        }
+        aria-valuemin={0}
+        aria-valuemax={100}
+        {...(running || canceled ? {} : { 'aria-valuenow': fillPct })}
+      >
+        <span
+          className="compaction-fill"
+          style={running || canceled ? undefined : { width: `${fillPct}%` }}
+        />
+      </div>
+      {!running && !canceled && hasNums && (
+        <div className="compaction-detail dim">
+          {pre.toLocaleString()} → {post.toLocaleString()} 토큰
+          {Number.isFinite(item.durationMs) ? ` · ${(item.durationMs / 1000).toFixed(1)}s` : ''}
+          {item.trigger === 'auto' ? ' · 자동' : ''}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 이전 대화 압축 요약(isCompactSummary user 메시지) — 접이식으로 보존.
+function CompactionSummary({ item }) {
+  return (
+    <details className="compaction-summary">
+      <summary className="dim">📄 이전 대화 압축 요약 — 펼치기</summary>
+      <pre className="compaction-summary-body">{item.text}</pre>
+    </details>
+  );
+}
+
 export default function Message({ item, isNew }) {
   const enter = isNew ? ' msg-enter' : '';
   switch (item.kind) {
@@ -91,10 +157,51 @@ export default function Message({ item, isNew }) {
       return <AssistantText item={item} enter={enter} isNew={isNew} />;
 
     case 'thinking':
+      // 본문이 비어 있고(최종 블록은 서명만) 편집표시·스트리밍도 아니면 렌더 생략 —
+      // 재개 트랜스크립트엔 사고 원문이 없어 빈 "사고 과정" 토글만 남는다.
+      if (!item.thinking && !item.redacted && !item.streaming) return null;
       return <div className={enter ? 'msg-enter' : undefined}><ThinkingBlock item={item} /></div>;
 
     case 'tool_use':
       return <div className={enter ? 'msg-enter' : undefined}><ToolCard item={item} /></div>;
+
+    case 'command':
+      return (
+        <div className={`msg msg-command${enter}`}>
+          <span className="cmd-chip">
+            <span className="cmd-chip-ico" aria-hidden="true">⌘</span>
+            <span className="cmd-chip-name">/{item.name}</span>
+            {item.args ? <span className="cmd-chip-args">{item.args}</span> : null}
+          </span>
+        </div>
+      );
+
+    case 'command-output':
+      return (
+        <div className={`msg msg-cmd-output${item.isError ? ' err' : ''}${enter}`}>
+          <pre className="cmd-output-body">{item.text}</pre>
+        </div>
+      );
+
+    case 'compaction':
+      return <div className={enter ? 'msg-enter' : undefined}><CompactionCard item={item} /></div>;
+
+    case 'compaction-summary':
+      return <div className={enter ? 'msg-enter' : undefined}><CompactionSummary item={item} /></div>;
+
+    case 'cleared':
+      // separator 롤은 자식이 접근성 트리에서 pruning되므로(Blink) 이름을 aria-label로 준다.
+      return (
+        <div
+          className={`msg msg-cleared${enter}`}
+          role="separator"
+          aria-label="대화 컨텍스트가 초기화되었습니다 (/clear)"
+        >
+          <span className="cleared-line" aria-hidden="true" />
+          <span className="cleared-label">🧹 대화 컨텍스트가 초기화되었습니다 · /clear</span>
+          <span className="cleared-line" aria-hidden="true" />
+        </div>
+      );
 
     case 'notice':
       return <div className={`msg msg-notice dim${enter}`}>{item.text}</div>;

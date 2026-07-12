@@ -11,6 +11,12 @@
 // assistant-text/thinking/tool_use 아이템은 assistant 이벤트로 확정되면 confirmed:true.
 //   notice         { text }           (system/notification)
 //   usage          { inTok, outTok, durationMs } (턴 종료 시 토큰 사용량 — CLI풍 표시)
+//   command        { name, args }     (슬래시 커맨드 호출 — /help 등, 커맨드 칩으로 렌더)
+//   command-output { text, isError }  (로컬 커맨드 출력 — <local-command-stdout|stderr>)
+//   compaction     { state:'running'|'done', trigger?, preTokens?, postTokens?, durationMs? }
+//                                     (/compact 진행/완료 카드 — 진행바 + 토큰 감소량)
+//   compaction-summary { text }       (압축 요약 사용자 메시지 — 접이식으로 보존)
+//   cleared        {}                 (/clear — 컨텍스트 초기화 구분선)
 //   error          { text }           (레거시 렌더 호환용 — 신규 에러는 store가 토스트로 표시)
 //   raw            { payload }        (미지의 타입 보존)
 //
@@ -68,6 +74,102 @@ function hasOpenTool(session) {
   return session.messages.some(
     (m) => m.kind === 'tool_use' && !m.streaming && m.result == null,
   );
+}
+
+// ----- 슬래시 커맨드 / 컨텍스트 압축(/compact) / 초기화(/clear) 헬퍼 -----
+
+// 슬래시 커맨드 호출 에코: `<command-name>/foo</command-name> … <command-args>…</command-args>`
+// (실 CLI 실측 wire format). 감싸는 caveat 블록이 앞에 붙어도 이름/인자를 뽑는다.
+function parseCommandEcho(content) {
+  const nameM = /<command-name>([^<]*)<\/command-name>/.exec(content);
+  if (!nameM) return null;
+  const argsM = /<command-args>([\s\S]*?)<\/command-args>/.exec(content);
+  return { name: nameM[1].trim().replace(/^\//, ''), args: (argsM ? argsM[1] : '').trim() };
+}
+
+// 낙관 렌더(직접 전송) 아이템에 optimistic:true를 달아 두고, CLI 에코가 도착하면
+// 그 미확정 항목을 "소비"(optimistic 해제)해 중복을 흡수한다. 이 짝짓기 방식은
+// 창(window) 휴리스틱과 달리 "같은 커맨드를 두 번 실행"을 과잉 흡수하지 않는다
+// (두 번째는 확정된 첫 칩을 건너뛰고 새 미확정 칩을 만든다). CLI가 에코를 아예
+// 안 보내도 낙관 칩이 그대로 남아 렌더되므로 양쪽에서 안전하다.
+function consumeOptimistic(session, pred) {
+  const idx = findLastIndex(session.messages, (m) => m.optimistic && pred(m));
+  if (idx < 0) return null;
+  const messages = session.messages.slice();
+  messages[idx] = { ...messages[idx], optimistic: false };
+  return { ...session, messages };
+}
+
+// 커맨드 호출을 아이템으로 반영 — /clear는 전용 초기화 구분선, 그 외는 커맨드 칩.
+// /compact는 칩과 함께 진행 카드를 즉시 띄운다(느린 작업이라 즉각 피드백이 중요).
+function reduceCommandInvocation(session, name, args, optimistic) {
+  if (name === 'clear') {
+    if (!optimistic) {
+      const consumed = consumeOptimistic(session, (m) => m.kind === 'cleared');
+      if (consumed) return consumed;
+    }
+    return append(session, { kind: 'cleared', ...(optimistic ? { optimistic: true } : {}) });
+  }
+  const matches = (m) => m.kind === 'command' && m.name === name && (m.args || '') === (args || '');
+  let next = null;
+  if (!optimistic) next = consumeOptimistic(session, matches); // 에코가 낙관 칩을 확정
+  if (!next) {
+    next = append(session, { kind: 'command', name, args: args || '', ...(optimistic ? { optimistic: true } : {}) });
+  }
+  // 진행 카드는 낙관(사용자가 방금 실행)일 때만 즉시 띄운다. 재개 트랜스크립트의
+  // 에코로는 만들지 않는다 — 뒤에 완료 신호(Compacted/result)가 없는 잘린 히스토리에서
+  // 무한 진행바가 남는 것을 원천 차단(라이브의 status:'compacting'은 별개 경로로 여전히
+  // 진행 카드를 만든다). 멱등이라 status와 겹쳐도 중복되지 않는다.
+  if (name === 'compact' && optimistic) next = startCompaction(next);
+  return next;
+}
+
+function findRunningCompaction(messages) {
+  return findLastIndex(messages, (m) => m.kind === 'compaction' && m.state === 'running');
+}
+
+function compactionMetaFields(meta) {
+  const out = {};
+  if (!meta || typeof meta !== 'object') return out;
+  if (typeof meta.trigger === 'string') out.trigger = meta.trigger;
+  if (Number.isFinite(meta.preTokens)) out.preTokens = meta.preTokens;
+  if (Number.isFinite(meta.postTokens)) out.postTokens = meta.postTokens;
+  if (Number.isFinite(meta.durationMs)) out.durationMs = meta.durationMs;
+  return out;
+}
+
+// /compact 시작 — status:'compacting' 이벤트로 진입. 이미 진행 카드가 있으면 유지.
+function startCompaction(session, trigger) {
+  if (findRunningCompaction(session.messages) >= 0) return session;
+  return append(session, { kind: 'compaction', state: 'running', ...(trigger ? { trigger } : {}) });
+}
+
+// /compact 완료 — compact_boundary(풍부한 메타) 또는 "Compacted" 출력(메타 없음)이
+// 신호. 진행 카드를 완료로 전환하고, 시작을 못 봤으면 완료 카드를 새로 만든다.
+// 여러 완료 신호가 겹쳐도(경계 이벤트 + stdout) 카드는 하나만 유지·보강한다.
+function finishCompaction(session, meta) {
+  const fields = compactionMetaFields(meta);
+  const runIdx = findRunningCompaction(session.messages);
+  if (runIdx >= 0) {
+    const messages = session.messages.slice();
+    messages[runIdx] = { ...messages[runIdx], state: 'done', ...fields };
+    return { ...session, messages };
+  }
+  // 진행 카드가 없다. 방금(최근 몇 메시지 이내) 완료 처리한 카드에 대한 중복 신호
+  // (compact_boundary + "Compacted"가 잇달아 옴)면 메타만 보강/무시한다. 그렇지 않고
+  // 오래전 완료 카드만 있거나 아예 없으면 새 완료 카드를 만든다(예: 자동 압축).
+  const lastIdx = findLastIndex(session.messages, (m) => m.kind === 'compaction');
+  const recentDuplicate =
+    lastIdx >= 0 &&
+    session.messages[lastIdx].state === 'done' &&
+    lastIdx >= session.messages.length - 3;
+  if (recentDuplicate) {
+    if (Object.keys(fields).length === 0) return session; // 추가 정보 없는 중복 신호
+    const messages = session.messages.slice();
+    messages[lastIdx] = { ...messages[lastIdx], ...fields };
+    return { ...session, messages };
+  }
+  return append(session, { kind: 'compaction', state: 'done', ...fields });
 }
 
 // ----- stream_event -----
@@ -280,13 +382,20 @@ function confirmBlock(session, block, msgId, blockIndex, parent) {
 
   const messages = msgs.slice();
   const prev = messages[idx];
-  messages[idx] = {
+  const merged = {
     ...prev,
     ...confirmed,
     msgId: msgId ?? prev.msgId,
     streaming: false,
     confirmed: true,
   };
+  // 사고 과정 본문은 스트리밍 thinking_delta로만 도착하고, 최종 assistant 블록의
+  // thinking 필드는 ''(서명만 존재)로 온다(실 CLI 실측). 확정값이 비면 스트리밍으로
+  // 누적한 본문을 덮어쓰지 않고 보존한다 — 안 그러면 펼쳤을 때 내용이 사라진다.
+  if (kind === 'thinking' && !confirmed.thinking && prev.thinking) {
+    merged.thinking = prev.thinking;
+  }
+  messages[idx] = merged;
 
   // streaming.blocks에 남아 있는 해당 uid 매핑 제거
   const streaming = normStreaming(session.streaming);
@@ -380,11 +489,24 @@ function reduceUser(session, payload) {
   // isReplay:true = CLI가 자기 히스토리를 되쏘는 이벤트(설정 변경 에코, 향후 resume replay
   // 가능성) — 대화가 아니고 preload와 중복될 수 있으므로 채팅에 추가하지 않는다(파일 헤더 참조).
   if (payload.isReplay) return next;
+  // 압축 요약(이전 대화를 이어받는 user 메시지) — 거대한 버블 대신 접이식 요약 카드.
+  if (payload.isCompactSummary && typeof content === 'string') {
+    return append(next, { kind: 'compaction-summary', text: content });
+  }
   if (typeof content === 'string') {
-    // 비-replay 로컬 커맨드 출력(슬래시 커맨드 결과 등)은 삼키지 않고 notice로 보여준다.
-    if (/^<local-command-(stdout|stderr)>/.test(content)) {
+    // 슬래시 커맨드 호출 에코(<command-name>…)는 커맨드 칩/초기화 구분선으로.
+    // payload.optimistic=true는 컴포저가 직접 전송 시 낙관 렌더로 만든 합성 이벤트.
+    const cmd = parseCommandEcho(content);
+    if (cmd) return reduceCommandInvocation(next, cmd.name, cmd.args, payload.optimistic === true);
+    // 로컬 커맨드 출력(슬래시 커맨드 결과)은 삼키지 않고 결과 블록으로 보여준다.
+    const outM = /^<local-command-(stdout|stderr)>/.exec(content);
+    if (outM) {
       const text = content.replace(/<\/?local-command-(stdout|stderr)>/g, '').trim();
-      return text ? append(next, { kind: 'notice', text }) : next;
+      // "Compacted …"는 /compact 완료 신호 — 압축 카드로 흡수(별도 출력 렌더 안 함).
+      if (/^Compacted\b/i.test(text)) return finishCompaction(next, null);
+      return text
+        ? append(next, { kind: 'command-output', text, isError: outM[1] === 'stderr' })
+        : next;
     }
     return append(next, { kind: 'user-text', text: content });
   }
@@ -417,8 +539,8 @@ function reduceSystem(session, payload) {
         cwd: payload.cwd ?? session.cwd,
         tools: payload.tools ?? session.tools,
       };
-    case 'status':
-      return {
+    case 'status': {
+      const next = {
         ...session,
         statusText: typeof payload.status === 'string' ? payload.status : null,
         // set_permission_mode 성공 시 CLI가 새 permissionMode를 실어 보낸다(v2.1.206 실측)
@@ -428,6 +550,14 @@ function reduceSystem(session, payload) {
             ? payload.permissionMode
             : session.permissionMode,
       };
+      // /compact 시작 신호 — 진행 카드(진행바)를 띄운다. compact_boundary가 완료로 전환.
+      return payload.status === 'compacting' ? startCompaction(next) : next;
+    }
+
+    // 컨텍스트 압축 경계(실 CLI 실측: system/subtype:compact_boundary + compactMetadata) —
+    // /compact 완료. preTokens→postTokens 감소량을 완료 카드에 싣는다.
+    case 'compact_boundary':
+      return finishCompaction(session, payload.compactMetadata);
     case 'thinking_tokens':
       return { ...session, thinkingTokens: payload.estimated_tokens ?? null };
     case 'hook_started':
@@ -445,6 +575,21 @@ function reduceSystem(session, payload) {
 
 function reduceResult(session, payload) {
   let next = adoptSessionId(session, payload);
+
+  // 안전망: 압축 진행 카드가 완료 신호(compact_boundary/stdout) 없이 턴이 끝났으면
+  // 여기서 닫는다 — 영구 진행바 방지(compact_boundary는 보통 result보다 앞선다).
+  // 단, 인터럽트/실패로 끝난 턴(is_error)은 "완료"가 아니라 "중단됨"으로 닫는다
+  // (사용자가 78초 압축을 Esc로 중단할 수 있다 — codex 지적).
+  const compRunIdx = findRunningCompaction(next.messages);
+  if (compRunIdx >= 0) {
+    if (payload.is_error) {
+      const messages = next.messages.slice();
+      messages[compRunIdx] = { ...messages[compRunIdx], state: 'canceled' };
+      next = { ...next, messages };
+    } else {
+      next = finishCompaction(next, null);
+    }
+  }
 
   // 남은 스트리밍 블록 정리(비정상 종료 대비)
   if (next.messages.some((m) => m.streaming)) {
@@ -548,6 +693,21 @@ function reduceResult(session, payload) {
   }
 
   return { ...next, status: next.status === 'exited' ? 'exited' : 'idle' };
+}
+
+// 시딩(재개/effort 재시작 프리로드)용 최종 flush — 완료 신호 없이 잘린 히스토리에서
+// 넘어온 'running' 압축 카드를 완료로 닫는다. 정적 뷰에 무한 진행바가 남지 않게.
+export function finalizeCompactionCards(messages) {
+  if (!Array.isArray(messages)) return messages;
+  let changed = false;
+  const out = messages.map((m) => {
+    if (m && m.kind === 'compaction' && m.state === 'running') {
+      changed = true;
+      return { ...m, state: 'done' };
+    }
+    return m;
+  });
+  return changed ? out : messages;
 }
 
 // ----- 진입점 -----

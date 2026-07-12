@@ -1,6 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSessionTree, shortDir } from '../src/lib/sessionTree.js';
+import { buildSessionTree, shortDir, deriveSessionTitle } from '../src/lib/sessionTree.js';
+
+test('deriveSessionTitle: 첫 사용자 발화를 요약하고 커맨드 래퍼/빈 발화는 건너뛴다', () => {
+  assert.equal(
+    deriveSessionTitle([
+      { kind: 'command', name: 'help' },
+      { kind: 'user-text', text: '   ' },
+      { kind: 'user-text', text: '리팩터링 도와줘\n부탁해' },
+      { kind: 'user-text', text: '두 번째' },
+    ]),
+    '리팩터링 도와줘 부탁해',
+  );
+  // <…>로 시작하는 래퍼성 발화는 제목으로 쓰지 않는다
+  assert.equal(deriveSessionTitle([{ kind: 'user-text', text: '<command-name>/x</command-name>' }]), '');
+  // 사용자 발화가 없으면 빈 문자열(호출측 폴백)
+  assert.equal(deriveSessionTitle([{ kind: 'assistant-text', text: 'hi' }]), '');
+  assert.equal(deriveSessionTitle([]), '');
+  assert.equal(deriveSessionTitle(), '');
+  // 길이 제한
+  assert.equal(deriveSessionTitle([{ kind: 'user-text', text: 'a'.repeat(200) }], 60).length, 60);
+});
 
 test('sessionId가 null인 두 라이브 세션은 절대 합쳐지지 않는다', () => {
   const { pinned, others } = buildSessionTree({

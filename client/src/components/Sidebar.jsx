@@ -8,11 +8,12 @@ import {
   fetchProjects,
   fetchSessions,
   fetchTranscript,
+  pickDirectory,
 } from '../lib/api.js';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
 import { createSessionState } from '../lib/store-reducer.js';
 import { isQuestionRequest } from '../lib/ask-user-question.js';
-import { buildSessionTree } from '../lib/sessionTree.js';
+import { buildSessionTree, deriveSessionTitle } from '../lib/sessionTree.js';
 import { shortPath } from '../lib/format.js';
 import { MODE_LABEL, MODE_CLASS, MODES } from '../lib/permission-modes.js';
 import { Sparkle, Mascot } from './Brand.jsx';
@@ -148,7 +149,7 @@ function DirTree({ root, selected, onSelect }) {
 }
 
 // ----- 새 세션 모달 (cwd 지정: 직접 입력 + 하위 폴더 트리 + 최근 프로젝트) -----
-function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose, presenceStatus }) {
+function NewSessionModal({ initInfo, projects, defaultCwd, platform, onStart, onClose, presenceStatus }) {
   const [cwd, setCwd] = useState(defaultCwd || '');
   const [model, setModel] = useState('');
   // 기본 권한 모드 = 전체 허용(bypassPermissions) — 사용자 요청(2026-07-10).
@@ -156,6 +157,7 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose, pre
   const [mode, setMode] = useState('bypassPermissions');
   const [treeRoot, setTreeRoot] = useState(null); // 트리 기준 경로 ('' = 드라이브 목록)
   const [error, setError] = useState(null);
+  const [browsing, setBrowsing] = useState(false); // 네이티브 폴더 대화상자 대기 중
   // 포커스 트랩 — 모달이 열린 동안 Tab을 안에 가두고, 닫히면 여는 버튼으로 복원.
   const cwdRef = useRef(null);
   const dialogRef = useFocusTrap(true, cwdRef);
@@ -168,6 +170,24 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose, pre
       setError(null);
     } catch (err) {
       setError(String(err.message ?? err));
+    }
+  };
+
+  // 윈도우 파일 탐색기(네이티브 폴더 선택 대화상자)로 cwd 지정 — 트리를 헤매지 않아도 됨.
+  const browseNative = async () => {
+    if (browsing) return;
+    setBrowsing(true);
+    setError(null);
+    try {
+      const res = await pickDirectory(cwd.trim());
+      if (res.path) {
+        setCwd(res.path);
+        await navigate(res.path);
+      }
+    } catch (err) {
+      setError(String(err.message ?? err));
+    } finally {
+      setBrowsing(false);
     }
   };
 
@@ -234,6 +254,17 @@ function NewSessionModal({ initInfo, projects, defaultCwd, onStart, onClose, pre
             <button type="button" onClick={() => navigate(cwd.trim())} title="입력한 경로로 이동">
               이동
             </button>
+            {platform === 'win32' && (
+              <button
+                type="button"
+                className="browse-native-btn"
+                onClick={browseNative}
+                disabled={browsing}
+                title="윈도우 파일 탐색기로 폴더 선택"
+              >
+                {browsing ? '여는 중…' : '📂 찾아보기'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -324,6 +355,7 @@ export default function Sidebar({ onCollapse }) {
   const openModal = () => dispatch({ type: 'open-new-session' });
   const closeModal = () => dispatch({ type: 'close-new-session' });
   const [defaultCwd, setDefaultCwd] = useState('');
+  const [platform, setPlatform] = useState(null); // 네이티브 폴더 선택 버튼 노출 판단
   const [expanded, setExpanded] = useState({}); // dirName -> sessions[]|'loading'
 
   // 에러는 영구 배너 대신 토스트(자동 소멸)로 — 모달 내부의 폼 검증 문구만 인라인 유지.
@@ -339,7 +371,10 @@ export default function Sidebar({ onCollapse }) {
   useEffect(() => {
     refreshProjects();
     fetchBootstrap()
-      .then((b) => setDefaultCwd(b.defaultCwd || ''))
+      .then((b) => {
+        setDefaultCwd(b.defaultCwd || '');
+        setPlatform(b.platform || null);
+      })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -411,21 +446,25 @@ export default function Sidebar({ onCollapse }) {
   // 라이브 세션 행 — 렌더 헬퍼(요소 인스턴스화가 아니라 호출)로 두어 DOM을 안정화.
   // 매 렌더마다 새 컴포넌트 타입이 생기지 않으므로 React가 remount 없이 patch한다.
   const liveRow = (row, node) => {
+    const sess = state.sessions.get(row.key);
     // 대기 중인 요청의 앞머리가 AskUserQuestion이면 '권한 대기' 대신 '질문 대기' —
     // 다이얼로그(QuestionDialog/PermissionPrompt) 분기와 같은 판별을 쓴다.
     const badge =
       row.status === 'awaiting-permission' &&
-      isQuestionRequest(state.sessions.get(row.key)?.pendingPermissions?.[0])
+      isQuestionRequest(sess?.pendingPermissions?.[0])
         ? { label: '질문 대기', cls: 'warn' }
         : STATUS_BADGE[row.status] ?? { label: row.status, cls: '' };
-    const label = row.sessionId ? row.sessionId.slice(0, 8) : '새 세션';
+    // 세션 이름 = 첫 사용자 발화 요약 → 없으면 세션 id 앞 8자 → 그것도 없으면 '새 세션'.
+    const label =
+      deriveSessionTitle(sess?.messages) ||
+      (row.sessionId ? row.sessionId.slice(0, 8) : '새 세션');
     return (
       <div key={row.key} className={`sess-row live${row.active ? ' active' : ''}`}>
         <button
           type="button"
           className="sess-main"
           onClick={() => dispatch({ type: 'set-active', key: row.key })}
-          title={node.cwd || node.label}
+          title={label !== node.cwd ? `${label}${node.cwd ? ` — ${node.cwd}` : ''}` : node.cwd || node.label}
         >
           <span className="sess-dot live" aria-hidden="true" />
           <span className="truncate">{label}</span>
@@ -563,6 +602,7 @@ export default function Sidebar({ onCollapse }) {
         initInfo={state.initInfo}
         projects={state.projects}
         defaultCwd={defaultCwd}
+        platform={platform}
         onClose={closeModal}
         onStart={(opts) => {
           closeModal();

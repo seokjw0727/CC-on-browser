@@ -498,6 +498,183 @@ details.collapse > pre {
   color: #0184bc;
 }
 
+/* ----- 슬래시 커맨드 칩 (/help 등 커맨드 호출) ----- */
+.msg-command {
+  padding: 1px 0;
+}
+.cmd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 12.5px;
+}
+.cmd-chip-ico {
+  color: var(--accent);
+  font-size: 12px;
+}
+.cmd-chip-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+.cmd-chip-args {
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ----- 로컬 커맨드 출력 (커맨드 실행 결과) ----- */
+.msg-cmd-output {
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--accent-line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+.msg-cmd-output.err {
+  border-left-color: var(--danger);
+}
+.cmd-output-body {
+  margin: 0;
+  padding: 7px 11px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+/* ----- 컨텍스트 압축(/compact) 진행/완료 카드 ----- */
+.compaction-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.compaction-card.done {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+}
+.compaction-card.canceled {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+.compaction-card.canceled .compaction-ico {
+  color: var(--danger);
+}
+.compaction-card.canceled .compaction-fill {
+  width: 100%;
+  background: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+.compaction-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.compaction-title {
+  font-weight: 600;
+}
+.compaction-card.done .compaction-ico {
+  color: var(--success);
+}
+.compaction-pct {
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--success);
+  /* --success를 텍스트색 쪽으로 섞어 라이트/다크 양쪽에서 WCAG AA 대비 확보 */
+  color: color-mix(in srgb, var(--success) 55%, var(--text));
+}
+.compaction-bar {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.compaction-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100%;
+  border-radius: 999px;
+}
+.compaction-card.done .compaction-fill {
+  /* width는 인라인 스타일(감소율 %)로 지정 — 없으면 100% */
+  width: 100%;
+  background: var(--success);
+  transition: width var(--dur-base, 240ms) var(--ease-out, ease);
+}
+/* 진행 중: 정확한 진행률이 없으므로 부정형(sweep) 진행바로 "작업 중"을 표현 */
+.compaction-card.running .compaction-fill {
+  width: 40%;
+  background: var(--accent);
+  animation: compaction-sweep 1.1s var(--ease-in-out, ease-in-out) infinite;
+}
+@keyframes compaction-sweep {
+  0% { left: -40%; }
+  100% { left: 100%; }
+}
+.compaction-detail {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .compaction-card.running .compaction-fill { animation: none; left: 0; width: 100%; opacity: 0.6; }
+}
+
+/* ----- 압축 요약(이전 대화 이어받기) 접이식 ----- */
+.compaction-summary {
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.compaction-summary > summary {
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.compaction-summary-body {
+  margin: 0;
+  padding: 8px 10px;
+  border-top: 1px dashed var(--border);
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: 12.5px;
+}
+
+/* ----- /clear 컨텍스트 초기화 구분선 ----- */
+.msg-cleared {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+.cleared-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent-line), transparent);
+}
+.cleared-label {
+  font-size: 12px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
 /* ----- Task 5: 세션 전환 뷰 트랜지션 + 메시지 등장 게이팅 ----- */
 .msg-enter { animation: enter-rise var(--dur-base) var(--ease-out) both; }
 .view-enter { animation: enter-rise var(--dur-base) var(--ease-out) both; }

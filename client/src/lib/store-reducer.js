@@ -1,6 +1,6 @@
 // 전역 스토어의 순수 상태 로직 — React 없는 모듈로 분리해 node --test로 검증한다.
 // (store.jsx가 이 리듀서를 useReducer에 연결하고 WS/컨텍스트를 소유한다.)
-import { reduceCliEvent } from './reduce-cli-event.js';
+import { reduceCliEvent, finalizeCompactionCards } from './reduce-cli-event.js';
 
 export function createSessionState(partial = {}) {
   return {
@@ -105,7 +105,11 @@ function handleServerMessage(state, msg) {
           // 트랜스크립트). 반드시 started 커밋에서 원자적으로 시딩한다 — 세션 생성
           // 후 별도 커밋으로 주입하면 ChatView의 seenRef 리셋(첫 렌더)이 프리로드를
           // 못 보고 히스토리 전체가 isNew=true로 등장 애니·타자기 출력을 탄다.
-          messages: Array.isArray(opts.preloadMessages) ? [...opts.preloadMessages] : [],
+          // 시딩된 프리로드에 완료 신호 없이 넘어온 'running' 압축 카드가 있으면
+          // 완료로 닫는다 — 정적 히스토리 뷰의 무한 진행바 방지(방어).
+          messages: Array.isArray(opts.preloadMessages)
+            ? finalizeCompactionCards([...opts.preloadMessages])
+            : [],
           // 재개 프리로드의 부속 산출물 — usage(상태줄 CTX% 연속성)와 원본 세션 id
           // (사이드바/배지 표기 — 이후 system/init의 새 fork id가 덮어쓴다).
           // ctxFromCalls도 이월: true면 result의 턴 합산 usage가 컨텍스트를 못 덮는다.
@@ -219,6 +223,23 @@ export function reducer(state, action) {
     }
     case 'set-active':
       return { ...state, activeKey: action.key };
+    case 'remove-session': {
+      // 종료된 세션을 사이드바(=세션 맵)에서 제거. 활성 세션이 사라지면 남은
+      // 세션 중 가장 최근 것으로 전환(없으면 null → 그리팅).
+      if (!state.sessions.has(action.key)) return state;
+      const sessions = new Map(state.sessions);
+      sessions.delete(action.key);
+      let activeKey = state.activeKey;
+      if (activeKey === action.key) {
+        // 살아있는 세션을 우선 선택 — 다른 종료 세션이 유예창에 남아 있어도 그쪽으로
+        // 포커스가 튀지 않게 한다(codex 지적). 라이브가 없으면 아무거나, 없으면 null.
+        const remaining = [...sessions.values()];
+        const live = remaining.filter((s) => s.status !== 'exited');
+        const pick = live.length ? live[live.length - 1] : remaining[remaining.length - 1];
+        activeKey = pick ? pick.key : null;
+      }
+      return { ...state, sessions, activeKey };
+    }
     case 'open-new-session':
       return { ...state, newSessionOpen: true };
     case 'close-new-session':

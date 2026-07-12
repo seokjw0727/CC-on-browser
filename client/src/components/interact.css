@@ -677,10 +677,12 @@ select.mode-trust:focus {
 }
 .cwd-path-row {
   display: flex;
+  flex-wrap: wrap; /* 좁은 폭에서 입력+이동+찾아보기 3버튼이 넘치지 않고 줄바꿈 */
   gap: 6px;
 }
 .cwd-path-row input {
   flex: 1;
+  min-width: 0; /* flex 자식 기본 min-width:auto가 좁은 폭에서 넘침을 유발 */
 }
 .cwd-path-row button {
   background: var(--surface-2);
@@ -688,6 +690,15 @@ select.mode-trust:focus {
 }
 .cwd-path-row button:hover {
   border-color: var(--border-strong);
+}
+.cwd-path-row .browse-native-btn {
+  white-space: nowrap;
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+.cwd-path-row .browse-native-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 .browse-box {
   max-height: 220px;
@@ -1060,6 +1071,11 @@ select.mode-trust:focus {
 /* 공식 색 — CLI 바이너리 테마 실측: clawd_body rgb(215,119,87), 눈은 검정(clawd_background) */
 .mascot .px-body { fill: var(--clawd-body, #d77757); }
 .mascot .px-eye { fill: var(--clawd-eye, #141413); }
+/* 연속 시선 추적(eyeDx/eyeDy translate) 사이를 부드럽게 보간 — rAF 샘플 간 스냅 방지 */
+.clawd .mascot .px-eye { transition: transform 110ms linear; }
+@media (prefers-reduced-motion: reduce) {
+  .clawd .mascot .px-eye { transition: none; }
+}
 /* 실루엣 문맥(사이드바 빈 상태 등) — 단색, 눈은 뚫린 구멍으로 배경이 비친다 */
 .mascot.mono .px-body { fill: currentColor; }
 .mascot.mono .px-eye { fill: transparent; }

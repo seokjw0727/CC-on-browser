@@ -449,6 +449,7 @@ test('(f) REST auth + /api/projects/sessions/transcript/browse/bootstrap', async
   assert.equal(bootstrap.port, port);
   assert.ok('claudeVersion' in bootstrap);
   assert.equal(typeof bootstrap.defaultCwd, 'string');
+  assert.equal(bootstrap.platform, process.platform, '클라이언트의 폴더 선택 버튼 노출 판단용');
 
   // /api/usage — 픽스처 assistant 엔트리(방금 timestamp) 1건이 양쪽 창에 집계되고,
   // 주입한 공식 사용률 스텁이 quota 필드로 실린다
@@ -458,6 +459,57 @@ test('(f) REST auth + /api/projects/sessions/transcript/browse/bootstrap', async
   assert.equal(usage.sevenDay.totalTokens, 185);
   assert.equal(usage.quota.fiveHour.utilization, 46);
   assert.equal(usage.quota.sevenDay.utilization, 28);
+});
+
+test('/api/pick-directory: 주입된 폴더 선택기 결과를 반환하고 인증을 요구한다', async () => {
+  const calls = [];
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    directoryPicker: async ({ initialPath } = {}) => {
+      calls.push(initialPath);
+      return { path: 'C:\\picked\\folder', canceled: false };
+    },
+  });
+  const b = `http://127.0.0.1:${h.port}`;
+  try {
+    // 인증 없으면 401 (폴더 대화상자를 열지 않는다)
+    assert.equal((await fetch(`${b}/api/pick-directory`)).status, 401);
+    assert.equal(calls.length, 0);
+
+    const auth = { headers: { 'x-auth-token': TOKEN } };
+    const res = await (await fetch(`${b}/api/pick-directory?path=${encodeURIComponent('C:\\start')}`, auth)).json();
+    assert.deepEqual(res, { path: 'C:\\picked\\folder', canceled: false });
+    assert.deepEqual(calls, ['C:\\start']);
+  } finally {
+    await h.close();
+  }
+});
+
+test('/api/pick-directory: 선택기 오류(비-Windows 등)는 400으로 전달된다', async () => {
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    directoryPicker: async () => { throw new Error('네이티브 폴더 선택은 Windows에서만 지원됩니다.'); },
+  });
+  const b = `http://127.0.0.1:${h.port}`;
+  try {
+    const auth = { headers: { 'x-auth-token': TOKEN } };
+    const r = await fetch(`${b}/api/pick-directory`, auth);
+    assert.equal(r.status, 400);
+    const body = await r.json();
+    assert.match(body.error, /Windows/);
+  } finally {
+    await h.close();
+  }
 });
 
 test('/api/usage quota 실패 → quota:null + 로컬 집계 보존 + 요청마다 재시도', async () => {

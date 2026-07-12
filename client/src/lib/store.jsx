@@ -33,11 +33,48 @@ export function getToken() {
 const StoreContext = createContext(null);
 let startCounter = 0;
 
+// 종료된 세션을 사이드바에서 자동 제거하기까지의 유예 — 종료 직후 결과를 확인할
+// 여유를 준다. 필요하면 히스토리에서 재개할 수 있어 데이터 손실이 아니다.
+const EXITED_UI_RETENTION_MS = 8_000;
+
 export function StoreProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, undefined, createInitialState);
   const wsRef = useRef(null);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const removalTimersRef = useRef(new Map()); // key -> timeout (exited 세션 제거 예약)
+
+  // exited 세션마다 제거 타이머를 한 번만 건다(키별로 안정 유지 — 다른 세션의
+  // 활동으로 이 effect가 재실행돼도 리셋하지 않는다). 재시작 대체 등으로 세션이
+  // 사라지거나 다시 exited가 아니게 되면 예약을 취소한다.
+  useEffect(() => {
+    const timers = removalTimersRef.current;
+    for (const s of state.sessions.values()) {
+      if (s.status === 'exited' && !timers.has(s.key)) {
+        const key = s.key;
+        const t = setTimeout(() => {
+          timers.delete(key);
+          dispatch({ type: 'remove-session', key });
+        }, EXITED_UI_RETENTION_MS);
+        timers.set(key, t);
+      }
+    }
+    for (const [key, t] of timers) {
+      const s = state.sessions.get(key);
+      if (!s || s.status !== 'exited') {
+        clearTimeout(t);
+        timers.delete(key);
+      }
+    }
+  }, [state.sessions]);
+
+  useEffect(
+    () => () => {
+      for (const t of removalTimersRef.current.values()) clearTimeout(t);
+      removalTimersRef.current.clear();
+    },
+    [],
+  );
 
   useEffect(() => {
     const token = getToken();

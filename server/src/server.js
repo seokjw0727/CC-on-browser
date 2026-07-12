@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 import { SessionHub } from './session-hub.js';
 import { listProjects, listSessions, loadTranscript } from './history.js';
-import { listDirs } from './fs-api.js';
+import { listDirs, pickDirectory } from './fs-api.js';
 import { aggregateUsage } from './usage.js';
 import { fetchQuota } from './quota.js';
 
@@ -44,6 +44,7 @@ export async function startServer({
   exitedRetentionMs,
   quotaFetcher, // 테스트 주입용 — 기본은 quota.js의 공식 사용률 조회
   onClientCountChange, // WS 클라이언트 수 변화 알림 — bin이 브라우저 생존 신호로 쓴다
+  directoryPicker, // 테스트 주입용 — 기본은 fs-api.js의 네이티브 폴더 선택 대화상자
 } = {}) {
   if (!token) throw new TypeError('token is required');
   if (!cliPath) throw new TypeError('cliPath is required');
@@ -56,6 +57,7 @@ export async function startServer({
   let usageCache = { at: 0, promise: null };
   let quotaCache = { at: 0, promise: null };
   const getQuota = quotaFetcher ?? fetchQuota;
+  const pickDir = directoryPicker ?? pickDirectory;
 
   const tokenBuf = Buffer.from(String(token));
   const tokenEquals = (candidate) => {
@@ -239,6 +241,7 @@ export async function startServer({
             claudeVersion: await getClaudeVersion(),
             defaultCwd: os.homedir(),
             port: boundPort,
+            platform: process.platform, // 클라이언트가 네이티브 폴더 선택 버튼 노출 판단
           });
           return;
         case '/api/projects':
@@ -256,6 +259,11 @@ export async function startServer({
           return;
         case '/api/browse':
           json(res, 200, await listDirs(url.searchParams.get('path') ?? ''));
+          return;
+        case '/api/pick-directory':
+          // 네이티브 폴더 선택 대화상자를 사용자 데스크톱에 띄우고 선택 경로를 반환.
+          // 사용자가 응답할 때까지 블록되는 GET(로컬 도구라 허용). 취소 시 path=null.
+          json(res, 200, await pickDir({ initialPath: url.searchParams.get('path') || undefined }));
           return;
         case '/api/usage': {
           if (!usageCache.promise || Date.now() - usageCache.at > USAGE_CACHE_MS) {

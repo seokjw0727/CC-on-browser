@@ -12,6 +12,10 @@ import {
   clawdVisualMood,
   clawdTurnEnd,
   eyeFrameFor,
+  eyeOffsetFor,
+  CLAWD_EYE_MAX_X,
+  CLAWD_EYE_MAX_Y,
+  CLAWD_EYE_RANGE_PX,
   openSubagentCount,
 } from '../src/lib/clawd.js';
 import { reduceCliEvent } from '../src/lib/reduce-cli-event.js';
@@ -150,12 +154,37 @@ test('clawdTurnEnd: 진행 중 → idle 전이만 턴 종료, isError가 happy/e
   assert.equal(clawdTurnEnd('thinking', 'idle', { isError: false }, true), null);
 });
 
-test('eyeFrameFor: 데드존 안은 정면, 밖은 커서 쪽을 본다', () => {
+test('eyeFrameFor: 데드존 안은 정면, 밖은 커서 쪽을 본다 (레거시 3프레임)', () => {
   assert.equal(eyeFrameFor(0), 'base');
   assert.equal(eyeFrameFor(-CLAWD_EYE_DEADZONE_PX), 'base');
   assert.equal(eyeFrameFor(CLAWD_EYE_DEADZONE_PX), 'base');
   assert.equal(eyeFrameFor(-(CLAWD_EYE_DEADZONE_PX + 1)), 'lookLeft');
   assert.equal(eyeFrameFor(CLAWD_EYE_DEADZONE_PX + 1), 'lookRight');
+});
+
+test('eyeOffsetFor: 중심이면 정면(0,0), 커서 각도를 2D로 따라간다', () => {
+  assert.deepEqual(eyeOffsetFor(0, 0), { ex: 0, ey: 0 });
+  // 오른쪽 아래로 멀리 → +x, +y 로 이동, 방향은 커서 각도 부호를 따른다
+  const dr = eyeOffsetFor(1000, 1000);
+  assert.ok(dr.ex > 0 && dr.ey > 0);
+  const ul = eyeOffsetFor(-1000, -1000);
+  assert.ok(ul.ex < 0 && ul.ey < 0);
+  // 좌우 대칭
+  const r = eyeOffsetFor(500, 0);
+  const l = eyeOffsetFor(-500, 0);
+  assert.equal(r.ex, -l.ex);
+  assert.equal(r.ey, 0);
+});
+
+test('eyeOffsetFor: 크기는 최대치로 포화하고 그 이상 넘지 않는다', () => {
+  const far = eyeOffsetFor(100000, 0);
+  assert.ok(Math.abs(far.ex) <= CLAWD_EYE_MAX_X + 1e-6);
+  const farY = eyeOffsetFor(0, 100000);
+  assert.ok(Math.abs(farY.ey) <= CLAWD_EYE_MAX_Y + 1e-6);
+  // 사거리 밖 거리에서 수평 최대치에 도달(순수 수평)
+  assert.ok(Math.abs(eyeOffsetFor(CLAWD_EYE_RANGE_PX, 0).ex - CLAWD_EYE_MAX_X) < 1e-6);
+  // 가까울수록 작다(단조 증가)
+  assert.ok(Math.abs(eyeOffsetFor(30, 0).ex) < Math.abs(eyeOffsetFor(120, 0).ex));
 });
 
 test('openSubagentCount: 결과 미도착·입력 확정된 Task/Agent 도구만 센다', () => {

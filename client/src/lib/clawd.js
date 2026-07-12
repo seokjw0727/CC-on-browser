@@ -161,10 +161,33 @@ export function clawdTurnEnd(prevStatus, nextStatus, lastResult, interrupted = f
   return lastResult && lastResult.isError ? 'error' : 'happy';
 }
 
-/** 커서 X 오프셋(px, 마스코트 중심 기준) → idle 눈 추적 프레임. */
+/** 커서 X 오프셋(px, 마스코트 중심 기준) → idle 눈 추적 프레임(레거시 3프레임 방식). */
 export function eyeFrameFor(dx) {
   if (Math.abs(dx) <= CLAWD_EYE_DEADZONE_PX) return 'base';
   return dx < 0 ? 'lookLeft' : 'lookRight';
+}
+
+// 연속 눈 추적(idle/think) — 3프레임(좌/정면/우) 대신 눈 픽셀 그룹을 커서 방향으로
+// 조금씩 밀어 "더 많은 각도"를 부드럽게 따라가게 한다. 오프셋 단위는 SVG viewBox
+// 좌표(가로 1열, 세로는 CLAWD_PIXEL_ASPECT로 이미 2배 스케일된 값).
+export const CLAWD_EYE_MAX_X = 1.7; // 최대 수평 이동(열)
+export const CLAWD_EYE_MAX_Y = 1.9; // 최대 수직 이동(스케일된 행 단위)
+export const CLAWD_EYE_RANGE_PX = 240; // 이 거리(px)에서 최대 이동에 도달
+
+/**
+ * 마스코트 중심 기준 커서 벡터(dx,dy px) → 눈 그룹 translate 오프셋(viewBox 단위).
+ * 방향은 커서 각도를 그대로 따르고(2D), 크기는 거리에 비례하되 CLAWD_EYE_RANGE_PX에서
+ * 포화한다. 커서가 중심에 있으면 {0,0}(정면).
+ */
+export function eyeOffsetFor(dx, dy, rangePx = CLAWD_EYE_RANGE_PX) {
+  const dist = Math.hypot(dx, dy);
+  if (dist < 1e-3) return { ex: 0, ey: 0 };
+  const mag = Math.min(1, dist / rangePx);
+  const round = (v) => Math.round(v * 1000) / 1000;
+  return {
+    ex: round((dx / dist) * mag * CLAWD_EYE_MAX_X),
+    ey: round((dy / dist) * mag * CLAWD_EYE_MAX_Y),
+  };
 }
 
 // 서브에이전트를 스폰하는 도구 이름 — CLI v2.1.x는 'Task'(구명 병기 'Agent'도 수용).

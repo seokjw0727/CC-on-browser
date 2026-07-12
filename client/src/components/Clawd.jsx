@@ -30,7 +30,7 @@ import {
   clawdMood,
   clawdVisualMood,
   clawdTurnEnd,
-  eyeFrameFor,
+  eyeOffsetFor,
 } from '../lib/clawd.js';
 import './interact.css';
 
@@ -60,7 +60,8 @@ function useMediaQuery(query) {
 }
 
 // '1'=몸통, '2'=눈. 쿼드런트 픽셀은 터미널 셀 비율대로 세로 2배(1x2)로 그린다.
-export function FrameSvg({ bits, scale = 4, className = '' }) {
+// eyeDx/eyeDy(viewBox 단위)는 눈 그룹만 커서 방향으로 밀어 연속 시선 추적을 만든다.
+export function FrameSvg({ bits, scale = 4, className = '', eyeDx = 0, eyeDy = 0 }) {
   const cols = bits[0].length;
   const rows = bits.length;
   const body = [];
@@ -84,7 +85,9 @@ export function FrameSvg({ bits, scale = 4, className = '' }) {
       aria-hidden="true"
     >
       <g className="px-body">{body}</g>
-      <g className="px-eye">{eyes}</g>
+      <g className="px-eye" transform={eyeDx || eyeDy ? `translate(${eyeDx} ${eyeDy})` : undefined}>
+        {eyes}
+      </g>
     </svg>
   );
 }
@@ -105,9 +108,9 @@ export default function Clawd({
   const [pokeTick, setPokeTick] = useState(0);
   const [transient, setTransient] = useState(null); // 'happy' | 'error' | null
   const [asleep, setAsleep] = useState(false);
+  const [eyeOff, setEyeOff] = useState({ ex: 0, ey: 0 }); // 연속 시선 추적 오프셋
 
   const rootRef = useRef(null);
-  const eyeRef = useRef('base'); // idle 눈 추적의 현재 목표(깜박임 복귀 지점)
   const lastActRef = useRef(0); // 마지막 유저 입력 시각(performance.now)
   const pokesRef = useRef([]); // 연타 판정용 클릭 타임스탬프
   const transientTimerRef = useRef(null);
@@ -168,23 +171,27 @@ export default function Clawd({
     };
   }, [base, reduced, hidden]);
 
-  // idle 눈 추적 — 커서가 마스코트 좌/우 데드존 밖에 있으면 그쪽을 본다.
-  // rAF로 스로틀하고, 깜박임 중엔 목표(eyeRef)만 갱신해 복귀 시 반영한다.
+  // 연속 시선 추적 — idle/think에서 눈 픽셀을 커서 방향으로(2D, 여러 각도) 부드럽게
+  // 민다. rAF로 스로틀하고, 오프셋이 실제로 바뀔 때만 setState한다. 추적을 벗어나는
+  // 무드(busy/juggle/doze 등)로 가면 눈을 정면(0,0)으로 되돌린다.
+  const tracking = mood === 'idle' || mood === 'think';
   useEffect(() => {
-    if (hidden || reduced || mood !== 'idle') return undefined;
+    if (hidden || reduced || !tracking) {
+      setEyeOff((o) => (o.ex === 0 && o.ey === 0 ? o : { ex: 0, ey: 0 }));
+      return undefined;
+    }
     let raf = 0;
     const onMove = (e) => {
       if (raf) return;
       const cx = e.clientX;
+      const cy = e.clientY;
       raf = requestAnimationFrame(() => {
         raf = 0;
         const el = rootRef.current;
         if (!el) return;
         const r = el.getBoundingClientRect();
-        const next = eyeFrameFor(cx - (r.left + r.width / 2));
-        if (eyeRef.current === next) return;
-        eyeRef.current = next;
-        setFrame((f) => (f === 'blink' ? f : next));
+        const next = eyeOffsetFor(cx - (r.left + r.width / 2), cy - (r.top + r.height / 2));
+        setEyeOff((o) => (o.ex === next.ex && o.ey === next.ey ? o : next));
       });
     };
     window.addEventListener('pointermove', onMove, { passive: true });
@@ -192,7 +199,7 @@ export default function Clawd({
       window.removeEventListener('pointermove', onMove);
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [mood, reduced, hidden]);
+  }, [tracking, reduced, hidden]);
 
   // 무드별 프레임 타이머 — 무드가 바뀌면 이전 타이머를 정리하고 다시 시작한다.
   useEffect(() => {
@@ -248,10 +255,9 @@ export default function Clawd({
       setFrame('doze');
       return undefined;
     }
-    // idle/think: 무작위 간격 깜박임. idle은 눈 추적 목표(eyeRef)로 복귀하고,
-    // think는 base 고정(말풍선이 상태를 말한다).
-    const restFrame = () => (mood === 'idle' ? eyeRef.current : 'base');
-    if (mood === 'idle') eyeRef.current = 'base';
+    // idle/think: 무작위 간격 깜박임. 정지 프레임은 base 고정 — 눈의 방향은
+    // 프레임 교체가 아니라 눈 그룹 translate(eyeOff)로 연속 추적한다.
+    const restFrame = () => 'base';
     setFrame(restFrame());
     let alive = true;
     let timer;
@@ -299,7 +305,12 @@ export default function Clawd({
       <span className="clawd-bob">
         {/* key 교체로 스쿼시 애니메이션을 매 클릭 재생 */}
         <span key={pokeTick} className={`clawd-poke${pokeTick > 0 ? ' poked' : ''}`}>
-          <FrameSvg bits={CLAWD_FRAMES[frame] ?? CLAWD_FRAMES.base} scale={scale} />
+          <FrameSvg
+            bits={CLAWD_FRAMES[frame] ?? CLAWD_FRAMES.base}
+            scale={scale}
+            eyeDx={eyeOff.ex}
+            eyeDy={eyeOff.ey}
+          />
         </span>
       </span>
       {mood === 'think' && (

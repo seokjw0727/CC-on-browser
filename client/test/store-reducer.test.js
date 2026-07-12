@@ -16,6 +16,39 @@ function registerStart(state, startId, opts) {
   return reducer(state, { type: 'register-start', startId, opts });
 }
 
+test('remove-session: 세션을 제거하고, 활성이었으면 남은 세션으로 전환(없으면 null)', () => {
+  let s = stateWithSession('a');
+  s.sessions.set('b', createSessionState({ key: 'b' }));
+  // 활성('a') 제거 → 남은 'b'로 전환
+  s = reducer({ ...s, activeKey: 'a' }, { type: 'remove-session', key: 'a' });
+  assert.equal(s.sessions.has('a'), false);
+  assert.equal(s.activeKey, 'b');
+  // 마지막 세션 제거 → activeKey null(그리팅)
+  s = reducer(s, { type: 'remove-session', key: 'b' });
+  assert.equal(s.sessions.size, 0);
+  assert.equal(s.activeKey, null);
+  // 없는 키 제거는 무해(상태 동일 참조)
+  const same = reducer(s, { type: 'remove-session', key: 'ghost' });
+  assert.equal(same, s);
+});
+
+test('remove-session: 비활성 세션 제거는 activeKey를 건드리지 않는다', () => {
+  let s = stateWithSession('a');
+  s.sessions.set('b', createSessionState({ key: 'b' }));
+  s = reducer({ ...s, activeKey: 'a' }, { type: 'remove-session', key: 'b' });
+  assert.equal(s.activeKey, 'a', '활성은 그대로');
+  assert.equal(s.sessions.has('b'), false);
+});
+
+test('remove-session: 활성 종료 세션 제거 시 종료 세션이 아닌 라이브 세션으로 전환한다', () => {
+  let s = stateWithSession('a', { status: 'exited' });
+  // 삽입 순서상 라이브 'b'가 먼저, 종료 'c'가 마지막 — 순진하게 마지막을 고르면 'c'(종료)
+  s.sessions.set('b', createSessionState({ key: 'b', status: 'idle' }));
+  s.sessions.set('c', createSessionState({ key: 'c', status: 'exited' }));
+  s = reducer({ ...s, activeKey: 'a' }, { type: 'remove-session', key: 'a' });
+  assert.equal(s.activeKey, 'b', '종료 세션(c)이 아니라 라이브(b)로 전환');
+});
+
 test("started(replaceKey): 새 탭이 옛 탭을 대체하고 resume 시딩이 이뤄진다", () => {
   let s = stateWithSession('old', { messages: [{ uid: 'm1', kind: 'user-text', text: '이월' }] });
   s = registerStart(s, 'cl_1', {

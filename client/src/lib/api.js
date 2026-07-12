@@ -16,8 +16,16 @@ async function get(path) {
   return res.json();
 }
 
-/** @returns {Promise<{claudeVersion, defaultCwd, port}>} */
+/** @returns {Promise<{claudeVersion, defaultCwd, port, platform}>} */
 export const fetchBootstrap = () => get('/api/bootstrap');
+
+/**
+ * 네이티브 폴더 선택 대화상자를 열고 선택 경로를 반환(Windows 전용).
+ * 사용자가 대화상자를 닫을 때까지 응답이 지연된다.
+ * @returns {Promise<{path: string|null, canceled: boolean}>}
+ */
+export const pickDirectory = (initialPath = '') =>
+  get(`/api/pick-directory${initialPath ? `?path=${encodeURIComponent(initialPath)}` : ''}`);
 
 /** @returns {Promise<[{dirName, cwd, sessionCount, lastModified}]>} */
 export const fetchProjects = () => get('/api/projects');

@@ -9,6 +9,18 @@ export function shortDir(p) {
   return parts.length <= 2 ? String(p) : `…\\${parts.slice(-2).join('\\')}`;
 }
 
+// 라이브 세션의 표시용 제목 — 첫 사용자 발화(user-text)를 히스토리 title과 같은 규칙으로
+// 요약한다. 커맨드 래퍼(<…>)·빈 문자열은 건너뛴다. 없으면 '' (호출측이 폴백).
+export function deriveSessionTitle(messages = [], maxLen = 60) {
+  for (const m of messages) {
+    if (!m || m.kind !== 'user-text' || typeof m.text !== 'string') continue;
+    const t = m.text.trim().replace(/\s+/g, ' ');
+    if (!t || t.startsWith('<')) continue;
+    return t.slice(0, maxLen);
+  }
+  return '';
+}
+
 function dirKeyOf(seed) {
   return (seed.cwd && String(seed.cwd).trim()) || seed.dirName || '';
 }
