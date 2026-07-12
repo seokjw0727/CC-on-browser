@@ -9,6 +9,7 @@
 // --no-open 은 예전처럼 포그라운드 콘솔 서버로 남는다(로그 확인·개발용).
 import crypto from 'node:crypto';
 import net from 'node:net';
+import http from 'node:http';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -109,18 +110,27 @@ const assertPortFree = (p) => new Promise((resolve) => {
   probe.listen(p, '127.0.0.1', () => probe.close(resolve));
 });
 
-// 데몬이 실제로 LISTEN 상태가 될 때까지 짧게 폴링 — 데몬 stdio가 ignore라
-// 기동 실패(레이스 EADDRINUSE 등)가 조용히 묻히는 것을 부모가 대신 감지한다.
-const waitForListen = (p, timeoutMs) => new Promise((resolve) => {
+// 데몬이 실제로 떠서 '우리 토큰'에 응답할 때까지 짧게 폴링 — 데몬 stdio가
+// ignore라 기동 실패(레이스 EADDRINUSE 등)가 조용히 묻히는 것을 부모가 대신
+// 감지한다. 단순 TCP 확인은 assertPortFree~데몬 bind 사이 레이스에 끼어든
+// 제3의 프로세스도 통과시키므로, 인증 REST(/api/bootstrap)로 신원까지 본다:
+// 200이면 방금 발급한 토큰을 아는 우리 데몬이 확실하다.
+const waitForDaemon = (p, authToken, timeoutMs) => new Promise((resolve) => {
   const deadline = Date.now() + timeoutMs;
+  const retry = () => {
+    if (Date.now() >= deadline) resolve(false);
+    else setTimeout(attempt, 100);
+  };
   const attempt = () => {
-    const sock = net.connect(p, '127.0.0.1');
-    sock.once('connect', () => { sock.destroy(); resolve(true); });
-    sock.once('error', () => {
-      sock.destroy();
-      if (Date.now() >= deadline) resolve(false);
-      else setTimeout(attempt, 100);
-    });
+    const req = http.get(
+      { host: '127.0.0.1', port: p, path: '/api/bootstrap', headers: { 'x-auth-token': authToken } },
+      (res) => {
+        res.resume(); // 본문을 소비해 소켓을 해제
+        if (res.statusCode === 200) resolve(true);
+        else retry();
+      },
+    );
+    req.on('error', retry);
   };
   attempt();
 });
@@ -159,9 +169,10 @@ if (!noOpen && !isDaemon) {
   });
   child.unref();
   if (port !== 0) {
-    // 데몬 stdio는 ignore라 startServer 실패가 조용히 묻힌다 — 실제 LISTEN을
-    // 확인한 뒤에만 "성공" URL을 낸다. (랜덤 포트는 부모가 포트를 몰라 스킵.)
-    const listening = await waitForListen(port, 5_000);
+    // 데몬 stdio는 ignore라 startServer 실패가 조용히 묻힌다 — 우리 토큰에
+    // 응답하는 데몬을 확인한 뒤에만 "성공" URL을 낸다. (랜덤 포트는 부모가
+    // 포트를 몰라 스킵.)
+    const listening = await waitForDaemon(port, token, 5_000);
     if (!listening) {
       fail(`The background server did not come up on port ${port}.\n`
         + 'Re-run with --no-open to see the underlying error.');
