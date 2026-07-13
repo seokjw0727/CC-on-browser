@@ -61,18 +61,33 @@ function useMediaQuery(query) {
 
 // '1'=몸통, '2'=눈. 쿼드런트 픽셀은 터미널 셀 비율대로 세로 2배(1x2)로 그린다.
 // eyeDx/eyeDy(viewBox 단위)는 눈 그룹만 커서 방향으로 밀어 연속 시선 추적을 만든다.
+//
+// 눈 소켓(px-socket): 눈 칸에는 몸통 rect를 그리지 않아 원래 그 자리가 "투명한 구멍"이다.
+// 정지 상태엔 눈이 구멍을 덮지만, 시선 추적으로 눈 그룹을 translate하면 눈은 이동하고
+// 남은 구멍으로 배경이 비쳐 "눈이 두 쌍"처럼 보인다. 이를 막으려 눈 칸마다 이동하지 않는
+// 몸통색 소켓을 눈 아래에 깐다(눈이 밀려나도 뒤가 몸통색). mono 실루엣은 눈을 뚫린 구멍으로
+// 두는 의도라 소켓만 투명 처리(CSS)해 원래 룩을 보존한다.
 export function FrameSvg({ bits, scale = 4, className = '', eyeDx = 0, eyeDy = 0 }) {
   const cols = bits[0].length;
   const rows = bits.length;
   const body = [];
+  const sockets = [];
   const eyes = [];
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
       const c = bits[y][x];
       if (c === '0') continue;
-      (c === '2' ? eyes : body).push(
-        <rect key={`${x}-${y}`} x={x} y={y * CLAWD_PIXEL_ASPECT} width="1" height={CLAWD_PIXEL_ASPECT} />,
+      const rect = (
+        <rect key={`${x}-${y}`} x={x} y={y * CLAWD_PIXEL_ASPECT} width="1" height={CLAWD_PIXEL_ASPECT} />
       );
+      if (c === '2') {
+        eyes.push(rect);
+        sockets.push(
+          <rect key={`s${x}-${y}`} x={x} y={y * CLAWD_PIXEL_ASPECT} width="1" height={CLAWD_PIXEL_ASPECT} />,
+        );
+      } else {
+        body.push(rect);
+      }
     }
   }
   return (
@@ -85,6 +100,7 @@ export function FrameSvg({ bits, scale = 4, className = '', eyeDx = 0, eyeDy = 0
       aria-hidden="true"
     >
       <g className="px-body">{body}</g>
+      <g className="px-socket">{sockets}</g>
       <g className="px-eye" transform={eyeDx || eyeDy ? `translate(${eyeDx} ${eyeDy})` : undefined}>
         {eyes}
       </g>

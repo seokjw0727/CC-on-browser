@@ -45,6 +45,13 @@ export const browseDirs = (absPath = '') =>
   get(`/api/browse?path=${encodeURIComponent(absPath)}`);
 
 /**
+ * @ 파일 태그 자동완성 — cwd 하위 파일을 질의로 검색해 상대경로 목록을 반환.
+ * @returns {Promise<{files: string[]}>}
+ */
+export const searchFiles = (cwd, q = '') =>
+  get(`/api/files?cwd=${encodeURIComponent(cwd)}${q ? `&q=${encodeURIComponent(q)}` : ''}`);
+
+/**
  * @returns {Promise<{now, fiveHour, sevenDay, quota}>}
  * 로컬 트랜스크립트 집계(5h/7d) + 계정 공식 사용률 quota({fiveHour,sevenDay} — 실패 시 null)
  */

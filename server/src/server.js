@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 import { SessionHub } from './session-hub.js';
 import { listProjects, listSessions, loadTranscript } from './history.js';
-import { listDirs, pickDirectory } from './fs-api.js';
+import { listDirs, pickDirectory, searchFiles } from './fs-api.js';
 import { aggregateUsage } from './usage.js';
 import { fetchQuota } from './quota.js';
 
@@ -259,6 +259,15 @@ export async function startServer({
           return;
         case '/api/browse':
           json(res, 200, await listDirs(url.searchParams.get('path') ?? ''));
+          return;
+        case '/api/files':
+          // @ 파일 태그 자동완성 — cwd 하위 파일을 질의로 검색(상대경로만 반환).
+          json(res, 200, {
+            files: await searchFiles(
+              url.searchParams.get('cwd') ?? '',
+              url.searchParams.get('q') ?? '',
+            ),
+          });
           return;
         case '/api/pick-directory':
           // 네이티브 폴더 선택 대화상자를 사용자 데스크톱에 띄우고 선택 경로를 반환.

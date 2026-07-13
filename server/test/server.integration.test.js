@@ -445,6 +445,15 @@ test('(f) REST auth + /api/projects/sessions/transcript/browse/bootstrap', async
   assert.ok(browse.dirs.includes('projects'));
   assert.ok(browse.dirs.includes('dist'));
 
+  // /api/files — @ 파일 태그 자동완성. 인증 필수, {files: 상대경로[]} 반환.
+  assert.equal((await fetch(`${base}/api/files?cwd=${encodeURIComponent(tmpRoot)}`)).status, 401);
+  const files = await (await fetch(
+    `${base}/api/files?cwd=${encodeURIComponent(tmpRoot)}&q=`,
+    auth,
+  )).json();
+  assert.ok(Array.isArray(files.files));
+  assert.ok(files.files.every((f) => !f.includes('\\')), 'POSIX 구분자');
+
   const bootstrap = await (await fetch(`${base}/api/bootstrap`, auth)).json();
   assert.equal(bootstrap.port, port);
   assert.ok('claudeVersion' in bootstrap);

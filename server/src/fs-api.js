@@ -96,6 +96,82 @@ async function listDrives() {
   return checks.filter((c) => c.status === 'fulfilled').map((c) => c.value);
 }
 
+// ----- @ 파일 태그용 — cwd 하위 파일을 질의로 검색해 상대경로(POSIX 구분자)를 반환 -----
+// 로컬 단일 사용자 도구지만 거대한 트리를 무한정 훑지 않도록 방문/결과 상한을 둔다.
+// 파일 "이름"만 반환하고 내용은 절대 읽지 않는다(listDirs와 동일 원칙).
+const FILE_SEARCH_IGNORE_DIRS = new Set([
+  'node_modules', '.git', '.hg', '.svn', 'dist', 'build', 'out',
+  '.next', '.nuxt', '.cache', '.turbo', 'coverage', '.venv', 'venv',
+  '__pycache__', '.idea', '.vscode', 'target', 'vendor', '.omc',
+]);
+const FILE_SEARCH_MAX_ENTRIES = 20_000; // 방문 상한(디렉터리 폭주 방지)
+const FILE_SEARCH_MAX_RESULTS = 50;
+
+function isSubsequence(needle, hay) {
+  let i = 0;
+  for (let j = 0; j < hay.length && i < needle.length; j += 1) {
+    if (hay[j] === needle[i]) i += 1;
+  }
+  return i === needle.length;
+}
+
+// 낮을수록 좋은 매치. -1이면 불일치(결과에서 제외). q는 소문자·트림된 질의.
+function fileMatchScore(relLower, nameLower, q) {
+  if (!q) return 0; // 빈 질의 — 전부 매치, 이후 경로 길이(얕은 순)로 정렬
+  if (nameLower.startsWith(q)) return 0;
+  if (nameLower.includes(q)) return 1;
+  if (relLower.includes(q)) return 2;
+  return isSubsequence(q, relLower) ? 3 : -1;
+}
+
+/**
+ * cwd 하위 파일을 질의로 검색한다. BFS로 얕은 경로를 먼저 방문해 상한에 걸려도
+ * 가까운 파일이 우선 담긴다. 숨김(.) 파일/폴더와 무거운 빌드 디렉터리는 건너뛴다.
+ * @returns {Promise<string[]>} cwd 기준 상대경로 목록(POSIX '/' 구분자), 관련도순.
+ */
+export async function searchFiles(cwd, query = '', { limit = FILE_SEARCH_MAX_RESULTS } = {}) {
+  if (typeof cwd !== 'string' || !path.isAbsolute(cwd)) {
+    throw new Error(`searchFiles requires an absolute cwd, got: ${String(cwd)}`);
+  }
+  if (cwd.startsWith('\\\\') || cwd.startsWith('//')) {
+    throw new Error(`UNC/network paths are not allowed: ${cwd}`);
+  }
+  const root = path.resolve(cwd);
+  const q = String(query ?? '').trim().toLowerCase();
+  const results = [];
+  let visited = 0;
+  const queue = [root];
+  while (queue.length && visited < FILE_SEARCH_MAX_ENTRIES) {
+    const dir = queue.shift();
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      continue; // 권한 없음 등 — 조용히 건너뛴다
+    }
+    for (const e of entries) {
+      visited += 1;
+      if (visited > FILE_SEARCH_MAX_ENTRIES) break;
+      if (e.name.startsWith('.')) continue; // 숨김 파일/폴더 제외
+      if (e.isDirectory()) {
+        if (!FILE_SEARCH_IGNORE_DIRS.has(e.name)) queue.push(path.join(dir, e.name));
+        continue;
+      }
+      if (!e.isFile()) continue; // 심볼릭 링크·특수 파일은 제외(따라가지 않음)
+      const rel = path.relative(root, path.join(dir, e.name)).split(path.sep).join('/');
+      const score = fileMatchScore(rel.toLowerCase(), e.name.toLowerCase(), q);
+      if (score >= 0) results.push({ rel, score });
+    }
+  }
+  results.sort(
+    (a, b) =>
+      a.score - b.score ||
+      a.rel.length - b.rel.length ||
+      a.rel.localeCompare(b.rel, undefined, { sensitivity: 'base' }),
+  );
+  return results.slice(0, limit).map((r) => r.rel);
+}
+
 export async function listDirs(absPath) {
   if (absPath === '' || absPath == null) {
     const dirs = process.platform === 'win32' ? await listDrives() : ['/'];

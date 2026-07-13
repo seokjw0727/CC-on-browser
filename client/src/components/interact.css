@@ -727,6 +727,9 @@ select.mode-trust:focus {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* @ 파일 태그 드롭다운 — 파일명은 그대로, 뒤따르는 경로(dir)는 남는 폭에서 말줄임 */
+.at-dropdown .cmd-name { flex: none; }
+.at-dropdown .cmd-desc { flex: 1; min-width: 0; text-align: right; }
 
 /* ===================== Modals ===================== */
 .modal-overlay {
@@ -1201,6 +1204,9 @@ select.mode-trust:focus {
 :where(.clawd) { position: relative; }
 /* 공식 색 — CLI 바이너리 테마 실측: clawd_body rgb(215,119,87), 눈은 검정(clawd_background) */
 .mascot .px-body { fill: var(--clawd-body, #d77757); }
+/* 눈 소켓 — 눈 아래에 깔린 몸통색 백킹. 시선 추적으로 눈이 밀려나도 뒤가 배경이 아닌
+   몸통색으로 채워져 "남은 구멍(=유령 눈)"이 안 생긴다(Clawd.jsx FrameSvg 주석 참조). */
+.mascot .px-socket { fill: var(--clawd-body, #d77757); }
 .mascot .px-eye { fill: var(--clawd-eye, #141413); }
 /* 연속 시선 추적(eyeDx/eyeDy translate) 사이를 부드럽게 보간 — rAF 샘플 간 스냅 방지 */
 .clawd .mascot .px-eye { transition: transform 110ms linear; }
@@ -1209,6 +1215,8 @@ select.mode-trust:focus {
 }
 /* 실루엣 문맥(사이드바 빈 상태 등) — 단색, 눈은 뚫린 구멍으로 배경이 비친다 */
 .mascot.mono .px-body { fill: currentColor; }
+/* mono는 눈을 뚫린 구멍으로 두는 의도 — 소켓도 투명해야 원래 실루엣 룩이 유지된다 */
+.mascot.mono .px-socket { fill: transparent; }
 .mascot.mono .px-eye { fill: transparent; }
 .clawd .clawd-bob,
 .clawd .clawd-poke { display: inline-block; }

@@ -5,6 +5,7 @@
 // Enter 전송/Shift+Enter 개행, `/` 커맨드 드롭다운, Esc/버튼 interrupt.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
+import { searchFiles } from '../lib/api.js';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
 import { openSubagentCount } from '../lib/clawd.js';
 import { fmtTok, shortPath, contextWindowFor } from '../lib/format.js';
@@ -285,8 +286,14 @@ export default function Composer({ theme, onToggleTheme }) {
   const { state, dispatch, send, startSession, stopSession, notify } = useStore();
   const session = useActiveSession();
   const [text, setText] = useState('');
+  const [caret, setCaret] = useState(0);
   const [selIdx, setSelIdx] = useState(0);
   const [cmdDismissed, setCmdDismissed] = useState(false);
+  // @ 파일 태그 자동완성 상태
+  const [atFiles, setAtFiles] = useState([]);
+  const [atSel, setAtSel] = useState(0);
+  const [atLoading, setAtLoading] = useState(false);
+  const [atDismissed, setAtDismissed] = useState(false);
   const taRef = useRef(null);
 
   const busy = !!session && session.status !== 'idle' && session.status !== 'exited';
@@ -327,6 +334,75 @@ export default function Composer({ theme, onToggleTheme }) {
     setCmdDismissed(false);
     setSelIdx(0);
   }, [text]);
+
+  // ----- `@` 파일 태그 자동완성 -----
+  // 캐럿 바로 앞의 @토큰(공백/@ 없는 연속 문자)을 잡아 cwd 하위 파일을 검색한다.
+  // 슬래시 커맨드와 달리 텍스트 중간에서도 동작하므로 캐럿 위치 기준으로 판정한다.
+  const atToken = useMemo(() => {
+    if (!session) return null;
+    const before = text.slice(0, caret);
+    const m = /(^|\s)@([^\s@]*)$/.exec(before);
+    if (!m) return null;
+    return { query: m[2], start: m.index + m[1].length, end: caret };
+  }, [text, caret, session]);
+  const atOpen = !!atToken && !atDismissed && (atLoading || atFiles.length > 0);
+
+  // @토큰이 활성일 때 cwd 하위 파일을 디바운스 검색한다(키 입력마다 서버 walk).
+  const atQuery = atToken?.query;
+  const atCwd = session?.cwd;
+  useEffect(() => {
+    if (atQuery == null || !atCwd) {
+      setAtFiles([]);
+      setAtLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setAtLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const { files } = await searchFiles(atCwd, atQuery);
+        if (!cancelled) {
+          setAtFiles(Array.isArray(files) ? files : []);
+          setAtSel(0);
+        }
+      } catch {
+        if (!cancelled) setAtFiles([]);
+      } finally {
+        if (!cancelled) setAtLoading(false);
+      }
+    }, 120);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [atQuery, atCwd]);
+
+  // 새 입력이 들어오면 @드롭다운 dismiss를 해제(슬래시 드롭다운과 동일 관례).
+  useEffect(() => {
+    setAtDismissed(false);
+  }, [atQuery]);
+
+  // textarea 캐럿 위치 동기화 — @토큰 판정의 기준. 값 변경(onChange)뿐 아니라
+  // 클릭·화살표 이동으로 캐럿만 움직일 때도 갱신해야 한다.
+  const syncCaret = () => setCaret(taRef.current?.selectionStart ?? 0);
+
+  // 선택한 파일을 @토큰 자리에 삽입한다(뒤에 공백을 붙여 토큰을 종료).
+  const pickFile = (rel) => {
+    if (!atToken || !rel) return;
+    const insert = `@${rel} `;
+    const next = text.slice(0, atToken.start) + insert + text.slice(atToken.end);
+    const pos = atToken.start + insert.length;
+    setText(next);
+    setAtFiles([]);
+    // 상태 반영 후 캐럿을 삽입 끝으로 옮긴다(제어 textarea라 rAF로 다음 프레임에).
+    requestAnimationFrame(() => {
+      const el = taRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(pos, pos);
+      setCaret(pos);
+    });
+  };
 
   useEffect(() => {
     const el = taRef.current;
@@ -495,6 +571,30 @@ export default function Composer({ theme, onToggleTheme }) {
   };
 
   const onKeyDown = (e) => {
+    if (atOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setAtSel((i) => Math.min(i + 1, atFiles.length - 1));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setAtSel((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        // 드롭다운이 열린 동안엔 Enter를 삼킨다 — 검색 중(결과 아직 없음)일 때
+        // 실수로 메시지가 전송되지 않도록. 결과가 있으면 선택.
+        e.preventDefault();
+        if (atFiles.length > 0) pickFile(atFiles[Math.min(atSel, atFiles.length - 1)]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setAtDismissed(true);
+        return;
+      }
+    }
     if (dropdownOpen) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -558,6 +658,37 @@ export default function Composer({ theme, onToggleTheme }) {
                 {c.description && <span className="cmd-desc">{c.description}</span>}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* @ 파일 태그 자동완성 — cwd 하위 파일 검색 결과 */}
+        {atOpen && (
+          <div className="cmd-dropdown at-dropdown" role="listbox" id="at-listbox" aria-label="파일 참조">
+            {atFiles.length === 0 ? (
+              <div className="cmd-item dim">검색 중…</div>
+            ) : (
+              atFiles.map((f, i) => {
+                const slash = f.lastIndexOf('/');
+                const name = slash >= 0 ? f.slice(slash + 1) : f;
+                const dir = slash >= 0 ? f.slice(0, slash + 1) : '';
+                return (
+                  <div
+                    key={f}
+                    role="option"
+                    aria-selected={i === atSel}
+                    className={`cmd-item${i === atSel ? ' sel' : ''}`}
+                    onMouseEnter={() => setAtSel(i)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      pickFile(f);
+                    }}
+                  >
+                    <span className="cmd-name">@{name}</span>
+                    {dir && <span className="cmd-desc">{dir}</span>}
+                  </div>
+                );
+              })
+            )}
           </div>
         )}
 
@@ -651,8 +782,14 @@ export default function Composer({ theme, onToggleTheme }) {
             aria-expanded={dropdownOpen}
             aria-controls={dropdownOpen ? 'cmd-listbox' : undefined}
             aria-activedescendant={dropdownOpen ? `cmd-opt-${selIdx}` : undefined}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+              setCaret(e.target.selectionStart ?? e.target.value.length);
+            }}
             onKeyDown={onKeyDown}
+            onKeyUp={syncCaret}
+            onClick={syncCaret}
+            onSelect={syncCaret}
           />
         </div>
 
