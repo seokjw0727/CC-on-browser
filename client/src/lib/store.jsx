@@ -13,6 +13,7 @@ import React, {
 } from 'react';
 import { connect } from './ws.js';
 import { createInitialState, reducer } from './store-reducer.js';
+import { spawnEffort } from './effort.js';
 
 const TOKEN_KEY = 'ccob-token';
 
@@ -114,7 +115,10 @@ export function StoreProvider({ children }) {
             cwd: opts.cwd,
             model: opts.model ?? null,
             permissionMode: opts.permissionMode ?? 'default',
-            effort: opts.effort ?? null,
+            // UI 의사 티어(ultracode)는 실제 CLI 값(max)으로 매핑해 보낸다 —
+            // 서버 EFFORT_LEVELS 검증은 low..max만 통과시킨다. UI 표시용 effort는
+            // register-start의 opts.effort로 세션에 그대로 시딩된다(ultracode 보존).
+            effort: spawnEffort(opts.effort),
             resumeSessionId: opts.resumeSessionId ?? null,
           });
         if (!ok) {

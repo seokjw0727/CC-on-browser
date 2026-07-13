@@ -9,6 +9,8 @@ import { reduceCliEvent } from '../lib/reduce-cli-event.js';
 import { openSubagentCount } from '../lib/clawd.js';
 import { fmtTok, shortPath, contextWindowFor } from '../lib/format.js';
 import { MODES, MODE_LABEL, MODE_CLASS } from '../lib/permission-modes.js';
+import { EFFORT_LEVELS, DEFAULT_EFFORT, effortLabel, isUiEffort } from '../lib/effort.js';
+import ActiveModes from './ActiveModes.jsx';
 import Clawd from './Clawd.jsx';
 import './interact.css';
 
@@ -199,14 +201,7 @@ function ModelPicker({ session, options, disabled, onSelect }) {
 }
 
 // ----- 노력 수준 피커 — progress bar 형태 (--effort는 spawn 전용 → 변경 시 --resume 재시작) -----
-const EFFORT_LEVELS = [
-  { value: 'low', label: '낮음' },
-  { value: 'medium', label: '중간' },
-  { value: 'high', label: '높음' },
-  { value: 'xhigh', label: '매우 높음' },
-  { value: 'max', label: '최대' },
-];
-const DEFAULT_EFFORT = 'high'; // CLI 기본값 (claude --help 실측: defaults to high)
+// EFFORT_LEVELS/DEFAULT_EFFORT/effortLabel은 lib/effort.js가 단일 출처(spawn 매핑과 공유).
 
 function EffortPicker({ session, options, disabled, onSelect }) {
   const { open, setOpen, wrapRef } = usePopover();
@@ -214,18 +209,23 @@ function EffortPicker({ session, options, disabled, onSelect }) {
   const opt = fam ? options.find((o) => o.family === fam.family) : null;
   // CLI 항목이 supportsEffort를 명시하지 않은 모델(예: Haiku)은 비활성; 정보가 없으면 허용
   const supports = opt?.cliEntry ? !!opt.cliEntry.supportsEffort : true;
+  // 모델이 지원 목록을 보고하면 그걸로 거르되, UI 전용 의사 티어(ultracode)는 CLI
+  // 목록에 없어도 항상 남긴다 — spawn 시 max로 매핑되므로 실제 지원과 무관하다.
   const levels = opt?.cliEntry?.supportedEffortLevels?.length
-    ? EFFORT_LEVELS.filter((l) => opt.cliEntry.supportedEffortLevels.includes(l.value))
+    ? EFFORT_LEVELS.filter(
+        (l) => isUiEffort(l.value) || opt.cliEntry.supportedEffortLevels.includes(l.value),
+      )
     : EFFORT_LEVELS;
   const cur = session.effort ?? DEFAULT_EFFORT;
   const curIdx = Math.max(0, levels.findIndex((l) => l.value === cur));
   const curLabel = levels[curIdx]?.label ?? cur;
+  const ultraActive = isUiEffort(cur);
 
   return (
     <span className="model-menu-wrap" ref={wrapRef}>
       <button
         type="button"
-        className="pill model-menu-btn"
+        className={`pill model-menu-btn${ultraActive ? ' effort-ultra' : ''}`}
         disabled={disabled || !supports}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -234,10 +234,13 @@ function EffortPicker({ session, options, disabled, onSelect }) {
       >
         <span className="effort-bar mini" aria-hidden="true">
           {levels.map((l, i) => (
-            <span key={l.value} className={`effort-seg-vis${i <= curIdx ? ' fill' : ''}`} />
+            <span
+              key={l.value}
+              className={`effort-seg-vis${i <= curIdx ? ' fill' : ''}${l.ultra ? ' ultra' : ''}`}
+            />
           ))}
         </span>
-        <span className="truncate">노력 {curLabel}</span>
+        <span className="truncate">{ultraActive ? `⚡ ${curLabel}` : `노력 ${curLabel}`}</span>
         <span className="mm-caret" aria-hidden="true">▾</span>
       </button>
       {open && (
@@ -250,9 +253,9 @@ function EffortPicker({ session, options, disabled, onSelect }) {
                 type="button"
                 role="menuitemradio"
                 aria-checked={l.value === cur}
-                aria-label={l.label}
-                className={`effort-seg${i <= curIdx ? ' fill' : ''}`}
-                title={l.label}
+                aria-label={l.ultra ? `${l.label} (최대 노력 + 플래그십 모드)` : l.label}
+                className={`effort-seg${i <= curIdx ? ' fill' : ''}${l.ultra ? ' ultra' : ''}`}
+                title={l.ultra ? '울트라코드 — 최대 노력으로 재시작(플래그십 모드)' : l.label}
                 onClick={() => {
                   if (l.value !== cur) onSelect(l.value);
                   setOpen(false);
@@ -262,11 +265,15 @@ function EffortPicker({ session, options, disabled, onSelect }) {
           </div>
           <div className="effort-labels">
             <span className="dim">{levels[0]?.label}</span>
-            <span className="effort-cur">{curLabel}</span>
+            <span className={`effort-cur${ultraActive ? ' ultra' : ''}`}>
+              {ultraActive ? `⚡ ${curLabel}` : curLabel}
+            </span>
             <span className="dim">{levels[levels.length - 1]?.label}</span>
           </div>
           <div className="mm-desc dim effort-note">
-            변경하면 같은 대화로 세션을 재시작합니다 (--effort는 시작 시에만 적용).
+            {ultraActive
+              ? '울트라코드는 최대 노력으로 세션을 재시작합니다(브라우저 CLI엔 별도 워크플로 채널이 없어 실효는 max 노력).'
+              : '변경하면 같은 대화로 세션을 재시작합니다 (--effort는 시작 시에만 적용).'}
           </div>
         </div>
       )}
@@ -334,11 +341,13 @@ export default function Composer({ theme, onToggleTheme }) {
     taRef.current?.focus();
   };
 
-  const doSend = () => {
-    if (!canSend) return;
-    const t = text;
+  // 프롬프트 전송 코어 — doSend(입력창)와 인터럽트 복구 재시도가 공유한다.
+  // 전송 가능 불변식(세션 idle·연결됨·비어있지 않음)을 스스로 강제한다.
+  const submit = (t) => {
+    if (!session || session.status !== 'idle' || state.conn !== 'open') return false;
+    if (typeof t !== 'string' || t.trim() === '') return false;
     const ok = send({ type: 'send', key: session.key, text: t });
-    if (!ok) return;
+    if (!ok) return false;
     // 알려진 슬래시 커맨드는 커맨드 칩/초기화 구분선/압축 카드로 낙관 렌더 —
     // reduceUser의 <command-name> 경로를 태워 CLI 에코와 자연히 중복 제거된다.
     const cmd = /^\/([\w:.-]+)(?:\s+([\s\S]*))?$/.exec(t.trim());
@@ -365,7 +374,45 @@ export default function Composer({ theme, onToggleTheme }) {
         interruptRequested: false, // 새 턴 시작 — 이전 인터럽트 표시 해제
       }),
     });
-    setText('');
+    return true;
+  };
+
+  const doSend = () => {
+    if (!canSend) return;
+    // 입력창 비우기는 "작성-후-전송" 경로에서만 — submit(t) 코어는 전달된 문자열을
+    // 보낼 뿐이라, 재시도(다른 문자열 전송)가 작성 중 draft를 지우지 않게 한다.
+    if (submit(text)) setText('');
+  };
+
+  // ----- 인터럽트된 턴 복구 (Task: interrupted chat 수정) -----
+  // 사용자가 Esc로 직접 중단한 턴은 is_error result로 끝나고 interruptRequested가
+  // 남는다. 그 마지막 프롬프트를 그대로 재전송하거나(재시도), 입력창으로 불러와
+  // 고쳐서 보낼 수 있게(수정) 복구 바를 노출한다.
+  const interrupted =
+    !!session &&
+    session.status === 'idle' &&
+    !!session.interruptRequested &&
+    !!session.lastResult?.isError &&
+    typeof session.lastUserText === 'string' &&
+    session.lastUserText.trim() !== '';
+
+  const retryInterrupted = () => submit(session?.lastUserText ?? '');
+
+  const editInterrupted = () => {
+    if (!session?.lastUserText) return;
+    setText(session.lastUserText);
+    taRef.current?.focus();
+    // 편집만 — 전송은 사용자가 doSend로. 인터럽트 표시는 실제 전송 때 해제된다.
+  };
+
+  // 복구 바를 명시적으로 닫기 — 인터럽트 표시만 해제(대화 기록은 그대로).
+  const dismissInterrupted = () => {
+    if (!session) return;
+    dispatch({
+      type: 'update-session',
+      key: session.key,
+      fn: (s) => ({ ...s, interruptRequested: false }),
+    });
   };
 
   const doInterrupt = () => {
@@ -438,7 +485,7 @@ export default function Composer({ theme, onToggleTheme }) {
       preloadCtxFromCalls: canResume ? session.ctxFromCalls : false,
       replaceKey: session.key,
     });
-    const label = EFFORT_LEVELS.find((l) => l.value === effort)?.label ?? effort;
+    const label = effortLabel(effort);
     // 문구는 실제 동작과 일치시킨다 — resume이 아닐 때 "같은 대화"라고 말하지 않는다.
     notify(
       canResume
@@ -511,6 +558,49 @@ export default function Composer({ theme, onToggleTheme }) {
                 {c.description && <span className="cmd-desc">{c.description}</span>}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* 구동 중인 기능 배지 — ⚡울트라코드 · 🎯목표 · 🔓권한 상승 (활성 시에만) */}
+        {session && <ActiveModes session={session} />}
+
+        {/* 인터럽트된 턴 복구 바 — 재시도 / 수정 후 재전송 */}
+        {interrupted && (
+          <div className="interrupt-recover" role="status">
+            <span className="ir-ico" aria-hidden="true">↺</span>
+            <span className="ir-text">직전 턴이 중단되었습니다.</span>
+            <span className="ir-preview dim" title={session.lastUserText}>
+              “{session.lastUserText.length > 40
+                ? `${session.lastUserText.slice(0, 40)}…`
+                : session.lastUserText}”
+            </span>
+            <span className="spacer" />
+            <button
+              type="button"
+              className="ir-btn primary"
+              onClick={retryInterrupted}
+              disabled={!live || state.conn !== 'open' || session.status !== 'idle'}
+              title="같은 프롬프트를 그대로 다시 보냅니다"
+            >
+              ↻ 재시도
+            </button>
+            <button
+              type="button"
+              className="ir-btn"
+              onClick={editInterrupted}
+              title="프롬프트를 입력창으로 불러와 고쳐서 보냅니다"
+            >
+              ✎ 수정
+            </button>
+            <button
+              type="button"
+              className="ir-btn ghost"
+              onClick={dismissInterrupted}
+              title="복구 바 닫기"
+              aria-label="복구 바 닫기"
+            >
+              ✕
+            </button>
           </div>
         )}
 

@@ -522,6 +522,137 @@ select.mode-trust:focus {
 .effort-note {
   padding: 6px 10px 4px;
 }
+/* 울트라코드 — UI 최상위 의사 티어(spawn 시 max로 매핑). 플래그십 강조색. */
+.effort-seg-vis.ultra.fill {
+  background: linear-gradient(135deg, var(--accent), #b06bff);
+}
+.effort-seg.ultra.fill {
+  background: linear-gradient(135deg, var(--accent), #b06bff);
+}
+.effort-seg.ultra {
+  outline: 1px solid color-mix(in srgb, #b06bff 55%, transparent);
+}
+.model-menu-btn.effort-ultra {
+  border-color: color-mix(in srgb, #b06bff 55%, var(--border-soft));
+  color: color-mix(in srgb, #b06bff 45%, var(--text));
+  font-weight: 600;
+}
+.effort-cur.ultra {
+  color: color-mix(in srgb, #b06bff 55%, var(--text));
+}
+
+/* ----- 구동 중인 기능 배지 (ActiveModes) ----- */
+.active-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 2px 6px;
+}
+.mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  border: 1px solid var(--border-soft);
+  background: var(--surface-2);
+  color: var(--text);
+}
+.mode-badge.ultra {
+  border-color: color-mix(in srgb, #b06bff 55%, transparent);
+  background: color-mix(in srgb, #b06bff 14%, transparent);
+  color: color-mix(in srgb, #b06bff 50%, var(--text));
+}
+.mode-badge.goal {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.mode-badge.goal .mode-badge-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+.mode-badge.perm {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: var(--danger-soft);
+  /* 작은 볼드 라벨은 var(--danger) on danger-soft가 다크에서 AA 미달(≈4:1) —
+     텍스트는 --text로 대비를 확보하고 danger는 테두리·아이콘에만 남긴다(토스트 패턴). */
+  color: var(--text);
+}
+.mode-badge.perm .badge-ico {
+  color: var(--danger);
+}
+
+/* ----- 인터럽트된 턴 복구 바 ----- */
+.interrupt-recover {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin: 0 2px 6px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 32%, transparent);
+  background: var(--danger-soft);
+  font-size: 12.5px;
+}
+.interrupt-recover .ir-ico {
+  color: var(--danger);
+  font-weight: 700;
+}
+.interrupt-recover .ir-text {
+  font-weight: 600;
+  color: var(--text);
+}
+.interrupt-recover .ir-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.ir-btn {
+  flex: none;
+  padding: 3px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ir-btn:hover {
+  border-color: var(--accent);
+}
+.ir-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.ir-btn.primary {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-color: var(--accent);
+}
+.ir-btn.primary:hover {
+  background: var(--accent-hover);
+}
+.ir-btn.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ir-btn.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 3px 6px;
+}
 .meta-x {
   padding: 0 4px;
   color: inherit;

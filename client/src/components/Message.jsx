@@ -14,6 +14,18 @@ function rawSummary(payload) {
   return payload.subtype ? `이벤트 ${t}/${payload.subtype}` : `이벤트 ${t}`;
 }
 
+// 디버그 모드 — 프로토콜 내부(raw) 이벤트를 노출할지. 기본 꺼짐. 개발 시
+// localStorage.setItem('ccob-debug','1') 또는 window.__CCOB_DEBUG=true로 켠다.
+function debugEnabled() {
+  try {
+    if (typeof window === 'undefined') return false;
+    if (window.__CCOB_DEBUG === true) return true;
+    return window.localStorage?.getItem('ccob-debug') === '1';
+  } catch {
+    return false;
+  }
+}
+
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' &&
   typeof window.matchMedia === 'function' &&
@@ -220,6 +232,9 @@ export default function Message({ item, isNew }) {
       return <div className={`msg msg-error${enter}`}>{item.text}</div>;
 
     case 'raw':
+      // 프로토콜 내부 이벤트(미지 타입·시스템 서브타입·고아 tool_result 등)는 사용자가
+      // 볼 필요가 없어 기본 숨김이다 — 디버그 모드에서만 접이식으로 노출한다.
+      if (!debugEnabled()) return null;
       return (
         <details className={`msg-raw${enter}`}>
           <summary className="dim">{rawSummary(item.payload)}</summary>

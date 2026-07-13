@@ -103,25 +103,60 @@ function consumeOptimistic(session, pred) {
 // 커맨드 호출을 아이템으로 반영 — /clear는 전용 초기화 구분선, 그 외는 커맨드 칩.
 // /compact는 칩과 함께 진행 카드를 즉시 띄운다(느린 작업이라 즉각 피드백이 중요).
 function reduceCommandInvocation(session, name, args, optimistic) {
+  let next;
   if (name === 'clear') {
-    if (!optimistic) {
-      const consumed = consumeOptimistic(session, (m) => m.kind === 'cleared');
-      if (consumed) return consumed;
+    const consumed = !optimistic ? consumeOptimistic(session, (m) => m.kind === 'cleared') : null;
+    next = consumed || append(session, { kind: 'cleared', ...(optimistic ? { optimistic: true } : {}) });
+  } else {
+    const matches = (m) => m.kind === 'command' && m.name === name && (m.args || '') === (args || '');
+    // 에코가 낙관 칩을 확정
+    next = (!optimistic && consumeOptimistic(session, matches)) || null;
+    if (!next) {
+      next = append(session, { kind: 'command', name, args: args || '', ...(optimistic ? { optimistic: true } : {}) });
     }
-    return append(session, { kind: 'cleared', ...(optimistic ? { optimistic: true } : {}) });
+    // 진행 카드는 낙관(사용자가 방금 실행)일 때만 즉시 띄운다. 재개 트랜스크립트의
+    // 에코로는 만들지 않는다 — 뒤에 완료 신호(Compacted/result)가 없는 잘린 히스토리에서
+    // 무한 진행바가 남는 것을 원천 차단(라이브의 status:'compacting'은 별개 경로로 여전히
+    // 진행 카드를 만든다). 멱등이라 status와 겹쳐도 중복되지 않는다.
+    if (name === 'compact' && optimistic) next = startCompaction(next);
+    // /goal 호출은 커맨드 칩을 남기되, 구동 중 기능 배지용 목표 상태도 함께 갱신한다.
+    if (name === 'goal') next = applyGoalCommand(next, args);
   }
-  const matches = (m) => m.kind === 'command' && m.name === name && (m.args || '') === (args || '');
-  let next = null;
-  if (!optimistic) next = consumeOptimistic(session, matches); // 에코가 낙관 칩을 확정
-  if (!next) {
-    next = append(session, { kind: 'command', name, args: args || '', ...(optimistic ? { optimistic: true } : {}) });
+  // 커맨드 턴은 재시도 가능한 "plain 프롬프트"가 아니다 — 인터럽트 복구 바가 직전
+  // plain 프롬프트를 stale하게 물고 오지 않도록(예: 프롬프트 완료 후 /compact를 Esc로
+  // 중단) lastUserText를 비운다. 복구 바는 plain 텍스트 턴이 중단됐을 때만 의미가 있다.
+  return { ...next, lastUserText: null };
+}
+
+// /goal <텍스트> = 목표 설정, /goal clear = 해제. 인자 없는 /goal(조회)은 상태를
+// 건드리지 않는다. 배지 표시용 session.goal만 갱신하고 렌더는 그대로 커맨드 칩이 맡는다.
+function applyGoalCommand(session, args) {
+  const a = (args || '').trim();
+  if (/^clear\b/i.test(a)) return { ...session, goal: null };
+  if (a === '') return session;
+  return { ...session, goal: a };
+}
+
+// 가장 최근 커맨드 칩의 이름 — /goal stdout 흡수를 그 명령이 방금 실행됐을 때로 한정하는 데 쓴다.
+function lastCommandName(session) {
+  const idx = findLastIndex(session.messages, (m) => m.kind === 'command');
+  return idx >= 0 ? session.messages[idx].name : null;
+}
+
+// 프리로드된 메시지(재개/effort 재시작)에서 마지막 /goal 상태를 복원한다. 시딩은
+// 리듀서를 안 태우므로, 이게 없으면 goal 배지가 재시작·재개에서 사라진다(같은 대화가
+// 이어지는데도). 커맨드 칩(kind:'command', name:'goal')을 역순으로 훑어 set/clear를 판정.
+export function deriveGoalFromMessages(messages) {
+  if (!Array.isArray(messages)) return null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (!m || m.kind !== 'command' || m.name !== 'goal') continue;
+    const a = (m.args || '').trim();
+    if (/^clear\b/i.test(a)) return null; // 마지막 동작이 해제
+    if (a === '') continue; // 조회 — 더 이전 설정을 계속 찾는다
+    return a;
   }
-  // 진행 카드는 낙관(사용자가 방금 실행)일 때만 즉시 띄운다. 재개 트랜스크립트의
-  // 에코로는 만들지 않는다 — 뒤에 완료 신호(Compacted/result)가 없는 잘린 히스토리에서
-  // 무한 진행바가 남는 것을 원천 차단(라이브의 status:'compacting'은 별개 경로로 여전히
-  // 진행 카드를 만든다). 멱등이라 status와 겹쳐도 중복되지 않는다.
-  if (name === 'compact' && optimistic) next = startCompaction(next);
-  return next;
+  return null;
 }
 
 function findRunningCompaction(messages) {
@@ -504,11 +539,21 @@ function reduceUser(session, payload) {
       const text = content.replace(/<\/?local-command-(stdout|stderr)>/g, '').trim();
       // "Compacted …"는 /compact 완료 신호 — 압축 카드로 흡수(별도 출력 렌더 안 함).
       if (/^Compacted\b/i.test(text)) return finishCompaction(next, null);
+      // "Goal set:"/"Goal cleared" stdout은 목표 배지의 폴백 신호지만, 임의 커맨드 출력이
+      // 우연히 같은 접두사로 시작하면 삼켜지므로(그 출력·오류가 사라짐) **직전 커맨드가
+      // /goal이고 stdout일 때만** 흡수한다. 커맨드 에코 경로(applyGoalCommand)가 이미
+      // 권위이므로 여기선 중복 출력 억제가 주목적이다. stderr은 절대 삼키지 않는다.
+      if (outM[1] === 'stdout' && lastCommandName(next) === 'goal') {
+        const goalSet = /^Goal set:\s*([\s\S]*)$/i.exec(text);
+        if (goalSet) return { ...next, goal: goalSet[1].trim() || next.goal };
+        if (/^Goal (cleared|unset)\b/i.test(text)) return { ...next, goal: null };
+      }
       return text
         ? append(next, { kind: 'command-output', text, isError: outM[1] === 'stderr' })
         : next;
     }
-    return append(next, { kind: 'user-text', text: content });
+    // 인터럽트 복구(재시도/수정)를 위해 사용자가 보낸 프롬프트 원문을 기억한다.
+    return { ...append(next, { kind: 'user-text', text: content }), lastUserText: content };
   }
   if (!Array.isArray(content)) return next;
 
@@ -517,6 +562,7 @@ function reduceUser(session, payload) {
       next = attachToolResult(next, item, payload.tool_use_result);
     } else if (item && item.type === 'text') {
       next = append(next, { kind: 'user-text', text: item.text ?? '' });
+      next = { ...next, lastUserText: item.text ?? '' };
     } else {
       next = append(next, { kind: 'raw', payload: item });
     }
@@ -732,6 +778,15 @@ export function reduceCliEvent(session, payload) {
     case 'control_request':
     case 'control_response':
       return session; // 서버가 처리(권한 요청은 별도 WS 타입으로 도착)
+    // 서버 허브가 CLI의 stderr·비-JSON stdout 라인을 {type:'raw', line}으로 중계한다
+    // (session-hub). 이는 프로토콜 내부 노이즈(미지 구조화 이벤트)와 달리 실제 진단
+    // 메시지일 수 있으므로, 숨기지 않고 눈에 띄지 않는 notice로 표시한다(조용히 삼키면
+    // CLI 경고/오류가 사라진다 — codex 지적). 미지의 "구조화" 이벤트는 아래 default가
+    // kind:'raw'로 담고 뷰에서 디버그 게이트로 가린다.
+    case 'raw': {
+      const line = typeof payload.line === 'string' ? payload.line.trim() : '';
+      return line ? append(session, { kind: 'notice', text: line }) : session;
+    }
     default:
       return append(session, { kind: 'raw', payload });
   }

@@ -1,6 +1,6 @@
 // 전역 스토어의 순수 상태 로직 — React 없는 모듈로 분리해 node --test로 검증한다.
 // (store.jsx가 이 리듀서를 useReducer에 연결하고 WS/컨텍스트를 소유한다.)
-import { reduceCliEvent, finalizeCompactionCards } from './reduce-cli-event.js';
+import { reduceCliEvent, finalizeCompactionCards, deriveGoalFromMessages } from './reduce-cli-event.js';
 
 export function createSessionState(partial = {}) {
   return {
@@ -36,6 +36,12 @@ export function createSessionState(partial = {}) {
     // (인터럽트도 is_error result로 끝난다). Composer가 인터럽트 전송 시 true,
     // 다음 doSend가 false로 되돌린다.
     interruptRequested: false,
+    // 사용자가 마지막으로 직접 보낸 프롬프트 텍스트 — 인터럽트된 턴의 "재시도/수정 후
+    // 재전송" 복구 UI가 참조한다(reduce-cli-event가 user-text에서 채운다).
+    lastUserText: null,
+    // 활성 세션 목표(/goal <텍스트>) — 구동 중 기능 배지 표시용. null=설정 안 됨.
+    // /goal 커맨드 에코 또는 "Goal set:" stdout에서 best-effort로 추적한다.
+    goal: null,
     lastSeq: 0,
     ...partial,
   };
@@ -110,6 +116,9 @@ function handleServerMessage(state, msg) {
           messages: Array.isArray(opts.preloadMessages)
             ? finalizeCompactionCards([...opts.preloadMessages])
             : [],
+          // 프리로드 메시지에서 활성 목표(/goal)를 복원한다 — 시딩은 리듀서를 안 태우므로
+          // 이게 없으면 effort 재시작·재개에서 🎯 배지가 사라진다(같은 대화가 이어지는데도).
+          goal: deriveGoalFromMessages(opts.preloadMessages),
           // 재개 프리로드의 부속 산출물 — usage(상태줄 CTX% 연속성)와 원본 세션 id
           // (사이드바/배지 표기 — 이후 system/init의 새 fork id가 덮어쓴다).
           // ctxFromCalls도 이월: true면 result의 턴 합산 usage가 컨텍스트를 못 덮는다.
