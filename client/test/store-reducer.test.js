@@ -32,6 +32,40 @@ test('remove-session: 세션을 제거하고, 활성이었으면 남은 세션�
   assert.equal(same, s);
 });
 
+test('set-usage: quota 조회 실패(null) 시 직전 quota를 이어 쓴다(로컬 집계는 갱신)', () => {
+  const s0 = createInitialState();
+  const withQuota = {
+    fiveHour: { totalTokens: 100 },
+    sevenDay: { totalTokens: 200 },
+    quota: { fiveHour: { utilization: 42 }, sevenDay: { utilization: 18 } },
+  };
+  const s1 = reducer(s0, { type: 'set-usage', usage: withQuota });
+  assert.equal(s1.globalUsage.quota.fiveHour.utilization, 42);
+
+  // 다음 폴링에서 quota=null(공식 조회 실패)이라도 직전 quota를 유지
+  const noQuota = { fiveHour: { totalTokens: 150 }, sevenDay: { totalTokens: 260 }, quota: null };
+  const s2 = reducer(s1, { type: 'set-usage', usage: noQuota });
+  assert.equal(s2.globalUsage.quota.fiveHour.utilization, 42, 'quota 이어받음');
+  assert.equal(s2.globalUsage.fiveHour.totalTokens, 150, '로컬 집계는 새 값');
+
+  // quota가 다시 오면 새 값으로 갱신
+  const fresh = { fiveHour: { totalTokens: 160 }, sevenDay: { totalTokens: 270 }, quota: { fiveHour: { utilization: 55 }, sevenDay: { utilization: 20 } } };
+  const s3 = reducer(s2, { type: 'set-usage', usage: fresh });
+  assert.equal(s3.globalUsage.quota.fiveHour.utilization, 55);
+  assert.equal(s3.globalUsage.quota.sevenDay.utilization, 20);
+
+  // 부분 실패(한쪽 창만 유효) — 빠진 창(sevenDay=null)은 직전 값으로 채우고 온 창은 새 값
+  const partial = { fiveHour: { totalTokens: 170 }, sevenDay: { totalTokens: 280 }, quota: { fiveHour: { utilization: 60 }, sevenDay: null } };
+  const s5 = reducer(s3, { type: 'set-usage', usage: partial });
+  assert.equal(s5.globalUsage.quota.fiveHour.utilization, 60, '온 창은 새 값');
+  assert.equal(s5.globalUsage.quota.sevenDay.utilization, 20, '빠진 창은 직전 값 이어받음');
+  assert.equal(s5.globalUsage.sevenDay.totalTokens, 280, '로컬 집계는 새 값');
+
+  // 최초부터 quota가 없으면 이어받을 값이 없어 null 그대로(원시 수치 폴백은 그때만)
+  const s4 = reducer(s0, { type: 'set-usage', usage: noQuota });
+  assert.equal(s4.globalUsage.quota, null);
+});
+
 test('remove-session: 비활성 세션 제거는 activeKey를 건드리지 않는다', () => {
   let s = stateWithSession('a');
   s.sessions.set('b', createSessionState({ key: 'b' }));

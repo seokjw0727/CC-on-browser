@@ -8,7 +8,7 @@ import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 import { SessionHub } from './session-hub.js';
-import { listProjects, listSessions, loadTranscript } from './history.js';
+import { listProjects, listSessions, loadTranscript, listRecentSessions } from './history.js';
 import { listDirs, pickDirectory, searchFiles } from './fs-api.js';
 import { aggregateUsage } from './usage.js';
 import { fetchQuota } from './quota.js';
@@ -249,6 +249,10 @@ export async function startServer({
           return;
         case '/api/sessions':
           json(res, 200, await listSessions(projectsRoot, url.searchParams.get('dir')));
+          return;
+        case '/api/recent-sessions':
+          // 새 세션 모달의 "최근 세션" 목록 — 전 프로젝트 세션을 mtime순으로 집계.
+          json(res, 200, await listRecentSessions(projectsRoot));
           return;
         case '/api/transcript':
           json(res, 200, await loadTranscript(

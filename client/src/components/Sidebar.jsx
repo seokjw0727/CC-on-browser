@@ -1,11 +1,11 @@
 // 사이드바 — wordmark / [새 세션](cwd 피커 모달) / 현재 세션(라이브 탭 + 히스토리 재개)
 // / 다른 열린 세션(타 프로젝트 라이브 세션 전환·종료).
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore } from '../lib/store.jsx';
 import {
-  browseDirs,
   fetchBootstrap,
   fetchProjects,
+  fetchRecentSessions,
   fetchSessions,
   fetchTranscript,
   pickDirectory,
@@ -50,140 +50,30 @@ function fmtTime(ms) {
   }
 }
 
-// ----- 디렉터리 트리 (지정한 루트의 하위 폴더 lazy 탐색) -----
-function joinPath(parent, name) {
-  if (!parent) return name; // 루트('') = 드라이브 목록 — 항목('C:\') 자체가 절대 경로
-  const sep = parent.includes('/') && !parent.includes('\\') ? '/' : '\\';
-  return parent.endsWith(sep) ? parent + name : parent + sep + name;
-}
-
-function DirTree({ root, selected, onSelect }) {
-  const [children, setChildren] = useState({}); // path -> string[] | 'loading' | {error}
-  const [open, setOpen] = useState({}); // path -> bool
-
-  const load = async (p) => {
-    setChildren((prev) => ({ ...prev, [p]: 'loading' }));
-    try {
-      const res = await browseDirs(p);
-      setChildren((prev) => ({ ...prev, [p]: res.dirs }));
-    } catch (err) {
-      setChildren((prev) => ({ ...prev, [p]: { error: String(err.message ?? err) } }));
-    }
-  };
-
-  // 루트가 바뀌면(경로 입력 이동/최근 프로젝트 클릭) 트리를 새 기준으로 리셋
-  useEffect(() => {
-    setChildren({});
-    setOpen({});
-    load(root);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [root]);
-
-  const toggle = (p) => {
-    // 미로드이거나 직전 로드가 실패({error})면 다시 시도 — 재루팅 없이 재시도 가능하게.
-    if (!open[p] && (children[p] == null || children[p]?.error)) load(p);
-    setOpen((prev) => ({ ...prev, [p]: !prev[p] }));
-  };
-
-  const rows = [];
-  const note = (key, depth, text) => {
-    rows.push(
-      <div key={key} className="dt-note dim" style={{ paddingLeft: `${10 + depth * 16}px` }}>
-        {text}
-      </div>,
-    );
-  };
-  const walk = (parentPath, depth) => {
-    const kids = children[parentPath];
-    if (kids === 'loading') {
-      note(`${parentPath}#loading`, depth, '불러오는 중…');
-      return;
-    }
-    if (kids && !Array.isArray(kids)) {
-      note(`${parentPath}#error`, depth, kids.error);
-      return;
-    }
-    if (!kids) return;
-    if (kids.length === 0) {
-      note(`${parentPath}#empty`, depth, '(하위 폴더 없음)');
-      return;
-    }
-    for (const name of kids) {
-      const p = joinPath(parentPath, name);
-      const isOpen = !!open[p];
-      rows.push(
-        <div
-          key={p}
-          className={`dt-row${selected === p ? ' sel' : ''}`}
-          style={{ paddingLeft: `${depth * 16}px` }}
-        >
-          <button
-            type="button"
-            className="dt-caret"
-            aria-expanded={isOpen}
-            aria-label={isOpen ? `${name} 접기` : `${name} 펼치기`}
-            onClick={() => toggle(p)}
-          >
-            {isOpen ? '▾' : '▸'}
-          </button>
-          <button
-            type="button"
-            className="dt-name"
-            title={`이 폴더 선택: ${p}`}
-            onClick={() => onSelect(p)}
-          >
-            📁 {name}
-          </button>
-        </div>,
-      );
-      if (isOpen) walk(p, depth + 1);
-    }
-  };
-  walk(root, 0);
-
-  return (
-    <div className="browse-box dir-tree" aria-label="하위 폴더 트리">
-      {rows}
-    </div>
-  );
-}
-
-// ----- 새 세션 모달 (cwd 지정: 직접 입력 + 하위 폴더 트리 + 최근 프로젝트) -----
-function NewSessionModal({ initInfo, projects, defaultCwd, platform, onStart, onClose, presenceStatus }) {
+// ----- 새 세션 모달 (cwd = 윈도우 파일 탐색기로 선택 + 최근 세션 재개) -----
+function NewSessionModal({ initInfo, defaultCwd, platform, onStart, onResume, onClose, presenceStatus }) {
   const [cwd, setCwd] = useState(defaultCwd || '');
   const [model, setModel] = useState('');
   // 기본 권한 모드 = 전체 허용(bypassPermissions) — 사용자 요청(2026-07-10).
   // 모달의 셀렉트에서 세션별로 변경할 수 있고, 경고 문구가 항상 함께 표시된다.
   const [mode, setMode] = useState('bypassPermissions');
-  const [treeRoot, setTreeRoot] = useState(null); // 트리 기준 경로 ('' = 드라이브 목록)
   const [error, setError] = useState(null);
   const [browsing, setBrowsing] = useState(false); // 네이티브 폴더 대화상자 대기 중
+  const [recent, setRecent] = useState([]); // 최근 세션(전 프로젝트)
   // 포커스 트랩 — 모달이 열린 동안 Tab을 안에 가두고, 닫히면 여는 버튼으로 복원.
-  const cwdRef = useRef(null);
-  const dialogRef = useFocusTrap(true, cwdRef);
+  // 초기 포커스는 첫 포커서블(닫기 버튼)로 폴백한다 — 폴더 선택 버튼은 platform 부트스트랩
+  // 전(초기 null)과 비-Windows에서 disabled라 초기 포커스 대상으로 지정하면 트랩이 깨진다.
+  const dialogRef = useFocusTrap(true);
 
-  const navigate = async (target) => {
-    try {
-      const res = await browseDirs(target ?? '');
-      setTreeRoot(res.path);
-      if (res.path) setCwd(res.path);
-      setError(null);
-    } catch (err) {
-      setError(String(err.message ?? err));
-    }
-  };
-
-  // 윈도우 파일 탐색기(네이티브 폴더 선택 대화상자)로 cwd 지정 — 트리를 헤매지 않아도 됨.
+  // 윈도우 파일 탐색기(네이티브 폴더 선택 대화상자)로 작업 디렉터리를 선택한다 —
+  // 인앱 경로 입력/폴더 트리 탐색을 완전히 대체(사용자 요청). 취소 시 기존 값 유지.
   const browseNative = async () => {
     if (browsing) return;
     setBrowsing(true);
     setError(null);
     try {
       const res = await pickDirectory(cwd.trim());
-      if (res.path) {
-        setCwd(res.path);
-        await navigate(res.path);
-      }
+      if (res.path) setCwd(res.path);
     } catch (err) {
       setError(String(err.message ?? err));
     } finally {
@@ -191,18 +81,25 @@ function NewSessionModal({ initInfo, projects, defaultCwd, platform, onStart, on
     }
   };
 
+  // 최근 세션 로드(모달이 열릴 때 1회) — 실패는 조용히 빈 목록으로 둔다.
   useEffect(() => {
-    navigate(defaultCwd || '');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let alive = true;
+    fetchRecentSessions()
+      .then((list) => {
+        if (alive) setRecent(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const models = Array.isArray(initInfo?.models) ? initInfo.models : [];
-  const recent = projects.filter((p) => p.cwd);
 
   const start = () => {
     const trimmed = cwd.trim();
     if (!trimmed) {
-      setError('작업 디렉터리를 선택하거나 입력하세요.');
+      setError('작업 디렉터리를 선택하세요 (📂 폴더 선택).');
       return;
     }
     onStart({
@@ -237,60 +134,48 @@ function NewSessionModal({ initInfo, projects, defaultCwd, platform, onStart, on
         <div className="picker-field">
           <span className="dim">작업 디렉터리 (cwd)</span>
           <div className="cwd-path-row">
+            <button
+              type="button"
+              className="browse-native-btn primary"
+              onClick={browseNative}
+              disabled={browsing || platform !== 'win32'}
+              title={platform === 'win32' ? '윈도우 파일 탐색기로 폴더 선택' : '네이티브 폴더 선택은 Windows에서만 지원됩니다'}
+            >
+              {browsing ? '탐색기 여는 중…' : '📂 폴더 선택 (파일 탐색기)'}
+            </button>
+          </div>
+          {/* 선택된 경로 표시 — Windows가 아니면 직접 입력 폴백. */}
+          {platform === 'win32' ? (
+            <div className="cwd-selected" title={cwd}>
+              {cwd ? <span className="truncate">{cwd}</span> : <span className="dim">아직 선택된 폴더가 없습니다</span>}
+            </div>
+          ) : (
             <input
-              ref={cwdRef}
               type="text"
               value={cwd}
               aria-label="작업 디렉터리 경로"
-              placeholder="C:\\path\\to\\project"
+              placeholder="/path/to/project"
               onChange={(e) => setCwd(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  navigate(cwd.trim());
-                }
-              }}
             />
-            <button type="button" onClick={() => navigate(cwd.trim())} title="입력한 경로로 이동">
-              이동
-            </button>
-            {platform === 'win32' && (
-              <button
-                type="button"
-                className="browse-native-btn"
-                onClick={browseNative}
-                disabled={browsing}
-                title="윈도우 파일 탐색기로 폴더 선택"
-              >
-                {browsing ? '여는 중…' : '📂 찾아보기'}
-              </button>
-            )}
-          </div>
+          )}
         </div>
-
-        {treeRoot != null && (
-          <div className="picker-field">
-            <span className="dim">하위 폴더 트리 — 이름 클릭으로 선택, ▸로 펼치기</span>
-            <DirTree root={treeRoot} selected={cwd} onSelect={setCwd} />
-          </div>
-        )}
 
         {recent.length > 0 && (
           <div className="picker-field">
-            <span className="dim">최근 프로젝트</span>
-            <div className="recent-projects">
-              {recent.map((p) => (
+            <span className="dim">최근 세션 — 클릭하면 이어서 재개합니다</span>
+            <div className="recent-sessions">
+              {recent.map((s) => (
                 <button
-                  key={p.dirName}
+                  key={`${s.dirName}/${s.sessionId}`}
                   type="button"
-                  className="browse-item"
-                  title={p.cwd}
-                  onClick={() => {
-                    setCwd(p.cwd);
-                    navigate(p.cwd);
-                  }}
+                  className="recent-session-item"
+                  disabled={!s.cwd}
+                  title={s.cwd ? `재개: ${s.cwd}` : 'cwd를 알 수 없어 재개할 수 없습니다'}
+                  onClick={() => s.cwd && onResume(s)}
                 >
-                  {p.cwd}
+                  <span className="rs-title truncate">{s.title || '(제목 없음)'}</span>
+                  <span className="rs-sub dim truncate">{s.cwd || s.dirName}</span>
+                  <span className="rs-time dim">{fmtTime(s.mtime)}</span>
                 </button>
               ))}
             </div>
@@ -600,13 +485,16 @@ export default function Sidebar({ onCollapse }) {
       <NewSessionPresence
         open={modalOpen}
         initInfo={state.initInfo}
-        projects={state.projects}
         defaultCwd={defaultCwd}
         platform={platform}
         onClose={closeModal}
         onStart={(opts) => {
           closeModal();
           startSession(opts);
+        }}
+        onResume={(s) => {
+          closeModal();
+          resumeSession({ dirName: s.dirName, cwd: s.cwd }, { sessionId: s.sessionId });
         }}
       />
     </>

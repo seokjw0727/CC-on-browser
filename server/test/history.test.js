@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { listProjects, listSessions, loadTranscript } from '../src/history.js';
+import { listProjects, listSessions, loadTranscript, listRecentSessions } from '../src/history.js';
 
 const J = (o) => JSON.stringify(o);
 
@@ -76,6 +76,40 @@ test('loadTranscript keeps assistant/user/result and only first system/init', as
     ['user', 'system', 'assistant', 'result'],
   );
   assert.equal(messages[1].subtype, 'init');
+});
+
+test('listRecentSessions aggregates across projects, mtime desc, with cwd/title', async () => {
+  const { root, dir } = await makeRoot(); // C--fake-project: aaaa(old), bbbb(new)
+  // 두 번째 프로젝트 — 가장 최신 세션(cccc)
+  const dir2 = path.join(root, 'D--other-proj');
+  await fs.mkdir(dir2, { recursive: true });
+  const s3 = [
+    J({ type: 'user', cwd: 'D:\\other', message: { role: 'user', content: [{ type: 'text', text: '다른 프로젝트 세션' }] } }),
+    J({ type: 'result', subtype: 'success', result: 'ok', session_id: 'cccc-3333' }),
+  ].join('\n') + '\n';
+  const f3 = path.join(dir2, 'cccc-3333.jsonl');
+  await fs.writeFile(f3, s3, 'utf8');
+  const newest = new Date(Date.now() + 60_000);
+  await fs.utimes(f3, newest, newest);
+
+  const recent = await listRecentSessions(root);
+  // 전 프로젝트에서 모아 mtime 내림차순 — cccc(미래) > bbbb(now) > aaaa(과거)
+  assert.deepEqual(recent.map((r) => r.sessionId), ['cccc-3333', 'bbbb-2222', 'aaaa-1111']);
+  assert.equal(recent[0].dirName, 'D--other-proj');
+  assert.equal(recent[0].cwd, 'D:\\other');
+  assert.equal(recent[0].title, '다른 프로젝트 세션');
+  assert.equal(recent[2].cwd, 'C:\\fake');
+  // limit 적용
+  const limited = await listRecentSessions(root, 2);
+  assert.deepEqual(limited.map((r) => r.sessionId), ['cccc-3333', 'bbbb-2222']);
+  // notes.txt(비 .jsonl)는 세션으로 잡히지 않는다
+  assert.ok(recent.every((r) => !r.sessionId.includes('notes')));
+  void dir;
+});
+
+test('listRecentSessions returns [] for missing root', async () => {
+  const missing = path.join(os.tmpdir(), `cc-recent-none-${Date.now()}`);
+  assert.deepEqual(await listRecentSessions(missing), []);
 });
 
 test('rejects path escape in dirName/sessionId', async () => {

@@ -811,7 +811,7 @@ select.mode-trust:focus {
 }
 .cwd-path-row {
   display: flex;
-  flex-wrap: wrap; /* 좁은 폭에서 입력+이동+찾아보기 3버튼이 넘치지 않고 줄바꿈 */
+  flex-wrap: wrap; /* 비-Windows 폴백(직접 입력)에서 입력창이 넘치지 않고 줄바꿈 */
   gap: 6px;
 }
 .cwd-path-row input {
@@ -834,91 +834,65 @@ select.mode-trust:focus {
   opacity: 0.6;
   cursor: default;
 }
-.browse-box {
-  max-height: 220px;
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 4px;
-  margin-bottom: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.browse-item {
-  display: block;
-  width: 100%;
-  /* flex column 스크롤 목록에서 필수: overflow:hidden(ellipsis용)이 flex 최소 높이를
-     0으로 풀어 max-height 초과 시 모든 행이 세로로 압착·클리핑됨(흐림처럼 보임) */
-  flex: none;
-  text-align: left;
-  background: none;
-  border: none;
-  padding: 6px 9px;
-  border-radius: var(--r-sm);
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.browse-item:hover {
-  background: var(--surface-2);
-}
-.dt-row {
-  display: flex;
-  align-items: center;
-  /* .browse-item과 동일 — flex column 스크롤 목록에서 행 압착 방지 */
-  flex: none;
-  min-width: 0;
-  border-radius: var(--r-sm);
-}
-.dt-row.sel {
-  background: var(--surface-2);
-}
-.dt-row.sel .dt-name {
+/* 새 세션 모달 — 파일 탐색기 폴더 선택 버튼(주력) */
+.cwd-path-row .browse-native-btn.primary {
+  flex: 1;
+  padding: 9px 12px;
   font-weight: 600;
 }
-.dt-caret {
-  flex: none;
-  width: 22px;
-  padding: 5px 0;
-  background: none;
-  border: none;
-  color: var(--text-faint);
-  cursor: pointer;
-  border-radius: var(--r-sm);
-}
-.dt-caret:hover {
+/* 탐색기로 선택된 경로 표시(Windows) */
+.cwd-selected {
+  display: flex;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
   background: var(--surface-2);
-}
-.dt-name {
-  flex: 1;
+  font-size: 12.5px;
   min-width: 0;
+}
+/* 최근 세션 목록 — 클릭하면 재개 */
+.recent-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.recent-session-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: 'title time' 'sub sub';
+  gap: 1px 8px;
+  /* flex column 스크롤 목록에서 행 압착 방지 */
+  flex: none;
   text-align: left;
   background: none;
   border: none;
-  padding: 5px 6px;
+  padding: 7px 10px;
   border-radius: var(--r-sm);
   color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   cursor: pointer;
+  min-width: 0;
 }
-.dt-name:hover {
+.recent-session-item:hover:not(:disabled) {
   background: var(--surface-2);
 }
-.dt-note {
-  flex: none;
-  padding: 5px 8px;
-  font-size: 12.5px;
+.recent-session-item:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
-.recent-projects {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  max-height: 180px;
-  overflow-y: auto;
+.recent-session-item .rs-title {
+  grid-area: title;
+  font-size: 13px;
+}
+.recent-session-item .rs-sub {
+  grid-area: sub;
+  font-size: 11.5px;
+}
+.recent-session-item .rs-time {
+  grid-area: time;
+  font-size: 11px;
+  white-space: nowrap;
 }
 .picker-row {
   display: flex;

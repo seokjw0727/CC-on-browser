@@ -430,6 +430,15 @@ test('(f) REST auth + /api/projects/sessions/transcript/browse/bootstrap', async
   assert.equal(sessions[0].sessionId, '11111111-1111-1111-1111-111111111111');
   assert.equal(sessions[0].title, '제목이 될 텍스트');
 
+  // /api/recent-sessions — 새 세션 모달의 "최근 세션". 인증 필수, dirName/cwd/title 포함.
+  assert.equal((await fetch(`${base}/api/recent-sessions`)).status, 401);
+  const recent = await (await fetch(`${base}/api/recent-sessions`, auth)).json();
+  assert.equal(recent.length, 1);
+  assert.equal(recent[0].sessionId, '11111111-1111-1111-1111-111111111111');
+  assert.equal(recent[0].dirName, 'C--fake-proj');
+  assert.equal(recent[0].cwd, 'C:\\fake');
+  assert.equal(recent[0].title, '제목이 될 텍스트');
+
   const transcript = await (
     await fetch(`${base}/api/transcript?dir=C--fake-proj&sessionId=11111111-1111-1111-1111-111111111111`, auth)
   ).json();

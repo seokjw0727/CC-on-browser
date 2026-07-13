@@ -255,8 +255,25 @@ export function reducer(state, action) {
       return { ...state, newSessionOpen: false };
     case 'set-projects':
       return { ...state, projects: action.projects };
-    case 'set-usage':
-      return { ...state, globalUsage: action.usage };
+    case 'set-usage': {
+      // 공식 사용률(quota)의 5h/7d 창은 폴링마다 독립적으로 실패할 수 있다: 서버는
+      // 두 창이 모두 없을 때만 quota=null을 주고, 한쪽만 유효하면 {fiveHour, sevenDay:null}
+      // 같은 부분(partial) quota를 준다(quota.js). Composer는 창별로 폴백하므로, 빠진 창을
+      // 직전 값으로 채워 넣는다 — 5h/7d 창 %는 느리게 변하므로 일시/부분 실패에도 링(%)
+      // 표시가 유지되고, 원시 토큰 수치로 깜빡이며 뒤바뀌지 않는다(로컬 집계는 새 값 유지).
+      const usage = action.usage;
+      const prevQuota = state.globalUsage?.quota ?? null;
+      let merged = usage;
+      if (usage && prevQuota) {
+        const q = usage.quota;
+        const fiveHour = q?.fiveHour ?? prevQuota.fiveHour ?? null;
+        const sevenDay = q?.sevenDay ?? prevQuota.sevenDay ?? null;
+        if (fiveHour || sevenDay) {
+          merged = { ...usage, quota: { ...(q ?? prevQuota), fiveHour, sevenDay } };
+        }
+      }
+      return { ...state, globalUsage: merged };
+    }
     case 'update-session':
       return updateSession(state, action.key, action.fn);
     case 'add-toast':

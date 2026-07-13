@@ -34,6 +34,9 @@ export const fetchProjects = () => get('/api/projects');
 export const fetchSessions = (dirName) =>
   get(`/api/sessions?dir=${encodeURIComponent(dirName)}`);
 
+/** @returns {Promise<[{dirName, cwd, sessionId, title, mtime}]>} 전 프로젝트 최근 세션(모달용) */
+export const fetchRecentSessions = () => get('/api/recent-sessions');
+
 /** @returns {Promise<{messages: object[]}>} */
 export const fetchTranscript = (dirName, sessionId) =>
   get(

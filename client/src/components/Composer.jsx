@@ -357,6 +357,10 @@ export default function Composer({ theme, onToggleTheme }) {
       return undefined;
     }
     let cancelled = false;
+    // 질의가 바뀌면 이전 결과를 즉시 비운다 — 디바운스/네트워크 대기 동안 stale 항목이
+    // 드롭다운에 남아 Enter/Tab/클릭으로 잘못 선택되는 것을 막는다(대신 "검색 중…" 표시).
+    setAtFiles([]);
+    setAtSel(0);
     setAtLoading(true);
     const t = setTimeout(async () => {
       try {

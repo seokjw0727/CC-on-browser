@@ -124,6 +124,43 @@ export async function listProjects(projectsRoot = DEFAULT_PROJECTS_ROOT) {
   return projects;
 }
 
+// 모든 프로젝트 디렉터리의 세션을 모아 mtime 내림차순 상위 N개를 반환한다(새 세션 모달의
+// "최근 세션" 목록용). 상위 N개에 대해서만 head를 읽어 cwd/title을 추출한다(비용 절감).
+export async function listRecentSessions(projectsRoot = DEFAULT_PROJECTS_ROOT, limit = 12) {
+  let entries;
+  try {
+    entries = await fs.readdir(projectsRoot, { withFileTypes: true });
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return [];
+    throw err;
+  }
+  const all = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const dirPath = path.join(projectsRoot, entry.name);
+    let files;
+    try {
+      files = await listSessionFiles(dirPath);
+    } catch {
+      continue; // 접근 불가 디렉터리는 제외
+    }
+    for (const file of files) all.push({ dirName: entry.name, dirPath, file });
+  }
+  all.sort((a, b) => b.file.mtime - a.file.mtime);
+  const sessions = [];
+  for (const item of all.slice(0, limit)) {
+    const head = await readHead(path.join(item.dirPath, item.file.name), TITLE_SCAN_BYTES).catch(() => '');
+    sessions.push({
+      dirName: item.dirName,
+      cwd: extractCwd(head),
+      sessionId: item.file.name.slice(0, -'.jsonl'.length),
+      title: extractTitle(head),
+      mtime: item.file.mtime,
+    });
+  }
+  return sessions;
+}
+
 export async function listSessions(projectsRoot, dirName) {
   assertSafeName(dirName, 'dirName');
   const root = projectsRoot ?? DEFAULT_PROJECTS_ROOT;
