@@ -318,6 +318,129 @@ test('압축 요약 user 메시지(isCompactSummary)는 접이식 요약 카드�
   assert.match(s.messages[0].text, /continued/);
 });
 
+// ----- live wire의 압축 요약/주입 메시지 (실 CLI 실측: 플래그 집합이 트랜스크립트와 다름) -----
+
+test('live 압축 요약(isSynthetic, isCompactSummary 없음)도 요약 카드가 된다 — 거대 사용자 버블 방지', () => {
+  // 실측 wire: { isReplay:false, isSynthetic:true } + 고정 본문 접두, isCompactSummary 없음
+  const s = reduceCliEvent(
+    createSessionState(),
+    userEvent(
+      'This session is being continued from a previous conversation that ran out of context. The summary below covers…',
+      { isReplay: false, isSynthetic: true },
+    ),
+  );
+  assert.equal(s.messages.length, 1);
+  assert.equal(s.messages[0].kind, 'compaction-summary');
+});
+
+test('isSynthetic user 이벤트(주입 넛지)는 렌더되지 않는다', () => {
+  // 실측 wire: "[Your previous response had no visible output. …]" — isSynthetic:true
+  const s = reduceCliEvent(
+    createSessionState(),
+    userEvent('[Your previous response had no visible output. Please continue and produce a user-visible response.]', {
+      isSynthetic: true,
+    }),
+  );
+  assert.equal(s.messages.length, 0);
+});
+
+test('isMeta user 이벤트(트랜스크립트 프리로드의 훅 피드백/캐빗)는 렌더되지 않는다', () => {
+  let s = reduceCliEvent(
+    createSessionState(),
+    userEvent('Stop hook feedback:\nA Stop hook detected that…', { isMeta: true }),
+  );
+  s = reduceCliEvent(
+    s,
+    userEvent([{ type: 'text', text: 'Continue from where you left off.' }], { isMeta: true }),
+  );
+  assert.equal(s.messages.length, 0);
+});
+
+test('플래그 없는 훅 피드백/캐빗도 본문 패턴으로 숨긴다 (플래그 누락 경로 폴백)', () => {
+  let s = reduceCliEvent(createSessionState(), userEvent('Stop hook feedback:\n지시문…'));
+  s = reduceCliEvent(
+    s,
+    userEvent('<local-command-caveat>Caveat: The messages below were generated…</local-command-caveat>'),
+  );
+  assert.equal(s.messages.length, 0);
+});
+
+test('사용자가 직접 친 프롬프트(text 블록 배열, 플래그 없음)는 접두사가 겹쳐도 억제되지 않는다', () => {
+  // 컴포저의 낙관 렌더/서버 전송 형식 — 우연히 주입 메시지와 같은 접두사로 시작해도
+  // 진짜 발화는 그대로 렌더돼야 한다(패턴 폴백은 문자열 본문에만 적용 — codex 지적).
+  let s = reduceCliEvent(
+    createSessionState(),
+    userEvent([{ type: 'text', text: 'Stop hook feedback: 이란 무엇인가요?' }]),
+  );
+  s = reduceCliEvent(
+    s,
+    userEvent([{ type: 'text', text: 'This session is being continued from a previous conversation 문구를 설명해줘' }]),
+  );
+  assert.equal(s.messages.length, 2);
+  assert.ok(s.messages.every((m) => m.kind === 'user-text'));
+});
+
+test('caveat 블록이 감싼 커맨드 에코는 억제되지 않고 커맨드 칩이 된다', () => {
+  const s = reduceCliEvent(
+    createSessionState(),
+    userEvent(
+      '<local-command-caveat>Caveat: The messages below were generated…</local-command-caveat>\n<command-name>/help</command-name>\n<command-args></command-args>',
+    ),
+  );
+  const chips = s.messages.filter((m) => m.kind === 'command');
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].name, 'help');
+});
+
+test('isMeta여도 tool_result는 정상 부착된다 (억제는 텍스트 본문에 한정)', () => {
+  let s = createSessionState();
+  s = reduceCliEvent(s, {
+    type: 'assistant',
+    message: { id: 'm1', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] },
+  });
+  s = reduceCliEvent(
+    s,
+    userEvent([{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }], { isMeta: true }),
+  );
+  const tool = s.messages.find((m) => m.kind === 'tool_use');
+  assert.ok(tool && tool.result, 'tool_result가 부착된다');
+});
+
+test('compact_boundary의 snake_case compact_metadata(live wire)도 완료 카드 메타가 된다', () => {
+  let s = reduceCliEvent(createSessionState(), { type: 'system', subtype: 'status', status: 'compacting' });
+  s = reduceCliEvent(s, {
+    type: 'system',
+    subtype: 'compact_boundary',
+    compact_metadata: { trigger: 'manual', pre_tokens: 43629, post_tokens: 1262, duration_ms: 23326 },
+  });
+  const card = s.messages.find((m) => m.kind === 'compaction');
+  assert.equal(card.state, 'done');
+  assert.equal(card.preTokens, 43629);
+  assert.equal(card.postTokens, 1262);
+  assert.equal(card.durationMs, 23326);
+});
+
+test('ANSI 이스케이프가 붙은 "Compacted…" stdout(TUI 기록 세션)도 압축 카드로 흡수된다', () => {
+  // 실측(구 TUI 트랜스크립트): "\x1b[2mCompacted (ctrl+o to see full summary)\x1b[22m\n\x1b[2mPreCompact [node …] completed successfully: {…}\x1b[22m"
+  const raw = '\u001b[2mCompacted (ctrl+o to see full summary)\u001b[22m\n\u001b[2mPreCompact [node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs] completed successfully: {"continue":true}\u001b[22m';
+  const s = reduceCliEvent(
+    createSessionState(),
+    userEvent(`<local-command-stdout>${raw}</local-command-stdout>`),
+  );
+  assert.equal(s.messages.filter((m) => m.kind === 'command-output').length, 0, '훅 스팸 출력 없음');
+  const card = s.messages.find((m) => m.kind === 'compaction');
+  assert.ok(card && card.state === 'done');
+});
+
+test('일반 커맨드 출력의 ANSI 이스케이프는 벗겨져 렌더된다', () => {
+  const s = reduceCliEvent(
+    createSessionState(),
+    userEvent('<local-command-stdout>\u001b[2mdim text\u001b[22m</local-command-stdout>'),
+  );
+  assert.equal(s.messages[0].kind, 'command-output');
+  assert.equal(s.messages[0].text, 'dim text');
+});
+
 // ----- 사고 과정 본문 보존 (스트리밍 delta로만 오고 최종 블록은 서명만) -----
 
 test('스트리밍 thinking_delta로 쌓인 본문은 빈 확정 블록에 덮이지 않는다', () => {

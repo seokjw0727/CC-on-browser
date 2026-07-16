@@ -6,9 +6,39 @@ import { spawn } from 'node:child_process';
 // 로컬 단일 사용자 도구이므로, 서버(=사용자 PC)가 네이티브 폴더 선택 대화상자를
 // 사용자 데스크톱에 여는 것이 안전하다. 경로는 PowerShell 스크립트에 문자열로
 // 끼워넣지 않고 환경변수로 전달해 인젝션/이스케이프 문제를 원천 차단한다.
+//
+// 전경 강제(AttachThreadInput)가 필요한 이유 — 백그라운드 프로세스(서버가 spawn한
+// powershell)는 Windows 포그라운드 잠금 정책 때문에 TopMost(WS_EX_TOPMOST)가 생성
+// 시점·SetWindowPos 양쪽 모두에서 조용히 박탈되고 SetForegroundWindow도 거부된다
+// (실측: 플래그 미부여 + 호출은 성공 반환). 그 결과 대화상자가 브라우저 창 **뒤에**
+// 열려 "안 열리는" 것처럼 보인다. 현재 전경 스레드에 입력 큐를 붙였다 떼는
+// AttachThreadInput 우회만이 전경 전환에 성공한다(실측 fg-is-us=True).
 const FOLDER_DIALOG_PS = `
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class CcobFg {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern IntPtr GetActiveWindow();
+  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+  [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+  [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+  public static void Force(IntPtr hWnd) {
+    if (hWnd == IntPtr.Zero) return;
+    IntPtr fg = GetForegroundWindow();
+    if (fg == hWnd) return;
+    uint myTid = GetCurrentThreadId();
+    uint fgPid;
+    uint fgTid = fg == IntPtr.Zero ? 0u : GetWindowThreadProcessId(fg, out fgPid);
+    bool attached = fgTid != 0 && fgTid != myTid && AttachThreadInput(fgTid, myTid, true);
+    SetForegroundWindow(hWnd);
+    if (attached) { AttachThreadInput(fgTid, myTid, false); }
+  }
+}
+'@
 $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
 $dlg.Description = 'CC-on-browser: 작업 디렉터리 선택'
 $dlg.ShowNewFolderButton = $true
@@ -16,9 +46,24 @@ if ($env:CCOB_INIT_PATH -and (Test-Path -LiteralPath $env:CCOB_INIT_PATH)) {
   try { $dlg.SelectedPath = $env:CCOB_INIT_PATH } catch {}
 }
 $owner = New-Object System.Windows.Forms.Form
-$owner.TopMost = $true; $owner.ShowInTaskbar = $false; $owner.Opacity = 0
-$owner.Show() | Out-Null; $owner.Activate()
+$owner.ShowInTaskbar = $false; $owner.Opacity = 0
+$owner.Show() | Out-Null
+[CcobFg]::Force($owner.Handle)
+# 모달 루프 안에서 대화상자 자체를 몇 차례 더 전경으로 — 클릭 직후 브라우저가
+# 포커스를 되가져가는 경합을 흡수한다. GetActiveWindow는 모달 루프 중 이 스레드의
+# 활성 창(=대화상자)을 돌려준다.
+$script:ccobFgTicks = 0
+$fgTimer = New-Object System.Windows.Forms.Timer
+$fgTimer.Interval = 250
+$fgTimer.Add_Tick({
+  $script:ccobFgTicks += 1
+  if ($script:ccobFgTicks -ge 4) { $fgTimer.Stop() }
+  $h = [CcobFg]::GetActiveWindow()
+  if ($h -ne [IntPtr]::Zero) { [CcobFg]::Force($h) }
+})
+$fgTimer.Start()
 $res = $dlg.ShowDialog($owner)
+$fgTimer.Dispose()
 $owner.Close()
 if ($res -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($dlg.SelectedPath) }
 `;

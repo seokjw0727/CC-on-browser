@@ -163,13 +163,18 @@ function findRunningCompaction(messages) {
   return findLastIndex(messages, (m) => m.kind === 'compaction' && m.state === 'running');
 }
 
+// 트랜스크립트(프리로드)는 camelCase(preTokens), live wire는 snake_case(pre_tokens)로
+// 온다(실 CLI 실측 — 같은 이벤트인데 표기가 다르다). 양쪽 모두 수용한다.
 function compactionMetaFields(meta) {
   const out = {};
   if (!meta || typeof meta !== 'object') return out;
   if (typeof meta.trigger === 'string') out.trigger = meta.trigger;
-  if (Number.isFinite(meta.preTokens)) out.preTokens = meta.preTokens;
-  if (Number.isFinite(meta.postTokens)) out.postTokens = meta.postTokens;
-  if (Number.isFinite(meta.durationMs)) out.durationMs = meta.durationMs;
+  const pre = meta.preTokens ?? meta.pre_tokens;
+  const post = meta.postTokens ?? meta.post_tokens;
+  const dur = meta.durationMs ?? meta.duration_ms;
+  if (Number.isFinite(pre)) out.preTokens = pre;
+  if (Number.isFinite(post)) out.postTokens = post;
+  if (Number.isFinite(dur)) out.durationMs = dur;
   return out;
 }
 
@@ -516,6 +521,16 @@ function attachToolResult(session, item, structured) {
   return { ...session, messages };
 }
 
+// 압축 요약 user 메시지의 본문 접두(고정 문구). 트랜스크립트 프리로드에는
+// isCompactSummary 플래그가 있지만 **live wire에는 없다**(실측: isSynthetic:true뿐)
+// — 본문 패턴이 없으면 /compact 직후 요약 전체가 거대한 사용자 버블로 렌더된다.
+const COMPACT_SUMMARY_RE = /^This session is being continued from a previous conversation/;
+
+// CLI가 컨텍스트에 주입하는 user 이벤트의 본문 패턴 폴백 — 플래그(isMeta/isSynthetic)가
+// 누락된 경로 대비. 훅 피드백("Stop hook feedback:")과 로컬 커맨드 캐빗은 사용자가
+// 직접 입력할 수 없는 형식이라 오검 위험이 없다.
+const INJECTED_NOISE_RE = /^(?:<local-command-caveat>|Stop hook feedback:)/;
+
 function reduceUser(session, payload) {
   const msg = payload.message || {};
   const content = msg.content;
@@ -524,19 +539,25 @@ function reduceUser(session, payload) {
   // isReplay:true = CLI가 자기 히스토리를 되쏘는 이벤트(설정 변경 에코, 향후 resume replay
   // 가능성) — 대화가 아니고 preload와 중복될 수 있으므로 채팅에 추가하지 않는다(파일 헤더 참조).
   if (payload.isReplay) return next;
-  // 압축 요약(이전 대화를 이어받는 user 메시지) — 거대한 버블 대신 접이식 요약 카드.
-  if (payload.isCompactSummary && typeof content === 'string') {
-    return append(next, { kind: 'compaction-summary', text: content });
-  }
+
   if (typeof content === 'string') {
     // 슬래시 커맨드 호출 에코(<command-name>…)는 커맨드 칩/초기화 구분선으로.
     // payload.optimistic=true는 컴포저가 직접 전송 시 낙관 렌더로 만든 합성 이벤트.
+    // 주입 메시지 억제(아래)보다 먼저 — caveat 블록이 에코를 감싸서 한 이벤트로 오는
+    // 실측 케이스에서 커맨드 칩을 잃지 않기 위해서다(parseCommandEcho 주석 참조).
     const cmd = parseCommandEcho(content);
     if (cmd) return reduceCommandInvocation(next, cmd.name, cmd.args, payload.optimistic === true);
     // 로컬 커맨드 출력(슬래시 커맨드 결과)은 삼키지 않고 결과 블록으로 보여준다.
+    // ANSI 색 이스케이프는 제거 — TUI가 기록한 세션은 "\x1b[2mCompacted (ctrl+o…)"
+    // 처럼 출력 앞에 이스케이프가 붙어(실측) ^Compacted 판별이 빗나가고, 렌더 시
+    // 깨진 문자로 보인다.
     const outM = /^<local-command-(stdout|stderr)>/.exec(content);
     if (outM) {
-      const text = content.replace(/<\/?local-command-(stdout|stderr)>/g, '').trim();
+      const text = content
+        .replace(/<\/?local-command-(stdout|stderr)>/g, '')
+        // eslint-disable-next-line no-control-regex
+        .replace(/\u001b\[[0-9;]*m/g, '')
+        .trim();
       // "Compacted …"는 /compact 완료 신호 — 압축 카드로 흡수(별도 출력 렌더 안 함).
       if (/^Compacted\b/i.test(text)) return finishCompaction(next, null);
       // "Goal set:"/"Goal cleared" stdout은 목표 배지의 폴백 신호지만, 임의 커맨드 출력이
@@ -552,6 +573,36 @@ function reduceUser(session, payload) {
         ? append(next, { kind: 'command-output', text, isError: outM[1] === 'stderr' })
         : next;
     }
+  }
+
+  // 단일 텍스트 본문(문자열 또는 text 블록 하나)을 뽑는다 — 주입 메시지 판별용.
+  const soleText =
+    typeof content === 'string'
+      ? content
+      : Array.isArray(content) &&
+          content.length === 1 &&
+          content[0]?.type === 'text' &&
+          typeof content[0].text === 'string'
+        ? content[0].text
+        : null;
+  if (soleText != null) {
+    // 본문 패턴 폴백은 **문자열 본문에만** 적용한다 — 실측상 CLI 주입 이벤트(요약·
+    // 넛지·캐빗·훅 피드백)는 전부 문자열 content인 반면, 사용자가 직접 친 프롬프트는
+    // 컴포저·서버 모두 text 블록 배열로 보낸다(우연히 같은 접두사로 시작하는 진짜
+    // 발화를 오검하지 않기 위한 경계 — codex 지적).
+    const isStringBody = typeof content === 'string';
+    // 압축 요약(이전 대화를 이어받는 user 메시지) — 거대한 버블 대신 접이식 요약 카드.
+    if (payload.isCompactSummary || (isStringBody && COMPACT_SUMMARY_RE.test(soleText))) {
+      return append(next, { kind: 'compaction-summary', text: soleText });
+    }
+    // CLI가 주입하는 합성/메타 user 이벤트(Stop 훅 피드백, 커맨드 캐빗, "no visible
+    // output" 넛지 등)는 사용자 발화가 아니다 — TUI와 동일하게 렌더하지 않는다.
+    // 실측상 트랜스크립트 프리로드는 isMeta, live wire는 isSynthetic으로 표시된다.
+    if (payload.isMeta === true || payload.isSynthetic === true) return next;
+    if (isStringBody && INJECTED_NOISE_RE.test(soleText)) return next;
+  }
+
+  if (typeof content === 'string') {
     // 인터럽트 복구(재시도/수정)를 위해 사용자가 보낸 프롬프트 원문을 기억한다.
     return { ...append(next, { kind: 'user-text', text: content }), lastUserText: content };
   }
@@ -600,10 +651,10 @@ function reduceSystem(session, payload) {
       return payload.status === 'compacting' ? startCompaction(next) : next;
     }
 
-    // 컨텍스트 압축 경계(실 CLI 실측: system/subtype:compact_boundary + compactMetadata) —
-    // /compact 완료. preTokens→postTokens 감소량을 완료 카드에 싣는다.
+    // 컨텍스트 압축 경계 — /compact 완료. preTokens→postTokens 감소량을 완료 카드에
+    // 싣는다. 메타 키는 트랜스크립트=compactMetadata, live wire=compact_metadata(실측).
     case 'compact_boundary':
-      return finishCompaction(session, payload.compactMetadata);
+      return finishCompaction(session, payload.compactMetadata ?? payload.compact_metadata);
     case 'thinking_tokens':
       return { ...session, thinkingTokens: payload.estimated_tokens ?? null };
     case 'hook_started':
