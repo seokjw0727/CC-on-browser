@@ -77,6 +77,18 @@ export function StoreProvider({ children }) {
     [],
   );
 
+  // 디버그 플래그 초기 동기화 — localStorage 'ccob-debug'를 store 상태로 미러.
+  // (리듀서/createInitialState는 순수 유지 — window 접근은 여기서만.)
+  useEffect(() => {
+    try {
+      if (window.localStorage?.getItem('ccob-debug') === '1') {
+        dispatch({ type: 'set-debug', value: true });
+      }
+    } catch {
+      /* localStorage 불가 환경 — 기본 꺼짐 유지 */
+    }
+  }, []);
+
   useEffect(() => {
     const token = getToken();
     const conn = connect({
@@ -130,6 +142,16 @@ export function StoreProvider({ children }) {
       stopSession: (key) => (wsRef.current ? wsRef.current.send({ type: 'stop', key }) : false),
       /** 일시 토스트 알림 — 설정 변경 확인·오류 표시용(자동 소멸). */
       notify: (text, kind = 'info') => dispatch({ type: 'add-toast', text, kind }),
+      /** 디버그 raw 이벤트 표시 토글 — localStorage 동기화 + 상태 반영(리렌더 유발). */
+      setDebug: (value) => {
+        try {
+          if (value) window.localStorage?.setItem('ccob-debug', '1');
+          else window.localStorage?.removeItem('ccob-debug');
+        } catch {
+          /* localStorage 불가 환경 — 상태만 반영 */
+        }
+        dispatch({ type: 'set-debug', value: !!value });
+      },
     }),
     [],
   );

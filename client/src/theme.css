@@ -85,6 +85,14 @@
   --danger-soft: rgba(224, 112, 95, 0.14);
   --info: #6a9bcc; /* CLI 테마의 chromeBlue rgb(106,155,204) — 자동모드 표시색 */
 
+  /* 잔디(사이드바 돌아보기) 강도 색 — color-mix가 테마별 --accent/--bg-sink를
+     사용 시점에 해석하므로 라이트 테마에서 자동으로 재계산된다(별도 override 불요). */
+  --grass-l0: color-mix(in srgb, var(--text) 7%, var(--bg-sink));
+  --grass-l1: color-mix(in srgb, var(--accent) 28%, var(--bg-sink));
+  --grass-l2: color-mix(in srgb, var(--accent) 50%, var(--bg-sink));
+  --grass-l3: color-mix(in srgb, var(--accent) 75%, var(--bg-sink));
+  --grass-l4: var(--accent);
+
   /* Type — Pretendard KR = 기본 UI, Monoplex KR = 대화·코드 (모두 번들) */
   --font-serif: 'Pretendard KR', Pretendard, -apple-system, BlinkMacSystemFont,
     'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
@@ -212,7 +220,8 @@ button {
   transition: background 0.13s, border-color 0.13s, color 0.13s, opacity 0.13s;
 }
 
-button:disabled {
+button:disabled,
+button[aria-disabled='true'] {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -416,7 +425,7 @@ select:focus {
   white-space: nowrap;
   max-width: 240px;
 }
-.pill:hover {
+.pill:hover:not(:disabled):not([aria-disabled='true']) {
   color: var(--text);
   border-color: var(--border-strong);
 }

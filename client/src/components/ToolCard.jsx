@@ -143,6 +143,40 @@ function AskUserQuestionBody({ input }) {
   );
 }
 
+// Task/Agent — 서브에이전트 스폰 호출. description·유형을 구조화하고 prompt는
+// 한 줄이어도 길 수 있어 줄 수와 무관하게 기본 접힘. 알려진 필드 외 나머지는
+// "기타 입력"으로 보존한다(미문서 프로토콜의 새 필드 소실 방지). fake-cli처럼
+// prompt만 오는 입력(description/type 부재)도 그대로 안전하다.
+const TASK_FIELDS = ['description', 'subagent_type', 'prompt'];
+
+function TaskBody({ input }) {
+  if (!input) return null;
+  const rest = Object.keys(input).filter((k) => !TASK_FIELDS.includes(k));
+  const prompt = typeof input.prompt === 'string' ? input.prompt : '';
+  return (
+    <div className="tool-kv">
+      {(input.description || input.subagent_type) && (
+        <div className="tool-desc">
+          {input.subagent_type && <span className="tool-chip">{input.subagent_type}</span>}{' '}
+          {input.description}
+        </div>
+      )}
+      {prompt !== '' && (
+        <Collapse summary={`프롬프트 (${prompt.split('\n').length}줄)`}>
+          <pre className="tool-code">{prompt}</pre>
+        </Collapse>
+      )}
+      {rest.length > 0 && (
+        <Collapse summary="기타 입력">
+          <pre className="tool-code">
+            {JSON.stringify(Object.fromEntries(rest.map((k) => [k, input[k]])), null, 2)}
+          </pre>
+        </Collapse>
+      )}
+    </div>
+  );
+}
+
 const BODY_BY_TOOL = {
   Bash: BashBody,
   Edit: EditBody,
@@ -153,10 +187,12 @@ const BODY_BY_TOOL = {
   WebFetch: QueryBody,
   WebSearch: QueryBody,
   AskUserQuestion: AskUserQuestionBody,
+  Task: TaskBody,
+  Agent: TaskBody,
 };
 
-// 결과를 기본 접힘으로 두는 도구들
-const RESULT_COLLAPSED = new Set(['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch']);
+// 결과를 기본 접힘으로 두는 도구들 — Task/Agent는 서브에이전트 최종 보고가 길다
+const RESULT_COLLAPSED = new Set(['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'Task', 'Agent']);
 
 function ResultBlock({ result, collapsedByDefault }) {
   const text = textOfResult(result);

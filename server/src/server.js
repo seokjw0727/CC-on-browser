@@ -10,14 +10,19 @@ import { WebSocketServer } from 'ws';
 import { SessionHub } from './session-hub.js';
 import { listProjects, listSessions, loadTranscript, listRecentSessions } from './history.js';
 import { listDirs, pickDirectory, searchFiles } from './fs-api.js';
-import { aggregateUsage } from './usage.js';
+import { aggregateDailyUsage, aggregateUsage, MAX_DAILY_DAYS } from './usage.js';
 import { fetchQuota } from './quota.js';
 
 const VERSION_TIMEOUT_MS = 3_000;
 const USAGE_CACHE_MS = 30_000;
 const QUOTA_CACHE_MS = 60_000;
+// 일별 집계(돌아보기 잔디)는 최대 1년치 스캔이라 5h/7d보다 캐시를 길게 둔다
+const DAILY_CACHE_MS = 5 * 60_000;
 // --effort 허용값 (spawn 전용 — claude --help 실측)
 const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+// 'bye'(의도적 탭 닫힘 신호) 수신 후 이 시간 내에 소켓이 닫혀야 bye-close로 인정.
+// 절전 등으로 close가 한참 뒤에 도착한 경우를 의도적 닫힘으로 오분류하지 않기 위한 TTL.
+export const BYE_MARK_TTL_MS = 15_000;
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -43,7 +48,10 @@ export async function startServer({
   staticDir,
   exitedRetentionMs,
   quotaFetcher, // 테스트 주입용 — 기본은 quota.js의 공식 사용률 조회
-  onClientCountChange, // WS 클라이언트 수 변화 알림 — bin이 브라우저 생존 신호로 쓴다
+  onClientCountChange, // WS 클라이언트 수 변화 알림 — bin이 브라우저 생존 신호로 쓴다.
+  // 계약: 연결(open) 시 (count) 단항 호출, 종료(close) 시 (count, {bye}) —
+  // bye는 "이 소켓이 bye 신호 후 TTL 내에 닫혔는가"(의도적 탭 닫힘 판별, lifecycle.js 참조).
+  byeMarkTtlMs = BYE_MARK_TTL_MS, // 테스트 주입용
   directoryPicker, // 테스트 주입용 — 기본은 fs-api.js의 네이티브 폴더 선택 대화상자
 } = {}) {
   if (!token) throw new TypeError('token is required');
@@ -52,10 +60,19 @@ export async function startServer({
   const hub = new SessionHub({ cliPath, cliArgsPrefix, exitedRetentionMs });
   /** @type {Set<import('ws').WebSocket>} */
   const sockets = new Set();
+  /** @type {WeakMap<import('ws').WebSocket, {at: number, seq: number}>} ws -> bye 수신 시각·연결 세대 */
+  const byeMarks = new WeakMap();
+  // WS 연결 세대 카운터 — bye 수신 후 새 연결이 생겼다면(세대 증가) 그 bye는 "이전
+  // episode"의 것(예: 새로고침에서 새 소켓 open 후 구 소켓 close가 늦게 도착)이라
+  // 의도적 닫힘 판정에 쓰지 않는다. 시계 비교는 같은 ms 해상도에서 모호해 세대로 판정.
+  let openSeq = 0;
   let boundPort = null;
   let versionPromise = null;
   let usageCache = { at: 0, promise: null };
   let quotaCache = { at: 0, promise: null };
+  // `${days}:${로컬 YYYY-MM-DD}` -> { at, promise } — 키에 날짜를 넣어 자정 직후
+  // 어제 캐시가 오늘 시계열로 오인되는 것을 차단(설계도 §2 server.js).
+  const dailyCache = new Map();
   const getQuota = quotaFetcher ?? fetchQuota;
   const pickDir = directoryPicker ?? pickDirectory;
 
@@ -136,6 +153,15 @@ export async function startServer({
     const key = typeof msg.key === 'string' ? msg.key : null;
     try {
       switch (msg.type) {
+        case 'bye':
+          // 클라이언트 pagehide(실제 탭 닫힘)의 best-effort 신호 — 곧 닫힐 소켓을
+          // "의도적 닫힘"으로 마킹한다. 응답 없음.
+          byeMarks.set(ws, { at: Date.now(), seq: openSeq });
+          return;
+        case 'ping':
+          // 절전 복귀 헬스체크 — half-open 소켓 판별용 왕복.
+          sendTo(ws, { type: 'pong' });
+          return;
         case 'start': {
           const startId = msg.startId ?? null;
           const effort = msg.effort ?? null;
@@ -304,6 +330,34 @@ export async function startServer({
           json(res, 200, { ...local, quota });
           return;
         }
+        case '/api/usage-daily': {
+          // 사이드바 "돌아보기" 잔디용 일별 집계. days: 정수만 허용(그 외 400), 1..365 clamp.
+          const raw = url.searchParams.get('days') ?? String(MAX_DAILY_DAYS);
+          const parsed = Number(raw);
+          if (!Number.isInteger(parsed)) {
+            json(res, 400, { error: 'days must be an integer' });
+            return;
+          }
+          const days = Math.max(1, Math.min(MAX_DAILY_DAYS, parsed));
+          const today = new Date();
+          const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+          const key = `${days}:${dateKey}`;
+          const hit = dailyCache.get(key);
+          if (!hit || Date.now() - hit.at > DAILY_CACHE_MS) {
+            const promise = aggregateDailyUsage(projectsRoot, Date.now(), days).catch((err) => {
+              // 실패는 캐시하지 않는다 — 그 사이 설치된 새 캐시는 건드리지 않는다
+              if (dailyCache.get(key)?.promise === promise) dailyCache.delete(key);
+              throw err;
+            });
+            // 만료 키(지난 날짜·다른 창) 정리 — 맵이 자라기만 하지 않게
+            for (const [k, v] of dailyCache) {
+              if (Date.now() - v.at > DAILY_CACHE_MS) dailyCache.delete(k);
+            }
+            dailyCache.set(key, { at: Date.now(), promise });
+          }
+          json(res, 200, await dailyCache.get(key).promise);
+          return;
+        }
         default:
           json(res, 404, { error: 'not found' });
       }
@@ -402,10 +456,17 @@ export async function startServer({
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
       sockets.add(ws);
+      openSeq += 1;
       onClientCountChange?.(sockets.size);
       ws.on('close', () => {
         sockets.delete(ws);
-        onClientCountChange?.(sockets.size);
+        const mark = byeMarks.get(ws);
+        // elapsed >= 0: 시계 역행 방어. seq === openSeq: bye 이후 새 연결이 없었어야 유효.
+        const elapsed = mark !== undefined ? Date.now() - mark.at : NaN;
+        const bye = mark !== undefined
+          && elapsed >= 0 && elapsed <= byeMarkTtlMs
+          && mark.seq === openSeq;
+        onClientCountChange?.(sockets.size, { bye });
       });
       ws.on('error', () => { /* 소켓 오류는 close로 정리 */ });
       ws.on('message', (data) => handleWsMessage(ws, data));
@@ -432,5 +493,13 @@ export async function startServer({
     server.closeAllConnections?.();
   });
 
-  return { server, port: boundPort, token, close, getClaudeVersion };
+  return {
+    server,
+    port: boundPort,
+    token,
+    close,
+    getClaudeVersion,
+    // 바인딩 래퍼로 노출 — private field 접근이 있는 메서드 참조를 그대로 넘기지 않는다.
+    hasLiveSessions: () => hub.hasLiveSessions(),
+  };
 }

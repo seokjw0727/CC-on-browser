@@ -20,20 +20,20 @@ export default function ActiveModes({ session }) {
   return (
     <div className="active-modes" role="group" aria-label="구동 중인 기능">
       {ultra && (
-        <span className="mode-badge ultra" title="울트라코드 — 최대 노력 플래그십 모드">
+        <span className="mode-badge ultra" data-tip="울트라코드 — 최대 노력 플래그십 모드">
           <span aria-hidden="true">⚡</span> 울트라코드
         </span>
       )}
       {goal && (
         // 의미(=활성 목표)는 aria-hidden 🎯에만 실리면 스크린리더가 목표 문자열만 읽어
         // 일반 텍스트와 구분 못 한다 — 배지에 접근성 이름을 명시한다.
-        <span className="mode-badge goal" title={`활성 목표: ${goal}`} aria-label={`활성 목표: ${goal}`}>
+        <span className="mode-badge goal" data-tip={`활성 목표: ${goal}`} aria-label={`활성 목표: ${goal}`}>
           <span aria-hidden="true">🎯</span>
           <span className="mode-badge-text">{goal}</span>
         </span>
       )}
       {mode && (
-        <span className="mode-badge perm" title={`권한 모드: ${MODE_LABEL[mode] ?? mode}`}>
+        <span className="mode-badge perm" data-tip={`권한 모드: ${MODE_LABEL[mode] ?? mode}`}>
           <span className="badge-ico" aria-hidden="true">🔓</span> {MODE_LABEL[mode] ?? mode}
         </span>
       )}

@@ -1,10 +1,16 @@
-// usage.js — 트랜스크립트 5h/7d 로컬 집계 테스트 (fake 픽스처만 사용, 실 CLI 미실행).
+// usage.js — 트랜스크립트 5h/7d·일별 로컬 집계 테스트 (fake 픽스처만 사용, 실 CLI 미실행).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { aggregateUsage, FIVE_HOURS_MS, SEVEN_DAYS_MS } from '../src/usage.js';
+import {
+  aggregateDailyUsage,
+  aggregateUsage,
+  FIVE_HOURS_MS,
+  MAX_DAILY_DAYS,
+  SEVEN_DAYS_MS,
+} from '../src/usage.js';
 
 const NOW = Date.UTC(2026, 6, 9, 12, 0, 0); // 고정 기준 시각 — 경계를 결정적으로 검증
 let root;
@@ -87,6 +93,97 @@ test('missing projects root returns zeroed buckets', async () => {
   assert.equal(res.fiveHour.totalTokens, 0);
   assert.equal(res.fiveHour.entries, 0);
   assert.equal(res.sevenDay.totalTokens, 0);
+});
+
+// ----- 일별 집계 (돌아보기 잔디용) -----
+// NOW는 UTC 고정이지만 일별 버킷은 러너의 로컬 캘린더 기준이다 — 기대 날짜 키를
+// 테스트 안에서 같은 로컬 규칙으로 계산해 타임존 독립적으로 검증한다.
+const entryAt = (ts, usage, extra = {}) =>
+  JSON.stringify({
+    type: 'assistant',
+    timestamp: new Date(ts).toISOString(),
+    message: { id: extra.msgId ?? null, role: 'assistant', content: [], usage },
+    ...(extra.requestId ? { requestId: extra.requestId } : {}),
+  });
+const localKey = (ms) => {
+  const d = new Date(ms);
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+};
+// NOW의 로컬 자정에서 n일 전 자정 ms
+const midnightAgo = (n) => {
+  const d = new Date(NOW);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - n).getTime();
+};
+
+test('daily: calendar buckets, zero fill, midnight boundaries, dedupe', async () => {
+  const r = await fs.mkdtemp(path.join(os.tmpdir(), 'ccob-daily-'));
+  try {
+    const proj = path.join(r, 'C--daily');
+    await fs.mkdir(proj, { recursive: true });
+    const HOUR = 60 * 60 * 1000;
+    const lines = [
+      // 오늘 자정 직후(00:30) — 오늘 버킷
+      entryAt(midnightAgo(0) + HOUR / 2, { input_tokens: 10, output_tokens: 0 }),
+      // 어제 자정 직전(23:30) — 어제 버킷
+      entryAt(midnightAgo(0) - HOUR / 2, { input_tokens: 5, output_tokens: 0 }),
+      // 창 시작 정각(2일 전 로컬 자정) — 포함
+      entryAt(midnightAgo(2), { input_tokens: 7, output_tokens: 0 }),
+      // 창 시작 직전 — 제외
+      entryAt(midnightAgo(2) - 1, { input_tokens: 999_999, output_tokens: 0 }),
+      // 미래 — 제외
+      entryAt(NOW + 60_000, { input_tokens: 888_888, output_tokens: 0 }),
+    ];
+    await fs.writeFile(path.join(proj, 's1.jsonl'), lines.join('\n') + '\n');
+    // resume 복제: 같은 requestId+msgId가 두 파일에 — 오늘 버킷에 1회만
+    const dup = entryAt(midnightAgo(0) + HOUR, { input_tokens: 40, output_tokens: 2 }, { requestId: 'req_d', msgId: 'msg_d' });
+    await fs.writeFile(path.join(proj, 's2.jsonl'), dup + '\n');
+    await fs.writeFile(path.join(proj, 's3.jsonl'), dup + '\n');
+
+    const { days } = await aggregateDailyUsage(r, NOW, 3);
+    assert.equal(days.length, 3);
+    // 시계열은 오래된 날 → 오늘, 로컬 캘린더 키
+    assert.deepEqual(days.map((d) => d.date), [localKey(midnightAgo(2)), localKey(midnightAgo(1)), localKey(midnightAgo(0))]);
+    assert.equal(days[2].totalTokens, 10 + 42); // 오늘 = 00:30 + dup 1회
+    assert.equal(days[2].entries, 2);
+    assert.equal(days[1].totalTokens, 5); // 어제 = 23:30
+    assert.equal(days[0].totalTokens, 7); // 창 시작 정각 — 0 버킷이 아니라 포함
+  } finally {
+    await fs.rm(r, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('daily: days clamp and full zero-fill series', async () => {
+  const r = await fs.mkdtemp(path.join(os.tmpdir(), 'ccob-daily2-'));
+  try {
+    const one = await aggregateDailyUsage(r, NOW, 0); // 하한 clamp → 오늘 하루
+    assert.equal(one.days.length, 1);
+    assert.equal(one.days[0].date, localKey(midnightAgo(0)));
+    const big = await aggregateDailyUsage(r, NOW, 9999); // 상한 clamp
+    assert.equal(big.days.length, MAX_DAILY_DAYS);
+    // 기록이 전혀 없어도 전 구간 0 버킷으로 채워진다
+    assert.ok(big.days.every((d) => d.totalTokens === 0 && d.entries === 0));
+  } finally {
+    await fs.rm(r, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('daily: files with mtime older than window are skipped', async () => {
+  const r = await fs.mkdtemp(path.join(os.tmpdir(), 'ccob-daily3-'));
+  try {
+    const proj = path.join(r, 'C--daily');
+    await fs.mkdir(proj, { recursive: true });
+    const f = path.join(proj, 'old.jsonl');
+    // 내용은 오늘(창 안)이지만 mtime을 10일 전으로 — 3일 창에서는 열리지 않는다
+    await fs.writeFile(f, entryAt(NOW - 1000, { input_tokens: 123 }) + '\n');
+    const oldSec = (NOW - 10 * 24 * 60 * 60 * 1000) / 1000;
+    await fs.utimes(f, oldSec, oldSec);
+    const { days } = await aggregateDailyUsage(r, NOW, 3);
+    assert.ok(days.every((d) => d.totalTokens === 0));
+  } finally {
+    await fs.rm(r, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
 });
 
 test('usage fields default to 0 when absent', async () => {

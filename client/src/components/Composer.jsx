@@ -1,5 +1,5 @@
 // 컴포저(레퍼런스 충실) — 상단 pill 행(레포·권한모드), 입력, 하단 컨트롤(모델 피커 +
-// 노력 수준 진행 바 + 전송), 그 아래 상태줄(컨텍스트·5h/7d 사용량·연결·테마).
+// 노력 수준 진행 바 + 전송), 그 아래 상태줄(컨텍스트·5h/7d 사용량·연결).
 // 상단 바를 대체한다. 설정 변경(모델·권한 모드·노력)은 채팅 기록 대신 토스트로 알린다.
 // 턴별 토큰(입/출력)은 상태줄이 아니라 채팅에 usage 아이템으로 표시(reduce-cli-event).
 // Enter 전송/Shift+Enter 개행, `/` 커맨드 드롭다운, Esc/버튼 interrupt.
@@ -7,11 +7,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
 import { searchFiles } from '../lib/api.js';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
-import { openSubagentCount } from '../lib/clawd.js';
-import { fmtTok, shortPath, contextWindowFor } from '../lib/format.js';
+import { openSubagents } from '../lib/subagents.js';
+import { fmtTok, fmtReset, shortPath, contextWindowFor } from '../lib/format.js';
 import { MODES, MODE_LABEL, MODE_CLASS } from '../lib/permission-modes.js';
 import { EFFORT_LEVELS, DEFAULT_EFFORT, effortLabel, isUiEffort } from '../lib/effort.js';
 import ActiveModes from './ActiveModes.jsx';
+import SubagentPanel from './SubagentPanel.jsx';
 import Clawd from './Clawd.jsx';
 import './interact.css';
 
@@ -28,18 +29,7 @@ function usageWindowTitle(label, b) {
     ' (로컬 트랜스크립트 집계)'
   );
 }
-// 7일 창 리셋처럼 하루를 넘기는 시각은 날짜까지 보여준다.
-function fmtReset(ms) {
-  if (!Number.isFinite(ms)) return null;
-  try {
-    const d = new Date(ms);
-    return d.toDateString() === new Date().toDateString()
-      ? d.toLocaleTimeString()
-      : d.toLocaleString();
-  } catch {
-    return null;
-  }
-}
+// 리셋 시각 표기는 format.js의 fmtReset 공유(사이드바 통계 섹션과 동일 표기).
 function quotaTitle(label, q, local) {
   const reset = fmtReset(q.resetsAt);
   return (
@@ -50,7 +40,7 @@ function quotaTitle(label, q, local) {
 }
 
 // 텍스트(label)를 둘러싼 원형 게이지 — 사용률 pct(0~100)만큼 링이 채워진다.
-function RingStat({ label, pct, title }) {
+function RingStat({ label, pct, tip }) {
   const R = 9;
   const C = 2 * Math.PI * R;
   const clamped = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
@@ -58,7 +48,7 @@ function RingStat({ label, pct, title }) {
   return (
     <span
       className={`meta-item ring-stat${cls}`}
-      title={title}
+      data-tip={tip}
       role="img"
       aria-label={`${label} ${Math.round(clamped)}%`}
     >
@@ -162,7 +152,7 @@ function ModelPicker({ session, options, disabled, onSelect }) {
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
-        title="모델 선택"
+        data-tip="모델 선택"
         onClick={() => setOpen((o) => !o)}
       >
         <span className="truncate">{label}</span>
@@ -224,14 +214,18 @@ function EffortPicker({ session, options, disabled, onSelect }) {
 
   return (
     <span className="model-menu-wrap" ref={wrapRef}>
+      {/* 미지원 사유 툴팁이 보여야 하므로 disabled 대신 aria-disabled + 클릭 가드 */}
       <button
         type="button"
         className={`pill model-menu-btn${ultraActive ? ' effort-ultra' : ''}`}
-        disabled={disabled || !supports}
+        aria-disabled={disabled || !supports}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={supports ? '노력 수준 (변경 시 같은 대화로 재시작)' : '이 모델은 노력 수준을 지원하지 않습니다'}
-        onClick={() => setOpen((o) => !o)}
+        data-tip={supports ? '노력 수준 (변경 시 같은 대화로 재시작)' : '이 모델은 노력 수준을 지원하지 않습니다'}
+        onClick={() => {
+          if (disabled || !supports) return;
+          setOpen((o) => !o);
+        }}
       >
         <span className="effort-bar mini" aria-hidden="true">
           {levels.map((l, i) => (
@@ -256,7 +250,7 @@ function EffortPicker({ session, options, disabled, onSelect }) {
                 aria-checked={l.value === cur}
                 aria-label={l.ultra ? `${l.label} (최대 노력 + 플래그십 모드)` : l.label}
                 className={`effort-seg${i <= curIdx ? ' fill' : ''}${l.ultra ? ' ultra' : ''}`}
-                title={l.ultra ? '울트라코드 — 최대 노력으로 재시작(플래그십 모드)' : l.label}
+                data-tip={l.ultra ? '울트라코드 — 최대 노력으로 재시작(플래그십 모드)' : l.label}
                 onClick={() => {
                   if (l.value !== cur) onSelect(l.value);
                   setOpen(false);
@@ -282,7 +276,7 @@ function EffortPicker({ session, options, disabled, onSelect }) {
   );
 }
 
-export default function Composer({ theme, onToggleTheme }) {
+export default function Composer() {
   const { state, dispatch, send, startSession, stopSession, notify } = useStore();
   const session = useActiveSession();
   const [text, setText] = useState('');
@@ -311,8 +305,8 @@ export default function Composer({ theme, onToggleTheme }) {
   // 재개 직후) 카탈로그 휴리스틱으로 판별([1m]→1M, 별칭은 카탈로그 해석)
   const ctxWindow = session?.contextWindow ?? contextWindowFor(session?.model, models);
   const ctxPct = (ctxTokens / ctxWindow) * 100;
-  // 실행 중인 서브에이전트(Task/Agent 도구) 수 — 마스코트 juggle 무드 판정
-  const subagents = useMemo(() => openSubagentCount(session?.messages), [session?.messages]);
+  // 실행 중인 서브에이전트(Task/Agent 도구) 목록 — 패널 표시 + 마스코트 juggle 판정(개수)
+  const subagentList = useMemo(() => openSubagents(session?.messages), [session?.messages]);
 
   // ----- `/` 커맨드 드롭다운 -----
   const commands = useMemo(() => {
@@ -696,6 +690,11 @@ export default function Composer({ theme, onToggleTheme }) {
           </div>
         )}
 
+        {/* 실행 중 서브에이전트 세션 모니터 — CLI Agents/Ultracode 표시의 브라우저판 */}
+        {session && (
+          <SubagentPanel list={subagentList} status={session.status} conn={state.conn} />
+        )}
+
         {/* 구동 중인 기능 배지 — ⚡울트라코드 · 🎯목표 · 🔓권한 상승 (활성 시에만) */}
         {session && <ActiveModes session={session} />}
 
@@ -704,7 +703,7 @@ export default function Composer({ theme, onToggleTheme }) {
           <div className="interrupt-recover" role="status">
             <span className="ir-ico" aria-hidden="true">↺</span>
             <span className="ir-text">직전 턴이 중단되었습니다.</span>
-            <span className="ir-preview dim" title={session.lastUserText}>
+            <span className="ir-preview dim" data-tip={session.lastUserText}>
               “{session.lastUserText.length > 40
                 ? `${session.lastUserText.slice(0, 40)}…`
                 : session.lastUserText}”
@@ -715,7 +714,7 @@ export default function Composer({ theme, onToggleTheme }) {
               className="ir-btn primary"
               onClick={retryInterrupted}
               disabled={!live || state.conn !== 'open' || session.status !== 'idle'}
-              title="같은 프롬프트를 그대로 다시 보냅니다"
+              data-tip="같은 프롬프트를 그대로 다시 보냅니다"
             >
               ↻ 재시도
             </button>
@@ -723,7 +722,7 @@ export default function Composer({ theme, onToggleTheme }) {
               type="button"
               className="ir-btn"
               onClick={editInterrupted}
-              title="프롬프트를 입력창으로 불러와 고쳐서 보냅니다"
+              data-tip="프롬프트를 입력창으로 불러와 고쳐서 보냅니다"
             >
               ✎ 수정
             </button>
@@ -731,7 +730,7 @@ export default function Composer({ theme, onToggleTheme }) {
               type="button"
               className="ir-btn ghost"
               onClick={dismissInterrupted}
-              title="복구 바 닫기"
+              data-tip="복구 바 닫기"
               aria-label="복구 바 닫기"
             >
               ✕
@@ -745,7 +744,7 @@ export default function Composer({ theme, onToggleTheme }) {
             type="button"
             className="pill repo-pill"
             onClick={() => dispatch({ type: 'open-new-session' })}
-            title={session?.cwd || '새 세션 / 레포 선택'}
+            data-tip={session?.cwd || '새 세션 / 레포 선택'}
           >
             <span className="pill-ico" aria-hidden="true">☁</span>
             <span className="truncate">{repoLabel}</span>
@@ -758,7 +757,7 @@ export default function Composer({ theme, onToggleTheme }) {
                 className={`pill-select ${MODE_CLASS[session.permissionMode] ?? ''}`.trim()}
                 value={session.permissionMode || 'default'}
                 disabled={!live || state.conn !== 'open'}
-                title="권한 모드 (setPermissionMode)"
+                data-tip="권한 모드 (setPermissionMode)"
                 onChange={(e) => changeMode(e.target.value)}
               >
                 {MODES.map((m) => (
@@ -828,7 +827,7 @@ export default function Composer({ theme, onToggleTheme }) {
               type="button"
               className="send-btn interrupt"
               onClick={doInterrupt}
-              title="현재 턴 중단 (Esc)"
+              data-tip="현재 턴 중단 (Esc)"
               aria-label="중단"
             >
               ■
@@ -839,7 +838,7 @@ export default function Composer({ theme, onToggleTheme }) {
               className="send-btn"
               disabled={!canSend}
               onClick={doSend}
-              title="전송 (Enter)"
+              data-tip="전송 (Enter)"
               aria-label="전송"
             >
               ↑
@@ -848,26 +847,26 @@ export default function Composer({ theme, onToggleTheme }) {
         </div>
       </div>
 
-      {/* 상태줄 — 컨텍스트·5h/7d 사용량·연결·테마 */}
+      {/* 상태줄 — 컨텍스트·5h/7d 사용량·연결 */}
       <div className="composer-meta">
         {ctxTokens > 0 && (
           <RingStat
             label="CTX"
             pct={ctxPct}
-            title={`현재 세션 컨텍스트(마지막 API 호출 기준, 턴 중 실시간 갱신): ${ctxTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} tok (${Math.round(ctxPct)}%)`}
+            tip={`현재 세션 컨텍스트(마지막 API 호출 기준, 턴 중 실시간 갱신): ${ctxTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} tok (${Math.round(ctxPct)}%)`}
           />
         )}
         {quota?.fiveHour ? (
           <RingStat
             label="5h"
             pct={quota.fiveHour.utilization}
-            title={quotaTitle('5시간 창', quota.fiveHour, gu?.fiveHour)}
+            tip={quotaTitle('5시간 창', quota.fiveHour, gu?.fiveHour)}
           />
         ) : (
           gu?.fiveHour && (
             <span
               className="meta-item"
-              title={`${usageWindowTitle('최근 5시간', gu.fiveHour)} — 공식 % 조회 실패(CLI 미로그인 또는 네트워크)`}
+              data-tip={`${usageWindowTitle('최근 5시간', gu.fiveHour)} — 공식 % 조회 실패(CLI 미로그인 또는 네트워크)`}
             >
               5h {fmtTok(gu.fiveHour.totalTokens)}
             </span>
@@ -877,13 +876,13 @@ export default function Composer({ theme, onToggleTheme }) {
           <RingStat
             label="7d"
             pct={quota.sevenDay.utilization}
-            title={quotaTitle('7일 창', quota.sevenDay, gu?.sevenDay)}
+            tip={quotaTitle('7일 창', quota.sevenDay, gu?.sevenDay)}
           />
         ) : (
           gu?.sevenDay && (
             <span
               className="meta-item"
-              title={`${usageWindowTitle('최근 7일', gu.sevenDay)} — 공식 % 조회 실패(CLI 미로그인 또는 네트워크)`}
+              data-tip={`${usageWindowTitle('최근 7일', gu.sevenDay)} — 공식 % 조회 실패(CLI 미로그인 또는 네트워크)`}
             >
               7d {fmtTok(gu.sevenDay.totalTokens)}
             </span>
@@ -894,18 +893,9 @@ export default function Composer({ theme, onToggleTheme }) {
           <span className="meta-item danger">연결 끊김 — 재접속 중…</span>
         )}
         <span className="spacer" />
-        <span className="meta-item" title={`WebSocket: ${state.conn}`}>
+        <span className="meta-item" data-tip={`WebSocket: ${state.conn}`}>
           <span className={`conn-dot ${state.conn}`} /> {CONN_LABEL[state.conn] ?? state.conn}
         </span>
-        <button
-          type="button"
-          className="meta-theme"
-          onClick={onToggleTheme}
-          title="테마 전환"
-          aria-label="테마 전환"
-        >
-          {theme === 'dark' ? '☀' : '☾'}
-        </button>
       </div>
 
       {/* CLAW'D — 세션 상태에 따라 움직이는 마스코트 (클릭=찌르기, 4연타=어지럼) */}
@@ -917,7 +907,7 @@ export default function Composer({ theme, onToggleTheme }) {
         sessionKey={state.activeKey ?? null}
         lastResult={session?.lastResult ?? null}
         interrupted={session?.interruptRequested ?? false}
-        subagents={subagents}
+        subagents={subagentList.length}
       />
     </div>
   );

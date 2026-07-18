@@ -5,7 +5,9 @@
 // 기본 실행은 "브라우저만 보이는" 모드다: 사전 점검을 마친 부모가 자신을 콘솔 없는
 // 백그라운드 프로세스로 재실행하고 즉시 종료하면, 백그라운드 서버가 기본 브라우저를
 // 연다. 클라이언트는 페이지 로드 시 WS를 상시 연결하므로(client/src/lib/store.jsx),
-// WS 클라이언트가 0인 채 유예 시간이 지나면 = 브라우저가 닫힌 것 → 서버 자동 종료.
+// 데몬 수명은 lifecycle.js 상태기계가 결정한다: 탭을 실제로 닫으면(pagehide 'bye'
+// 신호) 짧은 유예 후 종료하고, 절전·노트북 리드 닫힘 등으로 연결만 유실되면
+// 살아있는 CLI 세션이 있는 한 종료하지 않고 재접속을 기다린다(세션 돌연사 방지).
 // --no-open 은 예전처럼 포그라운드 콘솔 서버로 남는다(로그 확인·개발용).
 import crypto from 'node:crypto';
 import net from 'node:net';
@@ -15,15 +17,11 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../server/src/server.js';
+import { createLifecycle } from '../server/src/lifecycle.js';
 
 const selfPath = fileURLToPath(import.meta.url);
 const pkgRoot = path.resolve(path.dirname(selfPath), '..');
 const pkg = JSON.parse(readFileSync(path.join(pkgRoot, 'package.json'), 'utf8'));
-
-// 브라우저 종료 판정 유예 — 새로고침 재연결(ws.js 백오프 최대 5초)보다 넉넉하게.
-const IDLE_EXIT_GRACE_MS = 10_000;
-// 백그라운드 기동 후 브라우저가 끝내 접속하지 않으면 고아 서버로 남지 않게 종료.
-const FIRST_CONNECT_GRACE_MS = 90_000;
 
 const HELP = `Claude Code on Browser v${pkg.version}
 Local-only web UI for the claude CLI. Binds to 127.0.0.1 only.
@@ -187,26 +185,22 @@ if (!noOpen && !isDaemon) {
 }
 
 let handle;
-let idleTimer = null;
+let lifecycle = null;
 let closingDown = false;
 
 const shutdown = () => {
   if (closingDown) return;
   closingDown = true;
+  // close()가 WS 종료 콜백을 재발화시켜도 무시되도록 lifecycle부터 정리한다.
+  lifecycle?.dispose();
   const finish = () => process.exit(0);
   if (handle) handle.close().then(finish, finish);
   else finish();
 };
 
-// 브라우저 생존 신호: WS 클라이언트가 0이 된 채 유예가 지나면 종료.
-const onClientCountChange = (count) => {
-  if (closingDown) return;
-  if (idleTimer) {
-    clearTimeout(idleTimer);
-    idleTimer = null;
-  }
-  if (count === 0) idleTimer = setTimeout(shutdown, IDLE_EXIT_GRACE_MS);
-};
+// 브라우저 생존 신호 → 수명 정책(lifecycle.js 상태기계)에 위임.
+// lifecycle 생성 전 호출 가능성은 ?.로 방어(그 구간은 최초 접속 대기가 커버).
+const onClientCountChange = (count, meta) => lifecycle?.onClientCountChange(count, meta);
 
 try {
   handle = await startServer({
@@ -227,10 +221,12 @@ try {
 }
 
 if (!noOpen) {
-  // 데몬: 브라우저를 열고, 접속이 오기 전/모두 끊긴 뒤의 유예 타이머로 수명을 건다.
+  // 데몬: 브라우저를 열고, 수명은 lifecycle 상태기계에 건다 — 최초 접속 90초 대기,
+  // 의도적 탭 닫힘(bye)이면 10초 뒤 종료(기존 계약), 연결 유실(절전·리드 닫힘)이면
+  // 살아있는 CLI 세션이 있는 한 무기한 재접속 대기(없으면 30분 유예).
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
-  idleTimer = setTimeout(shutdown, FIRST_CONNECT_GRACE_MS);
+  lifecycle = createLifecycle({ hasLiveSessions: handle.hasLiveSessions, shutdown });
   openBrowser(`http://127.0.0.1:${handle.port}/#token=${handle.token}`);
 } else {
   console.log(`Claude Code on Browser v${pkg.version} — http://127.0.0.1:${handle.port}/#token=${handle.token}`);

@@ -59,3 +59,10 @@ export const searchFiles = (cwd, q = '') =>
  * 로컬 트랜스크립트 집계(5h/7d) + 계정 공식 사용률 quota({fiveHour,sevenDay} — 실패 시 null)
  */
 export const fetchUsage = () => get('/api/usage');
+
+/**
+ * 사이드바 "돌아보기" 잔디용 일별 집계 — 섹션이 열릴 때 1회 호출하고
+ * 주간/월간 뷰는 클라이언트에서 파생한다(토글 시 재요청 없음).
+ * @returns {Promise<{now, days: [{date, totalTokens, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, entries}]}>}
+ */
+export const fetchDailyUsage = (days = 365) => get(`/api/usage-daily?days=${days}`);

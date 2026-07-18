@@ -19,7 +19,7 @@ function Toast({ toast, onDone }) {
       type="button"
       className={`toast ${toast.kind}`}
       role={toast.kind === 'error' ? 'alert' : 'status'}
-      title="클릭하여 닫기"
+      data-tip="클릭하여 닫기"
       onClick={onDone}
     >
       <span className="toast-ico" aria-hidden="true">

@@ -477,6 +477,29 @@ test('(f) REST auth + /api/projects/sessions/transcript/browse/bootstrap', async
   assert.equal(usage.sevenDay.totalTokens, 185);
   assert.equal(usage.quota.fiveHour.utilization, 46);
   assert.equal(usage.quota.sevenDay.utilization, 28);
+
+  // /api/usage-daily — 돌아보기 잔디용 일별 집계. 인증 필수, days 검증/clamp,
+  // 빈 날짜 0 버킷을 포함한 전체 시계열(오래된 날 → 오늘)을 반환한다.
+  assert.equal((await fetch(`${base}/api/usage-daily`)).status, 401);
+  assert.equal((await fetch(`${base}/api/usage-daily?days=abc`, auth)).status, 400);
+  assert.equal((await fetch(`${base}/api/usage-daily?days=3.5`, auth)).status, 400);
+
+  const daily = await (await fetch(`${base}/api/usage-daily?days=7`, auth)).json();
+  assert.equal(daily.days.length, 7);
+  // 픽스처 엔트리는 "방금" timestamp — 마지막(오늘) 버킷에 집계된다
+  const todayBucket = daily.days[daily.days.length - 1];
+  assert.equal(todayBucket.totalTokens, 185);
+  assert.equal(todayBucket.entries, 1);
+  assert.match(todayBucket.date, /^\d{4}-\d{2}-\d{2}$/);
+  // 나머지는 0 버킷으로 채워진다
+  assert.ok(daily.days.slice(0, -1).every((d) => d.totalTokens === 0 && d.entries === 0));
+
+  // clamp: 상한(9999 → 365) · 하한(-5 → 1). 캐시는 days별 키라 7일 결과와 섞이지 않는다.
+  const big = await (await fetch(`${base}/api/usage-daily?days=9999`, auth)).json();
+  assert.equal(big.days.length, 365);
+  const one = await (await fetch(`${base}/api/usage-daily?days=-5`, auth)).json();
+  assert.equal(one.days.length, 1);
+  assert.equal(one.days[0].totalTokens, 185);
 });
 
 test('/api/pick-directory: 주입된 폴더 선택기 결과를 반환하고 인증을 요구한다', async () => {
@@ -581,6 +604,99 @@ test('onClientCountChange fires on WS connect/disconnect (browser-presence signa
       await new Promise((r) => setTimeout(r, 20));
     }
     assert.deepEqual(counts, [1, 2, 1, 0]);
+  } finally {
+    await h.close();
+  }
+});
+
+test('bye/ping 프로토콜: close 메타 {bye}, pong 왕복, hasLiveSessions 노출', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  /** @type {[number, {bye?: boolean}|null][]} [count, close메타|null(open)] */
+  const events = [];
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    byeMarkTtlMs: 300, // TTL 만료 케이스를 짧은 대기로 검증
+    onClientCountChange: (n, meta) => events.push([n, meta ?? null]),
+  });
+  const url = `ws://127.0.0.1:${h.port}/ws?token=${TOKEN}`;
+  const closes = () => events.filter(([, meta]) => meta !== null);
+  const waitCloses = async (count) => {
+    const deadline = Date.now() + 5000;
+    while (closes().length < count && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.equal(closes().length, count);
+  };
+  try {
+    // ping → pong 왕복
+    const c1 = await TestClient.connect(url);
+    c1.send({ type: 'ping' });
+    await c1.next((m) => m.type === 'pong');
+    assert.deepEqual(events, [[1, null]], 'open 보고는 메타 없이 단항');
+
+    // bye 후 즉시 close → {bye:true}
+    c1.send({ type: 'bye' });
+    c1.close();
+    await waitCloses(1);
+    assert.deepEqual(closes()[0], [0, { bye: true }]);
+
+    // silent close → {bye:false}
+    const c2 = await TestClient.connect(url);
+    c2.close();
+    await waitCloses(2);
+    assert.deepEqual(closes()[1], [0, { bye: false }]);
+
+    // bye 후 TTL(300ms) 경과 뒤 close → {bye:false} (늦은 close는 의도적 닫힘 아님)
+    const c3 = await TestClient.connect(url);
+    c3.send({ type: 'bye' });
+    c3.send({ type: 'ping' });
+    await c3.next((m) => m.type === 'pong'); // 순서 보장 — bye가 서버에 도착했음을 확인
+    await new Promise((r) => setTimeout(r, 400)); // TTL 경과
+    c3.close();
+    await waitCloses(3);
+    assert.deepEqual(closes()[2], [0, { bye: false }]);
+
+    // 다른 소켓의 bye가 오염되지 않는다: c4는 bye+close, c5는 silent close
+    const c4 = await TestClient.connect(url);
+    const c5 = await TestClient.connect(url);
+    c4.send({ type: 'bye' });
+    c4.close();
+    await waitCloses(4);
+    assert.deepEqual(closes()[3], [1, { bye: true }]);
+    c5.close();
+    await waitCloses(5);
+    assert.deepEqual(closes()[4], [0, { bye: false }]);
+
+    // 새로고침 겹침 순서: 구 소켓 bye → 신 소켓 open → 구 소켓 close.
+    // 최신 open 이전에 수신된 bye는 무효 — 신 소켓이 직후 리드 닫힘으로
+    // silent drop되어도 이전 episode의 bye로 종료 판정되면 안 된다.
+    const cOld = await TestClient.connect(url);
+    cOld.send({ type: 'bye' });
+    cOld.send({ type: 'ping' });
+    await cOld.next((m) => m.type === 'pong'); // bye 도착 확인
+    const cNew = await TestClient.connect(url); // 새 페이지가 먼저 연결
+    cOld.close(); // 구 소켓 close가 늦게 도착
+    await waitCloses(6);
+    assert.deepEqual(closes()[5], [1, { bye: false }], '최신 open 이전의 bye는 무효');
+    cNew.close();
+    await waitCloses(7);
+
+    // hasLiveSessions — 세션 시작 전 false, 시작 후 true, 종료 후 false
+    assert.equal(typeof h.hasLiveSessions, 'function');
+    assert.equal(h.hasLiveSessions(), false);
+    const c6 = await TestClient.connect(url);
+    c6.send({ type: 'start', startId: 'cl_live', cwd: tmpRoot });
+    const started = await c6.next((m) => m.type === 'started' && m.startId === 'cl_live');
+    assert.equal(h.hasLiveSessions(), true);
+    c6.send({ type: 'stop', key: started.key });
+    await c6.next((m) => m.type === 'exit' && m.key === started.key);
+    assert.equal(h.hasLiveSessions(), false, '종료된 세션은 리플레이 보존 중이어도 live 아님');
+    c6.close();
   } finally {
     await h.close();
   }

@@ -394,7 +394,8 @@ select.mode-trust:focus {
   max-width: 240px;
   cursor: pointer;
 }
-.model-menu-btn:disabled {
+.model-menu-btn:disabled,
+.model-menu-btn[aria-disabled='true'] {
   opacity: 0.55;
   cursor: default;
 }
@@ -590,6 +591,77 @@ select.mode-trust:focus {
   color: var(--danger);
 }
 
+/* ----- 실행 중 서브에이전트 세션 패널 (SubagentPanel) -----
+   ActiveModes 배지 행과 분리된 동적 작업 모니터. 항목은 1줄 고정(말줄임)이라
+   .sub-list max-height = 항목 22px x 3이 항상 성립하고 초과분은 스크롤. */
+.subagent-panel {
+  margin: 0 2px 6px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  font-size: 12px;
+}
+.subagent-panel .sub-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+.subagent-panel .sub-stale-note {
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+.subagent-panel .sub-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  max-height: 66px;
+  overflow-y: auto;
+}
+.subagent-panel .sub-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  min-width: 0;
+}
+.subagent-panel .sub-item.nested {
+  padding-left: 14px; /* 중첩(depth 1) 들여쓰기 — 좁은 화면에서도 폭 잠식 최소 */
+}
+.subagent-panel .sub-type {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-line);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.subagent-panel .sub-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.subagent-panel .sub-activity {
+  margin-left: auto;
+  flex: 0 0 auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
 /* ----- 인터럽트된 턴 복구 바 ----- */
 .interrupt-recover {
   display: flex;
@@ -663,18 +735,6 @@ select.mode-trust:focus {
 .meta-x:hover {
   opacity: 1;
 }
-.meta-theme {
-  padding: 2px 7px;
-  color: var(--text-faint);
-  background: none;
-  border: none;
-  border-radius: 6px;
-}
-.meta-theme:hover {
-  color: var(--text);
-  background: var(--surface-2);
-}
-
 .composer-mascot {
   position: absolute;
   right: 28px;
@@ -822,7 +882,7 @@ select.mode-trust:focus {
   background: var(--surface-2);
   border: 1px solid var(--border);
 }
-.cwd-path-row button:hover {
+.cwd-path-row button:hover:not(:disabled):not([aria-disabled='true']) {
   border-color: var(--border-strong);
 }
 .cwd-path-row .browse-native-btn {
@@ -830,7 +890,8 @@ select.mode-trust:focus {
   border-color: var(--accent-line);
   color: var(--accent);
 }
-.cwd-path-row .browse-native-btn:disabled {
+.cwd-path-row .browse-native-btn:disabled,
+.cwd-path-row .browse-native-btn[aria-disabled='true'] {
   opacity: 0.6;
   cursor: default;
 }
@@ -874,10 +935,11 @@ select.mode-trust:focus {
   cursor: pointer;
   min-width: 0;
 }
-.recent-session-item:hover:not(:disabled) {
+.recent-session-item:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--surface-2);
 }
-.recent-session-item:disabled {
+.recent-session-item:disabled,
+.recent-session-item[aria-disabled='true'] {
   opacity: 0.5;
   cursor: default;
 }
@@ -1084,7 +1146,7 @@ select.mode-trust:focus {
   color: var(--text-dim);
   text-align: left;
 }
-.sess-row.history:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.sess-row.history:hover:not(:disabled):not([aria-disabled='true']) { background: var(--surface-2); color: var(--text); }
 .sess-row.live { padding-right: 4px; }
 .sess-row.live.active .session-stop,
 .sess-row.live:hover .session-stop {
@@ -1104,11 +1166,11 @@ select.mode-trust:focus {
 /* ===== Task 6: press 마이크로 인터랙션 ===== */
 @media (prefers-reduced-motion: no-preference) {
   .btn-primary:active:not(:disabled),
-  .pill:active,
+  .pill:active:not([aria-disabled='true']),
   .send-btn:active:not(:disabled),
   .new-session-btn:active,
   .dir-head:active,
-  .sess-row:active {
+  .sess-row:active:not([aria-disabled='true']) {
     transform: scale(0.97);
   }
 }
@@ -1318,4 +1380,285 @@ select.mode-trust:focus {
   .clawd-zzz i {
     animation: none !important;
   }
+}
+
+/* ===== 사이드바 하단 통계·설정 팝오버 ===== */
+.sidebar-foot {
+  position: relative;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-soft);
+  padding: 4px 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.foot-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 7px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  /* .sidebar-h(섹션 헤더)와 같은 타이포 관례 */
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.foot-head:hover {
+  background: var(--surface);
+  color: var(--text-dim);
+}
+.foot-head.open {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.foot-icon {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.foot-title { flex: 1; }
+.foot-chevron {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.7;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.foot-head.open .foot-chevron { transform: rotate(-90deg); }
+/* 통계·설정 중앙 모달 — .modal 기본형의 컴팩트 변형 */
+.foot-modal {
+  max-width: 400px;
+  max-height: min(74vh, 560px);
+}
+.foot-modal .modal-title .foot-icon {
+  color: var(--accent);
+}
+.foot-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 2px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.foot-note { font-size: 12px; padding: 2px 0; }
+.foot-sub {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+/* ----- 통계 · 사용량 (5h/7d 공식 % + 리셋 시각 + 로컬 tok) ----- */
+.usage-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.usage-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.usage-label { font-size: 12px; color: var(--text-dim); }
+.usage-pct {
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.usage-pct.warn { color: var(--warning); }
+.usage-pct.danger { color: var(--danger); }
+.usage-bar {
+  height: 5px;
+  margin-top: 4px;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+  overflow: hidden;
+}
+.usage-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--dur-slow) var(--ease-out);
+}
+.usage-bar-fill.warn { background: var(--warning); }
+.usage-bar-fill.danger { background: var(--danger); }
+.usage-row-sub {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+/* ----- 세그먼트 토글 (돌아보기 주간/월간 · 설정 테마) ----- */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.seg button {
+  padding: 3px 10px;
+  border: none;
+  background: none;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.seg button:not(.on):hover { background: var(--surface); }
+.seg button.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ----- 통계 · 돌아보기 (GitHub 잔디 스타일 일별 heatmap) ----- */
+.grass-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.grass-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.grass {
+  /* 주간 뷰: 셀 14px + 간격 3px × 12열 = 201px — 내부 가용폭(≈244px) 안 */
+  --grass-cell: 14px;
+  --grass-gap: 3px;
+  --grass-step: calc(var(--grass-cell) + var(--grass-gap));
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.grass.monthly {
+  /* 월간 뷰: 셀 10px + 간격 2px × 최대 53열 ≈ 634px — 가로 스크롤 */
+  --grass-cell: 10px;
+  --grass-gap: 2px;
+}
+.grass-scroll { overflow-x: hidden; }
+.grass-scroll.wide {
+  overflow-x: auto;
+  padding-bottom: 4px; /* 스크롤바가 셀을 덮지 않게 */
+}
+.grass-months {
+  display: grid; /* grid-template-columns는 열 수에 맞춰 인라인 지정 */
+  height: 13px;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.grass-months span { white-space: nowrap; }
+.grass-grid {
+  display: flex;
+  gap: var(--grass-gap);
+}
+.grass-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--grass-gap);
+}
+.grass-cell {
+  width: var(--grass-cell, 10px);
+  height: var(--grass-cell, 10px);
+  border-radius: 3px;
+  background: var(--grass-l0);
+  flex-shrink: 0;
+}
+.grass-cell.l1 { background: var(--grass-l1); }
+.grass-cell.l2 { background: var(--grass-l2); }
+.grass-cell.l3 { background: var(--grass-l3); }
+.grass-cell.l4 { background: var(--grass-l4); }
+.grass-cell.out { background: transparent; } /* 미래·데이터 창 밖 */
+.grass-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+}
+
+/* ----- 설정 (테마 세그먼트 + 디버그 스위치) ----- */
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.setting-label { font-size: 12px; color: var(--text-dim); }
+.switch {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  transition: background var(--dur-fast), border-color var(--dur-fast);
+  flex-shrink: 0;
+}
+.switch.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.switch.on .switch-knob {
+  transform: translateX(14px);
+  background: var(--accent-contrast);
+}
+
+/* ===================== 커스텀 툴팁 (TooltipLayer) ===================== */
+.tip-card {
+  position: fixed;
+  /* 모달 오버레이(50) 위 — 모달 안 잔디 셀 툴팁도 보여야 한다. 토스트(1200) 아래. */
+  z-index: 700;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+  white-space: pre-line;
+  overflow-wrap: break-word;
+  animation: tip-in var(--dur-fast) var(--ease-out);
+}
+@keyframes tip-in {
+  from { opacity: 0; transform: translateY(2px); }
 }

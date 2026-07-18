@@ -52,6 +52,20 @@ export function contextWindowFor(model, models = []) {
   return has1m(s) ? CONTEXT_WINDOW_1M : CONTEXT_WINDOW;
 }
 
+// 쿼터 리셋 시각 표기 — 당일이면 시각만, 하루를 넘기면 날짜까지.
+// Composer 상태줄 툴팁·사이드바 통계 섹션이 같은 표기를 쓴다.
+export function fmtReset(ms) {
+  if (!Number.isFinite(ms)) return null;
+  try {
+    const d = new Date(ms);
+    return d.toDateString() === new Date().toDateString()
+      ? d.toLocaleTimeString()
+      : d.toLocaleString();
+  } catch {
+    return null;
+  }
+}
+
 // 경로 꼬리 2단 축약 — 세션 이름 표기 관례 (레포 pill·사이드바·접힘 배지 공통)
 export function shortPath(p) {
   if (!p) return '';

@@ -21,6 +21,8 @@
 // 턴 종료→happy·error(일회성)/유저 60s 무활동→sleep(눈 추적·zzz는 CSS·JS).
 //
 // 비트 문자: '0' 투명, '1' 몸통(주황), '2' 눈(검정).
+import { openSubagents } from './subagents.js';
+
 export const CLAWD_PIXEL_ASPECT = 2;
 
 export const CLAWD_FRAMES = {
@@ -190,16 +192,10 @@ export function eyeOffsetFor(dx, dy, rangePx = CLAWD_EYE_RANGE_PX) {
   };
 }
 
-// 서브에이전트를 스폰하는 도구 이름 — CLI v2.1.x는 'Task'(구명 병기 'Agent'도 수용).
-export const SUBAGENT_TOOLS = new Set(['Task', 'Agent']);
+// 서브에이전트 도구 판정·목록의 소유자는 subagents.js — 여기서는 호환 재수출만.
+export { SUBAGENT_TOOLS } from './subagents.js';
 
-/** 실행 중(결과 미도착·입력 확정)인 서브에이전트 도구 수 — juggle 판정용. */
+/** 실행 중(결과 미도착·입력 확정)인 서브에이전트 도구 수 — juggle 판정용 래퍼. */
 export function openSubagentCount(messages) {
-  let n = 0;
-  for (const m of messages ?? []) {
-    if (m.kind === 'tool_use' && !m.streaming && m.result == null && SUBAGENT_TOOLS.has(m.name)) {
-      n += 1;
-    }
-  }
-  return n;
+  return openSubagents(messages).length;
 }

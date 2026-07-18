@@ -13,6 +13,12 @@ import { spawn } from 'node:child_process';
 // (실측: 플래그 미부여 + 호출은 성공 반환). 그 결과 대화상자가 브라우저 창 **뒤에**
 // 열려 "안 열리는" 것처럼 보인다. 현재 전경 스레드에 입력 큐를 붙였다 떼는
 // AttachThreadInput 우회만이 전경 전환에 성공한다(실측 fg-is-us=True).
+//
+// IFileOpenDialog(FOS_PICKFOLDERS)를 직접 COM으로 띄우는 이유 — Windows PowerShell
+// 5.1(.NET Framework)의 FolderBrowserDialog는 구형 SHBrowseForFolder 트리 대화상자라
+// 주소창·검색이 없다. 탐색기 스타일(주소창에 경로 직접 입력/붙여넣기, 우상단 검색,
+// 즐겨찾기 탐색 창)은 Vista+ 공용 항목 대화상자에만 있고, .NET Framework에는 이를
+// 노출하는 관리 래퍼가 없어 최소 COM interop을 내장한다.
 const FOLDER_DIALOG_PS = `
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
@@ -38,12 +44,81 @@ public static class CcobFg {
     if (attached) { AttachThreadInput(fgTid, myTid, false); }
   }
 }
+public static class CcobPicker {
+  [ComImport, Guid("DC1C5A9C-E88A-4dde-A5A1-60F82A20AEF7")]
+  private class FileOpenDialogRCW { }
+  [ComImport, Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  private interface IShellItem {
+    void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
+    void GetParent(out IShellItem ppsi);
+    void GetDisplayName(uint sigdnName, [MarshalAs(UnmanagedType.LPWStr)] out string ppszName);
+    void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+    void Compare(IShellItem psi, uint hint, out int piOrder);
+  }
+  // vtable 순서는 IModalWindow+IFileDialog 선언 순서 그대로여야 한다(재배열 금지).
+  [ComImport, Guid("42f85136-db7e-439c-85f1-e4075d135fc8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  private interface IFileDialog {
+    [PreserveSig] uint Show(IntPtr hwndOwner);
+    void SetFileTypes(uint cFileTypes, IntPtr rgFilterSpec);
+    void SetFileTypeIndex(uint iFileType);
+    void GetFileTypeIndex(out uint piFileType);
+    void Advise(IntPtr pfde, out uint pdwCookie);
+    void Unadvise(uint dwCookie);
+    void SetOptions(uint fos);
+    void GetOptions(out uint pfos);
+    void SetDefaultFolder(IShellItem psi);
+    void SetFolder(IShellItem psi);
+    void GetFolder(out IShellItem ppsi);
+    void GetCurrentSelection(out IShellItem ppsi);
+    void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+    void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
+    void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
+    void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
+    void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
+    void GetResult(out IShellItem ppsi);
+    void AddPlace(IShellItem psi, uint fdap);
+    void SetDefaultExtension([MarshalAs(UnmanagedType.LPWStr)] string pszDefaultExtension);
+    void Close(int hr);
+    void SetClientGuid(ref Guid guid);
+    void ClearClientData();
+    void SetFilter(IntPtr pFilter);
+  }
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+  [return: MarshalAs(UnmanagedType.Interface)]
+  private static extern IShellItem SHCreateItemFromParsingName(string pszPath, IntPtr pbc, ref Guid riid);
+  private const uint FOS_NOCHANGEDIR = 0x00000008;
+  private const uint FOS_PICKFOLDERS = 0x00000020;
+  private const uint FOS_FORCEFILESYSTEM = 0x00000040;
+  private const uint SIGDN_FILESYSPATH = 0x80058000;
+  private const uint HR_CANCELLED = 0x800704C7; // HRESULT_FROM_WIN32(ERROR_CANCELLED)
+  public static string Pick(IntPtr owner, string title, string initialPath) {
+    IFileDialog dlg = (IFileDialog)new FileOpenDialogRCW();
+    uint opts;
+    dlg.GetOptions(out opts);
+    dlg.SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR);
+    if (!string.IsNullOrEmpty(title)) dlg.SetTitle(title);
+    if (!string.IsNullOrEmpty(initialPath)) {
+      try {
+        Guid iid = typeof(IShellItem).GUID;
+        IShellItem folder = SHCreateItemFromParsingName(initialPath, IntPtr.Zero, ref iid);
+        dlg.SetFolder(folder);
+      } catch { }
+    }
+    uint hr = dlg.Show(owner);
+    if (hr == HR_CANCELLED) return null;
+    // 사용자 취소 외의 실패는 취소로 위장하지 않고 예외로 표면화한다.
+    if (hr != 0) Marshal.ThrowExceptionForHR(unchecked((int)hr));
+    IShellItem item;
+    dlg.GetResult(out item);
+    string path;
+    item.GetDisplayName(SIGDN_FILESYSPATH, out path);
+    return path;
+  }
+}
 '@
-$dlg = New-Object System.Windows.Forms.FolderBrowserDialog
-$dlg.Description = 'CC-on-browser: 작업 디렉터리 선택'
-$dlg.ShowNewFolderButton = $true
+$initPath = ''
 if ($env:CCOB_INIT_PATH -and (Test-Path -LiteralPath $env:CCOB_INIT_PATH)) {
-  try { $dlg.SelectedPath = $env:CCOB_INIT_PATH } catch {}
+  $initPath = $env:CCOB_INIT_PATH
 }
 $owner = New-Object System.Windows.Forms.Form
 $owner.ShowInTaskbar = $false; $owner.Opacity = 0
@@ -51,7 +126,8 @@ $owner.Show() | Out-Null
 [CcobFg]::Force($owner.Handle)
 # 모달 루프 안에서 대화상자 자체를 몇 차례 더 전경으로 — 클릭 직후 브라우저가
 # 포커스를 되가져가는 경합을 흡수한다. GetActiveWindow는 모달 루프 중 이 스레드의
-# 활성 창(=대화상자)을 돌려준다.
+# 활성 창(=대화상자)을 돌려준다. 공용 대화상자의 모달 루프도 스레드 메시지를
+# 디스패치하므로 WinForms Timer 틱은 그대로 동작한다.
 $script:ccobFgTicks = 0
 $fgTimer = New-Object System.Windows.Forms.Timer
 $fgTimer.Interval = 250
@@ -62,10 +138,18 @@ $fgTimer.Add_Tick({
   if ($h -ne [IntPtr]::Zero) { [CcobFg]::Force($h) }
 })
 $fgTimer.Start()
-$res = $dlg.ShowDialog($owner)
+$picked = $null
+$pickError = $null
+try {
+  $picked = [CcobPicker]::Pick($owner.Handle, 'CC-on-browser: 작업 디렉터리 선택', $initPath)
+} catch {
+  $pickError = $_
+}
 $fgTimer.Dispose()
 $owner.Close()
-if ($res -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($dlg.SelectedPath) }
+# 취소가 아닌 COM 실패는 stderr+exit 1로 — 래퍼가 canceled 대신 reject하게 한다.
+if ($pickError) { [Console]::Error.Write($pickError.ToString()); exit 1 }
+if ($picked) { [Console]::Out.Write($picked) }
 `;
 
 const FOLDER_DIALOG_TIMEOUT_MS = 3 * 60_000;

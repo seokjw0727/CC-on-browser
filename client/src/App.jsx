@@ -11,6 +11,7 @@ import Composer from './components/Composer.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import PermissionDialog from './components/PermissionDialog.jsx';
 import Toasts from './components/Toasts.jsx';
+import TooltipLayer from './components/Tooltip.jsx';
 
 const THEME_KEY = 'ccob-theme';
 const USAGE_POLL_MS = 60_000;
@@ -22,7 +23,6 @@ function Shell() {
     () => localStorage.getItem(THEME_KEY) || 'dark',
   );
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -48,7 +48,8 @@ function Shell() {
 
   return (
     <div className={`app${sidebarOpen ? '' : ' sidebar-collapsed'}`}>
-      <Sidebar onCollapse={() => setSidebarOpen(false)} />
+      {/* 테마 변경은 사이드바 설정 팝업에서 제공한다. */}
+      <Sidebar onCollapse={() => setSidebarOpen(false)} theme={theme} onSetTheme={setTheme} />
 
       <main className="main">
         {!sidebarOpen && (
@@ -57,7 +58,7 @@ function Shell() {
             className="sidebar-reopen"
             onClick={() => setSidebarOpen(true)}
             aria-label="사이드바 열기"
-            title="사이드바 열기"
+            data-tip="사이드바 열기"
           >
             ☰
           </button>
@@ -66,16 +67,17 @@ function Shell() {
             이름은 사이드바 라이브 행과 같은 관례(sessionId 앞 8자, 미발급이면 '새 세션')
             + 보조로 작업 디렉터리 꼬리. */}
         {!sidebarOpen && session && (
-          <div className="session-name-badge" title={session.cwd || session.key}>
+          <div className="session-name-badge" data-tip={session.cwd || session.key}>
             {session.sessionId ? session.sessionId.slice(0, 8) : '새 세션'}
             {shortPath(session.cwd) ? ` · ${shortPath(session.cwd)}` : ''}
           </div>
         )}
         <ChatView />
-        <Composer theme={theme} onToggleTheme={toggleTheme} />
+        <Composer />
       </main>
 
       <PermissionDialog />
+      <TooltipLayer />
       <Toasts />
     </div>
   );

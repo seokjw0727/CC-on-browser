@@ -62,6 +62,11 @@ export function createInitialState() {
     toasts: [], // [{id, kind: 'info'|'error', text}] — 설정 변경·오류의 일시 알림(자동 소멸)
     newSessionOpen: false, // 새 세션(레포 선택) 모달 표시 여부 — Sidebar/Composer 공용
     globalUsage: null, // /api/usage 폴링 결과 — 로컬 5h/7d 집계 + 공식 quota(실패 시 null), 상태줄 표시용
+    // 디버그 raw 이벤트 표시(사이드바 설정 토글) — localStorage 'ccob-debug' 미러.
+    // 리듀서는 순수 유지: localStorage 읽기/쓰기는 store.jsx(초기 동기화·setDebug)의 몫.
+    // 토글 dispatch가 store 구독자(ChatView)를 리렌더시켜 Message.jsx의 기존
+    // debugEnabled()가 재평가된다 — Message는 무수정(설계도 §2).
+    debugRaw: false,
   };
 }
 
@@ -280,6 +285,8 @@ export function reducer(state, action) {
       return pushToast(state, action.text, action.kind);
     case 'remove-toast':
       return { ...state, toasts: state.toasts.filter((t) => t.id !== action.id) };
+    case 'set-debug':
+      return { ...state, debugRaw: !!action.value };
     default:
       return state;
   }

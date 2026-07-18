@@ -98,6 +98,18 @@ export class SessionHub extends EventEmitter {
     return this.#sessions.has(key);
   }
 
+  /**
+   * exited 아닌 CLI 세션 존재 여부 — 데몬 수명 정책(lifecycle.js)이 "연결 유실 시
+   * 보호할 세션이 있는가"를 판단하는 데 쓴다. 초기화 중 세션도 live로 간주하고,
+   * 리플레이용으로 잠시 남은 종료 엔트리는 제외한다.
+   */
+  hasLiveSessions() {
+    for (const entry of this.#sessions.values()) {
+      if (!entry.exited) return true;
+    }
+    return false;
+  }
+
   /** 사용자 텍스트 전송. 세션이 종료/중단되어 쓸 수 없으면 false. */
   sendText(key, text) {
     return this.#require(key).session.sendUserText(String(text ?? ''));
