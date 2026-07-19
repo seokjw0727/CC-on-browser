@@ -79,16 +79,19 @@ jobs:
           cd /tmp/consumer
           npm init -y > /dev/null
           npm install "$GITHUB_WORKSPACE"/cc-on-browser-*.tgz
-          ./node_modules/.bin/cc-on-browser --port 8790 > boot.log 2>&1 &
-          SERVER_PID=$!
+          # 기본 실행은 부모가 URL 출력 후 스스로 종료하고 서버는 데몬으로 남는다
+          # (v1.1.0+). 부모를 동기로 기다렸다가, 데몬은 argv 마커로 정리한다 —
+          # 이미 죽은 부모 PID를 kill해 실패하던 종전 방식의 수정.
+          ./node_modules/.bin/cc-on-browser --port 8790 > boot.log 2>&1 || { cat boot.log; exit 1; }
           for i in $(seq 1 30); do
             grep -q '#token=' boot.log && break
             sleep 1
           done
           cat boot.log
+          grep -Eq 'claude CLI:|WARNING: claude CLI' boot.log
           TOKEN=$(grep -o '#token=[0-9a-f]*' boot.log | head -1 | cut -d= -f2)
           test -n "$TOKEN"
           curl -fsS http://127.0.0.1:8790/ | grep -qi '<!doctype html'
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8790/api/bootstrap)" = "401"
           curl -fsS -H "x-auth-token: $TOKEN" http://127.0.0.1:8790/api/bootstrap
-          kill "$SERVER_PID"
+          pkill -f 'daemon-worker' || true
