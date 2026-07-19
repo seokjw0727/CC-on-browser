@@ -1,0 +1,174 @@
+# 릴리스 파이프라인 — 태그 푸시(v*) 또는 수동 디스패치.
+# 디스패치 모드 이원화(설계도 §2):
+#   dry-run : 브랜치 리허설 — 검증·pack·스모크까지만, Release 업로드·npm publish 완전 차단
+#   publish : 기존 태그 지정 필수 — 그 태그를 체크아웃해 게시 복구(부분 실패 재실행 경로)
+# 산출물 계약: npm pack 1회(prepack이 최종 배포 빌드 소유) → 같은 tarball을
+# E2E 서빙 dist·소비자 스모크·GitHub 자산·npm publish에 동일하게 승격.
+# 재실행 안전: 기존 자산과 체크섬이 같으면 유지, 다르면 실패(불변 태그 자산 보호).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry-run = rehearse only · publish = recover an existing tag'
+        type: choice
+        options: [dry-run, publish]
+        default: dry-run
+      tag:
+        description: 'Existing tag (required for publish mode, e.g. v1.5.0)'
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+# 같은 태그의 push 릴리스와 수동 복구가 동시에 돌지 않게 대상 태그 기준으로 묶는다.
+concurrency:
+  group: release-${{ github.event_name == 'push' && github.ref_name || (inputs.tag || github.ref_name) }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve mode & target tag
+        id: cfg
+        shell: bash
+        env:
+          # 사용자 입력은 보간하지 않고 env로만 받는다(명령 주입 방지) + 형식 검증.
+          RAW_MODE: ${{ inputs.mode }}
+          RAW_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            MODE=publish
+            TAG="${GITHUB_REF_NAME}"
+          else
+            MODE="$RAW_MODE"
+            TAG="$RAW_TAG"
+            if [ "$MODE" = "publish" ] && [ -z "$TAG" ]; then
+              echo "::error::publish mode requires an existing tag input"; exit 1
+            fi
+          fi
+          if [ -n "$TAG" ] && ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
+            echo "::error::tag '$TAG' does not look like a version tag (vX.Y.Z)"; exit 1
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v5
+        with:
+          # dry-run(태그 미지정)은 디스패치된 브랜치를, 그 외에는 대상 태그를 체크아웃.
+          ref: ${{ steps.cfg.outputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      - name: Install (locked, reproducible)
+        run: npm ci && npm ci --prefix client
+
+      - name: Unit & integration tests
+        run: npm test
+
+      - name: Verify tag matches package.json version
+        if: steps.cfg.outputs.tag != ''
+        run: |
+          PKG_V=$(node -p "require('./package.json').version")
+          test "v$PKG_V" = "${{ steps.cfg.outputs.tag }}" \
+            || { echo "::error::tag ${{ steps.cfg.outputs.tag }} != package version v$PKG_V"; exit 1; }
+
+      - name: Pack once (prepack owns the final client build)
+        run: |
+          set -euo pipefail
+          npm pack
+          TARBALL=$(ls cc-on-browser-*.tgz)
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+          sha256sum "$TARBALL" | tee "$TARBALL.sha256"
+
+      - name: Browser E2E (against the dist the pack just built)
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+
+      - name: Consumer install & boot smoke (same tarball)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/consumer && cd /tmp/consumer
+          npm init -y > /dev/null
+          npm install "$GITHUB_WORKSPACE/$TARBALL"
+          # 설치된 bin의 버전·도움말 — 패키지 버전/진입점 문제를 릴리스 전에 잡는다.
+          test "$(./node_modules/.bin/cc-on-browser --version)" = "$(node -p "require('$GITHUB_WORKSPACE/package.json').version")"
+          ./node_modules/.bin/cc-on-browser --help | grep -q -- '--no-open'
+          # 기본(백그라운드) 모드 부팅 + CLI 진단 라인(버전 또는 미탐지 경고) 확인.
+          ./node_modules/.bin/cc-on-browser --port 8791 > boot.log 2>&1 || { cat boot.log; exit 1; }
+          for i in $(seq 1 30); do grep -q '#token=' boot.log && break; sleep 1; done
+          cat boot.log
+          grep -Eq 'claude CLI:|WARNING: claude CLI' boot.log
+          TOKEN=$(grep -o '#token=[0-9a-f]*' boot.log | head -1 | cut -d= -f2)
+          test -n "$TOKEN"
+          curl -fsS -H "x-auth-token: $TOKEN" http://127.0.0.1:8791/api/bootstrap > /dev/null
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8791/api/bootstrap)" = "401"
+          pkill -f 'daemon-worker' || true
+
+      - name: Upload release asset (checksum-safe, re-runnable)
+        if: steps.cfg.outputs.mode == 'publish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.cfg.outputs.tag }}
+        run: |
+          set -euo pipefail
+          LOCAL_SHA=$(sha256sum "$TARBALL" | cut -d' ' -f1)
+          if gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null | grep -qx "$TARBALL"; then
+            gh release download "$TAG" --pattern "$TARBALL" --output /tmp/existing.tgz
+            REMOTE_SHA=$(sha256sum /tmp/existing.tgz | cut -d' ' -f1)
+            if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
+              echo "::error::existing asset differs (local $LOCAL_SHA, remote $REMOTE_SHA) — refusing to replace an immutable tag's asset"
+              exit 1
+            fi
+            # tgz는 동일 — 이전 부분 실패로 .sha256만 누락됐을 수 있으니 개별 복구.
+            # 내용은 동일 tarball에서 방금 재계산한 값이라 --clobber가 안전하다.
+            gh release upload "$TAG" "$TARBALL.sha256" --clobber
+            echo "::notice::tarball already uploaded with identical checksum — kept; checksum asset ensured"
+            exit 0
+          fi
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            # 릴리스 노트 = CHANGELOG의 해당 버전 섹션(없으면 기본 문구).
+            NOTES=$(awk "/^## \\[${TAG#v}\\]/{flag=1;next}/^## \\[/{flag=0}flag" CHANGELOG.md || true)
+            gh release create "$TAG" --verify-tag --title "$TAG" --notes "${NOTES:-Release $TAG}"
+          fi
+          gh release upload "$TAG" "$TARBALL" "$TARBALL.sha256"
+
+      - name: Publish to npm (same tarball; explicit skip without NPM_TOKEN)
+        if: steps.cfg.outputs.mode == 'publish'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::notice::npm publish SKIPPED — NPM_TOKEN secret is not configured, so this version is NOT on npm. After adding the secret, recover with workflow_dispatch (mode=publish, tag=${{ steps.cfg.outputs.tag }})."
+            exit 0
+          fi
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "cc-on-browser@$VERSION" version > /dev/null 2>&1; then
+            # 기게시 skip은 registry 산출물이 지금 만든 tarball과 동일할 때만 —
+            # 이름 선점·과거 오게시를 동일 릴리스로 오인하지 않는다(codex 지적).
+            REG_SHA=$(npm view "cc-on-browser@$VERSION" dist.shasum)
+            LOCAL_SHA1=$(sha1sum "$TARBALL" | cut -d' ' -f1)
+            if [ "$REG_SHA" = "$LOCAL_SHA1" ]; then
+              echo "::notice::cc-on-browser@$VERSION already on npm with identical tarball — skipping"
+              exit 0
+            fi
+            echo "::error::cc-on-browser@$VERSION exists on npm but its tarball differs (registry sha1 $REG_SHA, local $LOCAL_SHA1) — manual review required"
+            exit 1
+          fi
+          npm publish "$TARBALL"

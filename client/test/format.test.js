@@ -5,7 +5,7 @@
 // ('claude-opus-4-8'). 판별은 정확 일치 → base(접미사 제거) 일치 → 문자열 순.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { contextWindowFor, CONTEXT_WINDOW, CONTEXT_WINDOW_1M } from '../src/lib/format.js';
+import { contextWindowFor, fmtAgo, fmtBytes, CONTEXT_WINDOW, CONTEXT_WINDOW_1M } from '../src/lib/format.js';
 import { reduceCliEvent } from '../src/lib/reduce-cli-event.js';
 import { createSessionState, reducer, createInitialState } from '../src/lib/store-reducer.js';
 
@@ -17,6 +17,47 @@ const CATALOG = [
   { value: 'claude-fable-5[1m]', resolvedModel: 'claude-fable-5' },
   { value: 'sonnet', resolvedModel: 'claude-sonnet-5' },
 ];
+
+test('fmtBytes: 1024 기준 경계 — 0 B 유지, 무효 입력은 null', () => {
+  assert.equal(fmtBytes(0), '0 B');
+  assert.equal(fmtBytes(812), '812 B');
+  assert.equal(fmtBytes(1023), '1023 B');
+  assert.equal(fmtBytes(1024), '1.0 KB');
+  assert.equal(fmtBytes(24_884), '24.3 KB');
+  assert.equal(fmtBytes(1024 ** 2), '1.0 MB');
+  assert.equal(fmtBytes(1024 ** 3), '1.0 GB');
+  // 반올림이 다음 단위 임계("1024.0 KB")를 만들지 않는다 — 상위 단위로 승급(codex 지적)
+  assert.equal(fmtBytes(1024 ** 2 - 1), '1.0 MB');
+  assert.equal(fmtBytes(1024 ** 3 - 1), '1.0 GB');
+  assert.equal(fmtBytes(1023.9 * 1024), '1023.9 KB');
+  assert.equal(fmtBytes(null), null);
+  assert.equal(fmtBytes(undefined), null);
+  assert.equal(fmtBytes(NaN), null);
+  assert.equal(fmtBytes(Infinity), null);
+  assert.equal(fmtBytes(-1), null);
+});
+
+test('fmtAgo: 구간 표기 · 미래 clamp · 무효 입력', () => {
+  const now = Date.parse('2026-07-19T12:00:00Z');
+  assert.equal(fmtAgo(now - 5_000, now), '방금');
+  assert.equal(fmtAgo(now - 59_999, now), '방금');
+  assert.equal(fmtAgo(now - 60_000, now), '1분 전');
+  assert.equal(fmtAgo(now - 59 * 60_000, now), '59분 전');
+  assert.equal(fmtAgo(now - 60 * 60_000, now), '1시간 전');
+  assert.equal(fmtAgo(now - 23 * 3_600_000, now), '23시간 전');
+  assert.equal(fmtAgo(now - 24 * 3_600_000, now), '1일 전');
+  assert.equal(fmtAgo(now - 6 * 86_400_000, now), '6일 전');
+  // 7일 이상 — 로케일 날짜 문자열(정확 문구는 로케일 의존이라 형태만 확인)
+  const old = fmtAgo(now - 8 * 86_400_000, now);
+  assert.equal(typeof old, 'string');
+  assert.ok(!old.includes('전'));
+  // 미래 mtime(시계 왜곡·테스트 픽스처)은 "방금"으로 clamp — 음수 표기 금지
+  assert.equal(fmtAgo(now + 60_000, now), '방금');
+  // 무효 입력
+  assert.equal(fmtAgo(null, now), null);
+  assert.equal(fmtAgo(0, now), null);
+  assert.equal(fmtAgo(NaN, now), null);
+});
 
 test('contextWindowFor: 기본은 200k — 미상/표준 모델', () => {
   assert.equal(CONTEXT_WINDOW, 200_000);

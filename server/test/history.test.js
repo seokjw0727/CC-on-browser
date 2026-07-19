@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { listProjects, listSessions, loadTranscript, listRecentSessions } from '../src/history.js';
+import { listProjects, listSessions, loadTranscript, listRecentSessions, deleteSession } from '../src/history.js';
 
 const J = (o) => JSON.stringify(o);
 
@@ -99,6 +99,9 @@ test('listRecentSessions aggregates across projects, mtime desc, with cwd/title'
   assert.equal(recent[0].cwd, 'D:\\other');
   assert.equal(recent[0].title, '다른 프로젝트 세션');
   assert.equal(recent[2].cwd, 'C:\\fake');
+  // 대화 크기 — stat 그대로의 정확한 바이트(한글 멀티바이트 포함) 배선 검증
+  assert.equal(recent[0].fileSize, Buffer.byteLength(s3, 'utf8'));
+  assert.ok(recent.every((r) => Number.isFinite(r.fileSize) && r.fileSize > 0));
   // limit 적용
   const limited = await listRecentSessions(root, 2);
   assert.deepEqual(limited.map((r) => r.sessionId), ['cccc-3333', 'bbbb-2222']);
@@ -120,4 +123,41 @@ test('rejects path escape in dirName/sessionId', async () => {
   await assert.rejects(loadTranscript(root, '..', 'aaaa-1111'));
   await assert.rejects(loadTranscript(root, 'C--fake-project', '..\\..\\x'));
   await assert.rejects(loadTranscript(root, 'C--fake-project', 'a/b'));
+});
+
+test('deleteSession removes only the target jsonl permanently', async () => {
+  const { root, dir } = await makeRoot();
+  await deleteSession(root, 'C--fake-project', 'aaaa-1111');
+  await assert.rejects(fs.access(path.join(dir, 'aaaa-1111.jsonl')), { code: 'ENOENT' });
+  // 다른 세션 파일·비세션 파일은 그대로
+  await fs.access(path.join(dir, 'bbbb-2222.jsonl'));
+  await fs.access(path.join(dir, 'notes.txt'));
+});
+
+test('deleteSession rejects bad names and missing files', async () => {
+  const { root } = await makeRoot();
+  // 경로 탈출·형식 위반 — 파일시스템 접근 전에 거부
+  await assert.rejects(deleteSession(root, '..', 'aaaa-1111'));
+  await assert.rejects(deleteSession(root, 'a/b', 'aaaa-1111'));
+  await assert.rejects(deleteSession(root, 'C--fake-project', 'a/b'));
+  await assert.rejects(deleteSession(root, 'C--fake-project', 'a b'), /invalid sessionId/);
+  await assert.rejects(deleteSession(root, 'C--fake-project', 'a*b'), /invalid sessionId/);
+  // 없는 파일/디렉터리는 ENOENT (호출측 404 매핑)
+  await assert.rejects(deleteSession(root, 'C--fake-project', 'no-such'), { code: 'ENOENT' });
+  await assert.rejects(deleteSession(root, 'no-such-dir', 'aaaa-1111'), { code: 'ENOENT' });
+});
+
+test('deleteSession blocks symlink/junction escape out of projectsRoot', async (t) => {
+  const { root } = await makeRoot();
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'cc-outside-'));
+  await fs.writeFile(path.join(outside, 'victim.jsonl'), '{}\n', 'utf8');
+  try {
+    await fs.symlink(outside, path.join(root, 'evil-link'), 'junction');
+  } catch (err) {
+    t.skip(`symlink unavailable on this platform: ${err.code}`);
+    return;
+  }
+  await assert.rejects(deleteSession(root, 'evil-link', 'victim'), /invalid dirName/);
+  await fs.access(path.join(outside, 'victim.jsonl')); // 링크 밖 파일은 살아 있어야 한다
+  await fs.rm(outside, { recursive: true, force: true });
 });

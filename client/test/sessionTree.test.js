@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSessionTree, shortDir, deriveSessionTitle } from '../src/lib/sessionTree.js';
+import { buildSessionTree, shortDir, deriveSessionTitle, mergeRecentSessions } from '../src/lib/sessionTree.js';
 
 test('deriveSessionTitle: 첫 사용자 발화를 요약하고 커맨드 래퍼/빈 발화는 건너뛴다', () => {
   assert.equal(
@@ -120,4 +120,44 @@ test('shortDir: 마지막 2 세그먼트로 축약', () => {
   assert.equal(shortDir('C:\\a\\b\\c'), '…\\b\\c');
   assert.equal(shortDir('C:\\a'), 'C:\\a');
   assert.equal(shortDir(''), '');
+});
+
+test('mergeRecentSessions: (dirName,sessionId) dedupe — 서버 항목이 로컬 캡처를 덮는다', () => {
+  const merged = mergeRecentSessions({
+    fetched: [{ dirName: 'd1', cwd: 'C:\\p', sessionId: 's1', title: '서버 제목', mtime: 10 }],
+    closedLocal: [{ dirName: 'd1', cwd: 'C:\\p', sessionId: 's1', title: '로컬 제목', mtime: 99 }],
+    liveIds: new Set(),
+  });
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].title, '서버 제목');
+  // 같은 sessionId라도 dirName이 다르면 별개 항목
+  const twoDirs = mergeRecentSessions({
+    fetched: [{ dirName: 'd1', sessionId: 's1', mtime: 1 }],
+    closedLocal: [{ dirName: 'd2', sessionId: 's1', mtime: 2 }],
+    liveIds: new Set(),
+  });
+  assert.equal(twoDirs.length, 2);
+});
+
+test('mergeRecentSessions: 라이브 세션 제외 + 로컬 캡처는 top-N 밖이어도 유지(재절단 없음)', () => {
+  const fetched = [
+    { dirName: 'd1', sessionId: 'live-1', mtime: 30 },
+    { dirName: 'd1', sessionId: 'old-1', mtime: 20 },
+  ];
+  const closedLocal = [
+    // 서버 top-N 밖의 방금 닫힌 세션 — 닫힘 시각(mtime=40)이라 맨 위로 온다
+    { dirName: 'd2', sessionId: 'just-closed', mtime: 40 },
+  ];
+  const merged = mergeRecentSessions({ fetched, closedLocal, liveIds: new Set(['live-1']) });
+  assert.deepEqual(merged.map((s) => s.sessionId), ['just-closed', 'old-1']);
+});
+
+test('mergeRecentSessions: dirName/sessionId 없는 항목은 제외, 기본 인자 안전', () => {
+  const merged = mergeRecentSessions({
+    fetched: [{ dirName: 'd1', sessionId: 's1', mtime: 1 }, { sessionId: 'no-dir', mtime: 9 }, null],
+    closedLocal: [{ dirName: 'd2', cwd: 'C:\\x', sessionId: null, mtime: 9 }],
+  });
+  assert.deepEqual(merged.map((s) => s.sessionId), ['s1']);
+  assert.deepEqual(mergeRecentSessions(), []);
+  assert.deepEqual(mergeRecentSessions({}), []);
 });

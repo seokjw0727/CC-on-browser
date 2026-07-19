@@ -25,6 +25,27 @@ function dirKeyOf(seed) {
   return (seed.cwd && String(seed.cwd).trim()) || seed.dirName || '';
 }
 
+// 사이드바 "지난 세션" 목록 병합 — 서버 최근 목록(fetched)과 방금 닫힌 세션의 로컬
+// 캡처(closedLocal, {dirName, cwd, sessionId, title, mtime=닫힘 시각})를 (dirName,
+// sessionId) 키로 합친다. 서버 항목 우선(파일 기준 제목·mtime이 더 정확), 라이브
+// 세션은 숨김, 병합 후 재절단은 하지 않는다 — 로컬 항목이 서버 top-N 밖이어도
+// "닫으면 지난 세션으로 이동"이 보이도록. mtime 내림차순 정렬.
+export function mergeRecentSessions({ fetched = [], closedLocal = [], liveIds = new Set() } = {}) {
+  const keyOf = (s) => `${s.dirName}\n${s.sessionId}`;
+  const map = new Map();
+  for (const s of closedLocal) {
+    if (!s || !s.dirName || !s.sessionId) continue;
+    map.set(keyOf(s), s);
+  }
+  for (const s of fetched) {
+    if (!s || !s.dirName || !s.sessionId) continue;
+    map.set(keyOf(s), s);
+  }
+  return [...map.values()]
+    .filter((s) => !liveIds.has(s.sessionId))
+    .sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0));
+}
+
 export function buildSessionTree({
   liveSessions = [],
   projects = [],

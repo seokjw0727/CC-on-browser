@@ -8,7 +8,7 @@ import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 import { SessionHub } from './session-hub.js';
-import { listProjects, listSessions, loadTranscript, listRecentSessions } from './history.js';
+import { listProjects, listSessions, loadTranscript, listRecentSessions, deleteSession } from './history.js';
 import { listDirs, pickDirectory, searchFiles } from './fs-api.js';
 import { aggregateDailyUsage, aggregateUsage, MAX_DAILY_DAYS } from './usage.js';
 import { fetchQuota } from './quota.js';
@@ -53,6 +53,7 @@ export async function startServer({
   // bye는 "이 소켓이 bye 신호 후 TTL 내에 닫혔는가"(의도적 탭 닫힘 판별, lifecycle.js 참조).
   byeMarkTtlMs = BYE_MARK_TTL_MS, // 테스트 주입용
   directoryPicker, // 테스트 주입용 — 기본은 fs-api.js의 네이티브 폴더 선택 대화상자
+  platform = process.platform, // 테스트 주입용 — E2E가 비-Windows UI(cwd 직접 입력 폴백)를 강제
 } = {}) {
   if (!token) throw new TypeError('token is required');
   if (!cliPath) throw new TypeError('cliPath is required');
@@ -242,13 +243,53 @@ export async function startServer({
     }
   }
 
-  function json(res, status, body) {
+  function json(res, status, body, headers = {}) {
     const data = JSON.stringify(body);
     res.writeHead(status, {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'no-store',
+      ...headers,
     });
     res.end(data);
+  }
+
+  // DELETE /api/sessions?dir=..&sessionId=.. — 세션 히스토리 파일 영구 삭제.
+  // 라이브(재개 초기화 중 포함) 세션 파일은 409로 거부, 없으면 404,
+  // 예상 밖 파일 오류(EACCES/EPERM/EBUSY)는 500, 그 외 검증 오류는 400.
+  async function handleDeleteSession(res, url) {
+    const dir = url.searchParams.get('dir');
+    const sessionId = url.searchParams.get('sessionId');
+    if (!dir || !sessionId) {
+      json(res, 400, { error: 'dir and sessionId are required' });
+      return;
+    }
+    if (hub.isSessionIdLive(sessionId)) {
+      json(res, 409, { error: 'session is currently live' });
+      return;
+    }
+    // 파일이 이미 사라진 뒤(외부 삭제) 404로 수렴하는 경우에도 집계 캐시는 낡았을 수
+    // 있으므로, 성공·404 공통으로 무효화한다(최대 캐시 수명 30초/5분 잔존 방지).
+    const invalidateUsageCaches = () => {
+      usageCache = { at: 0, promise: null };
+      dailyCache.clear();
+    };
+    try {
+      await deleteSession(projectsRoot, dir, sessionId);
+    } catch (err) {
+      if (err?.code === 'ENOENT') {
+        invalidateUsageCaches();
+        json(res, 404, { error: 'not found' });
+      } else if (err?.code == null) {
+        // code 없는 Error = deleteSession의 자체 검증(invalid dirName/sessionId) → 400
+        json(res, 400, { error: String(err?.message ?? err) });
+      } else {
+        // 그 외 파일시스템 오류(EACCES/EPERM/EBUSY/EIO/EROFS …)는 서버 오류로 분류
+        json(res, 500, { error: String(err?.message ?? err) });
+      }
+      return;
+    }
+    invalidateUsageCaches();
+    json(res, 200, { ok: true });
   }
 
   async function handleApi(req, res, url) {
@@ -256,8 +297,13 @@ export async function startServer({
       json(res, 401, { error: 'unauthorized' });
       return;
     }
+    if (req.method === 'DELETE' && url.pathname === '/api/sessions') {
+      await handleDeleteSession(res, url);
+      return;
+    }
     if (req.method !== 'GET') {
-      json(res, 405, { error: 'method not allowed' });
+      const allow = url.pathname === '/api/sessions' ? 'GET, DELETE' : 'GET';
+      json(res, 405, { error: 'method not allowed' }, { allow });
       return;
     }
     try {
@@ -267,7 +313,7 @@ export async function startServer({
             claudeVersion: await getClaudeVersion(),
             defaultCwd: os.homedir(),
             port: boundPort,
-            platform: process.platform, // 클라이언트가 네이티브 폴더 선택 버튼 노출 판단
+            platform, // 클라이언트가 네이티브 폴더 선택 버튼 노출 판단
           });
           return;
         case '/api/projects':
@@ -276,10 +322,22 @@ export async function startServer({
         case '/api/sessions':
           json(res, 200, await listSessions(projectsRoot, url.searchParams.get('dir')));
           return;
-        case '/api/recent-sessions':
-          // 새 세션 모달의 "최근 세션" 목록 — 전 프로젝트 세션을 mtime순으로 집계.
-          json(res, 200, await listRecentSessions(projectsRoot));
+        case '/api/recent-sessions': {
+          // 전 프로젝트 세션을 mtime순으로 집계 — 새 세션 모달·사이드바 "지난 세션".
+          // limit: 생략 시 12, 비정수는 400(usage-daily와 동일 계약), 1..50 clamp.
+          const rawLimit = url.searchParams.get('limit');
+          let limit = 12;
+          if (rawLimit != null) {
+            const parsed = Number(rawLimit);
+            if (!Number.isInteger(parsed)) {
+              json(res, 400, { error: 'limit must be an integer' });
+              return;
+            }
+            limit = Math.max(1, Math.min(50, parsed));
+          }
+          json(res, 200, await listRecentSessions(projectsRoot, limit));
           return;
+        }
         case '/api/transcript':
           json(res, 200, await loadTranscript(
             projectsRoot,

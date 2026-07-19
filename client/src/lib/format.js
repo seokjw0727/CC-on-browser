@@ -66,6 +66,42 @@ export function fmtReset(ms) {
   }
 }
 
+// 파일 크기 축약(1024 기준) — 사이드바 "지난 세션" 대화 크기 표기.
+// 유한 아님·음수는 null(호출측 미표시), 0은 "0 B".
+export function fmtBytes(n) {
+  if (!Number.isFinite(n) || n < 0) return null;
+  if (n < 1024) return `${Math.floor(n)} B`;
+  // toFixed(1)이 "1024.0 KB"를 만들지 않게 반올림 임계(1023.95)에서 상위 단위로 승급
+  const units = ['KB', 'MB', 'GB'];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1023.95 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v.toFixed(1)} ${units[i]}`;
+}
+
+// 상대 시각 — "방금"/"n분 전"/"n시간 전"/"n일 전", 7일 이상은 로케일 날짜.
+// 미래 timestamp(시계 왜곡)는 "방금"으로 clamp, invalid/0 이하는 null.
+// 리렌더 시점 기준이라 방치 시 다소 뒤처질 수 있다(허용 정책 — 설계도 §4).
+export function fmtAgo(ms, now = Date.now()) {
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const diff = now - ms; // 미래(음수)는 첫 분기("방금")로 흡수
+  if (diff < 60_000) return '방금';
+  const min = Math.floor(diff / 60_000);
+  if (min < 60) return `${min}분 전`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}시간 전`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}일 전`;
+  try {
+    return new Date(ms).toLocaleDateString();
+  } catch {
+    return null;
+  }
+}
+
 // 경로 꼬리 2단 축약 — 세션 이름 표기 관례 (레포 pill·사이드바·접힘 배지 공통)
 export function shortPath(p) {
   if (!p) return '';

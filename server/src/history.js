@@ -156,6 +156,7 @@ export async function listRecentSessions(projectsRoot = DEFAULT_PROJECTS_ROOT, l
       sessionId: item.file.name.slice(0, -'.jsonl'.length),
       title: extractTitle(head),
       mtime: item.file.mtime,
+      fileSize: item.file.size, // listSessionFiles의 stat 재사용 — 추가 I/O 없음
     });
   }
   return sessions;
@@ -183,6 +184,25 @@ export async function listSessions(projectsRoot, dirName) {
     });
   }
   return sessions;
+}
+
+// 세션 히스토리 파일(.jsonl)을 영구 삭제한다 — 휴지통 이동이 아니며 되돌릴 수 없다.
+// assertSafeName 외에 sessionId를 파일명 안전 문자로 제한하고, 디렉터리의 realpath가
+// projectsRoot 내부인지 확인해 심볼릭 링크/정션 경유 탈출을 차단한다.
+// 파일·디렉터리가 없으면 ENOENT를 그대로 던진다(호출측에서 404로 매핑).
+export async function deleteSession(projectsRoot, dirName, sessionId) {
+  assertSafeName(dirName, 'dirName');
+  assertSafeName(sessionId, 'sessionId');
+  if (!/^[A-Za-z0-9._-]+$/.test(sessionId)) {
+    throw new Error(`invalid sessionId: ${String(sessionId)}`);
+  }
+  const root = projectsRoot ?? DEFAULT_PROJECTS_ROOT;
+  const realRoot = await fs.realpath(root);
+  const realDir = await fs.realpath(path.join(root, dirName));
+  if (!realDir.startsWith(realRoot + path.sep)) {
+    throw new Error(`invalid dirName: ${String(dirName)}`);
+  }
+  await fs.unlink(path.join(realDir, `${sessionId}.jsonl`));
 }
 
 export async function loadTranscript(projectsRoot, dirName, sessionId) {

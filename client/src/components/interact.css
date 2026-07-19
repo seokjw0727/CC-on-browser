@@ -1095,17 +1095,19 @@ select.mode-trust:focus {
 }
 
 /* ===== 통합 세션 트리 ===== */
+/* 현재 세션 — 박스가 아니라 선으로만 구분: 헤더 텍스트 accent + 밑선 틴트(약한 표현) */
 .pin-box {
   margin: 4px 0 10px;
-  padding: 6px;
-  border: 1px solid var(--accent-line);
-  border-radius: var(--r-md);
-  background: var(--accent-soft);
   animation: enter-fade var(--dur-base) var(--ease-out) both;
 }
 .pin-box .sidebar-h { margin-top: 2px; color: var(--accent); }
 
+/* 섹션 헤더 우측 1px 수평선 — 섹션 구분의 유일한 시각 장치 */
+.sidebar-h::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.sidebar-h.current::after { background: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+
 .dir-group { margin: 1px 0; }
+/* 디렉토리 헤더 — 라이브 전용 라벨(클릭 동작 없음), 배지는 열린 세션 수 */
 .dir-head {
   display: flex;
   align-items: center;
@@ -1116,25 +1118,9 @@ select.mode-trust:focus {
   color: var(--text-dim);
   text-align: left;
 }
-.dir-head:hover { background: var(--surface-2); color: var(--text); }
-.dir-head:disabled { opacity: 1; cursor: default; }
-.dir-caret { width: 12px; flex: none; font-size: 10px; transition: transform var(--dur-fast) var(--ease-out); }
 .dir-ico { flex: none; }
 .dir-head .badge { margin-left: auto; }
 .active-dir > .dir-head { color: var(--text); }
-.live-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--accent); flex: none;
-}
-
-/* 펼침 — grid-rows 0fr→1fr (순수 CSS, JS 높이 계산 불필요) */
-.dir-rows {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows var(--dur-base) var(--ease-out);
-}
-.dir-rows[data-open='true'] { grid-template-rows: 1fr; }
-.dir-rows-inner { overflow: hidden; min-height: 0; }
 
 .sess-row {
   display: flex;
@@ -1146,7 +1132,6 @@ select.mode-trust:focus {
   color: var(--text-dim);
   text-align: left;
 }
-.sess-row.history:hover:not(:disabled):not([aria-disabled='true']) { background: var(--surface-2); color: var(--text); }
 .sess-row.live { padding-right: 4px; }
 .sess-row.live.active .session-stop,
 .sess-row.live:hover .session-stop {
@@ -1157,11 +1142,83 @@ select.mode-trust:focus {
   flex: 1; min-width: 0; padding: 0; border: none; background: none;
   color: inherit; text-align: left;
 }
-.sess-row.live.active { background: var(--accent-soft); color: var(--text); }
+/* 활성 세션 행 — 배경 박스 대신 좌측 2px 선(inset이라 레이아웃 불변) */
+.sess-row.live.active {
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--text);
+}
 .sess-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
 .sess-dot.live { background: var(--accent); }
-.sess-row .rs-meta { margin-left: auto; font-size: 11px; }
 .dir-loading, .dir-empty { padding: 4px 8px 4px 22px; font-size: 12px; }
+
+/* ----- 지난 세션 행 — 재개(2줄 본문) + hover/focus 삭제 버튼 ----- */
+.sess-row.past { padding: 4px 4px 4px 8px; }
+.sess-row.past:hover { background: var(--surface-2); }
+.past-lines {
+  display: flex; flex-direction: column; gap: 1px;
+  flex: 1; min-width: 0;
+}
+.past-sub { font-size: 11px; }
+.sess-row.past .sess-main[aria-disabled='true'] { cursor: default; opacity: 0.6; }
+.session-del {
+  flex: none;
+  cursor: pointer;
+  color: var(--text-faint);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s;
+}
+.sess-row.past:hover .session-del,
+.session-del:focus-visible {
+  opacity: 1;
+}
+.session-del:hover:not(:disabled) { color: var(--danger); }
+.session-del:disabled { cursor: default; }
+.past-more-btn {
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+}
+.past-more-btn:hover { background: var(--surface-2); color: var(--text); }
+
+/* 지난 세션 헤더 토글 — .sidebar-h의 타이포·::after 구분선을 그대로 물려받는
+   버튼 변형. 버튼 기본 스타일만 리셋하고 폭은 margin(좌우 4px)을 뺀 전폭. */
+button.sidebar-h-toggle {
+  width: calc(100% - 8px);
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  cursor: pointer;
+}
+button.sidebar-h-toggle:hover { color: var(--text-dim); }
+/* 섹션 chevron — 펼침(기본)은 아래(90°), 접힘은 오른쪽(0°) */
+.sect-chevron {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform: rotate(90deg);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.sidebar-h-toggle[aria-expanded='false'] .sect-chevron { transform: rotate(0deg); }
+@media (prefers-reduced-motion: reduce) {
+  .sect-chevron { transition: none; }
+}
+
+/* 삭제 확인 모달 */
+.confirm-modal { max-width: 380px; }
+.confirm-target { font-weight: 600; margin: 0 0 6px; }
+.confirm-note { margin: 0; font-size: 12.5px; }
 
 /* ===== Task 6: press 마이크로 인터랙션 ===== */
 @media (prefers-reduced-motion: no-preference) {
@@ -1169,12 +1226,11 @@ select.mode-trust:focus {
   .pill:active:not([aria-disabled='true']),
   .send-btn:active:not(:disabled),
   .new-session-btn:active,
-  .dir-head:active,
   .sess-row:active:not([aria-disabled='true']) {
     transform: scale(0.97);
   }
 }
-.btn-primary, .pill, .send-btn, .new-session-btn, .dir-head, .sess-row {
+.btn-primary, .pill, .send-btn, .new-session-btn, .sess-row {
   transition: transform var(--dur-micro) var(--ease-out),
               background var(--dur-fast) var(--ease-out),
               border-color var(--dur-fast) var(--ease-out),

@@ -34,9 +34,10 @@ export function getToken() {
 const StoreContext = createContext(null);
 let startCounter = 0;
 
-// 종료된 세션을 사이드바에서 자동 제거하기까지의 유예 — 종료 직후 결과를 확인할
-// 여유를 준다. 필요하면 히스토리에서 재개할 수 있어 데이터 손실이 아니다.
-const EXITED_UI_RETENTION_MS = 8_000;
+// 종료된 세션이 '종료' 배지로 남아 있다가 사이드바 "지난 세션"으로 넘어가기까지의
+// 유예(사용자 의도: 닫기 → 3초 후 이동). 기준 시점은 CLI exit 확인 시점이며,
+// 제거 후에도 히스토리에서 재개할 수 있어 데이터 손실이 아니다.
+const EXITED_UI_RETENTION_MS = 3_000;
 
 export function StoreProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, undefined, createInitialState);

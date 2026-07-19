@@ -31,6 +31,32 @@ jobs:
       - run: npm run build
       - run: npm test
 
+  e2e:
+    name: e2e (ubuntu, chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+      # 잡 간 파일 미공유 + client/dist는 Git에 없으므로 잡 안에서 설치·빌드한다.
+      - run: npm run install:all
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
   pack-smoke:
     name: pack & install smoke (ubuntu)
     runs-on: ubuntu-latest

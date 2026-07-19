@@ -33,6 +33,9 @@ const handle = await startServer({
   cliPath: process.execPath,
   cliArgsPrefix: [path.join(root, 'server', 'test', 'fake-cli.mjs')],
   staticDir: path.join(root, 'client', 'dist'),
+  // FAKE_PLATFORM: E2E 전용 — 'linux'를 주면 Windows에서도 cwd 직접 입력 UI가 떠
+  // 네이티브 폴더 대화상자 없이 자동화할 수 있다. 미설정 시 실제 플랫폼.
+  platform: process.env.FAKE_PLATFORM || undefined,
 });
 
 console.log(`[dev-fake] scenario=${process.env.FAKE_SCENARIO || 'echo'}`);

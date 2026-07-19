@@ -1,6 +1,6 @@
 {
   "name": "cc-on-browser",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Use CLI-based Claude Code from your browser — a local-only web UI that drives your claude CLI (no SDK, no API key)",
   "type": "module",
   "license": "MIT",
@@ -29,15 +29,22 @@
     "scripts/dev-fake.mjs",
     "client/dist/"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "install:all": "npm install && npm install --prefix client",
     "build": "npm run build --prefix client",
     "start": "node bin/cc-on-browser.mjs",
     "test": "node --test \"server/test/*.test.js\" \"client/test/*.test.js\"",
+    "test:e2e": "playwright test",
     "dev:client": "npm run dev --prefix client",
     "prepack": "npm run build"
   },
   "dependencies": {
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
   }
 }

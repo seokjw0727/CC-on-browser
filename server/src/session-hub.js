@@ -41,6 +41,9 @@ export class SessionHub extends EventEmitter {
     const entry = {
       key,
       session,
+      // 재개 원본 id — 초기화 중 session.sessionId가 아직 null인 창에서도
+      // isSessionIdLive가 이 파일을 라이브로 취급해 삭제(409 방어)를 막는다.
+      resumeSessionId: resumeSessionId || null,
       ring: [],
       nextSeq: 1,
       pendingPermissions: new Map(),
@@ -106,6 +109,22 @@ export class SessionHub extends EventEmitter {
   hasLiveSessions() {
     for (const entry of this.#sessions.values()) {
       if (!entry.exited) return true;
+    }
+    return false;
+  }
+
+  /**
+   * 주어진 CLI sessionId가 라이브(비-exited) 세션에서 사용 중인지 — 히스토리 삭제
+   * API의 409 방어용. 현재 sessionId뿐 아니라 시작 시 받은 resumeSessionId도
+   * 라이브로 취급한다(재개 초기화 중 보호).
+   */
+  isSessionIdLive(sessionId) {
+    if (!sessionId) return false;
+    for (const entry of this.#sessions.values()) {
+      if (entry.exited) continue;
+      if (entry.session.sessionId === sessionId || entry.resumeSessionId === sessionId) {
+        return true;
+      }
     }
     return false;
   }

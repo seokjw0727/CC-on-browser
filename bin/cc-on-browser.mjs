@@ -51,6 +51,7 @@ const fail = (msg) => {
 
 let port = Number(process.env.PORT) || 8787;
 let noOpen = false;
+let daemonWorker = false;
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i += 1) {
   const arg = args[i];
@@ -59,6 +60,9 @@ for (let i = 0; i < args.length; i += 1) {
     i += 1;
   } else if (arg === '--no-open') {
     noOpen = true;
+  } else if (arg === '--daemon-worker') {
+    // 내부 전용(도움말 비노출): 부모가 백그라운드 데몬 재실행에만 붙인다.
+    daemonWorker = true;
   } else if (arg === '--version' || arg === '-v') {
     console.log(pkg.version);
     process.exit(0);
@@ -90,7 +94,11 @@ if (!existsSync(path.join(staticDir, 'index.html'))) {
     + '  npm run install:all && npm run build');
 }
 
-const isDaemon = process.env.CC_ON_BROWSER_DAEMON === '1';
+// 데몬 판별은 env가 아니라 argv 플래그로 한다. 데몬이 스폰한 CLI 세션의 자식
+// 셸(예: 이 앱 안에서 연 터미널)에는 데몬의 env가 그대로 상속되므로, env 기반
+// 판별은 거기서 `cc-on-browser`를 다시 실행할 때 조용히 데몬 모드로 오인 진입해
+// URL 출력 없이 서버·브라우저만 띄우는 버그가 된다(실측 2026-07-19).
+const isDaemon = daemonWorker;
 
 // 포트 선점 검사 — 데몬이 EADDRINUSE로 조용히 죽는 대신 부모가 여기서 보고한다.
 // (검사~데몬 bind 사이의 레이스는 감수: 로컬 단일 사용자 도구다.)
@@ -155,17 +163,50 @@ const openBrowser = (url) => {
   child.unref();
 };
 
+// claude --version 존재 프로브 — 세션을 만들지 않아 구독을 소모하지 않는다.
+// 실패(미설치·타임아웃)는 null: 경고만 내고 기동은 막지 않는다.
+const probeClaudeVersion = (timeoutMs = 8_000) => new Promise((resolve) => {
+  let child;
+  try {
+    child = spawn(cliPath, ['--version'], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+  } catch {
+    resolve(null);
+    return;
+  }
+  let out = '';
+  const timer = setTimeout(() => { child.kill(); resolve(null); }, timeoutMs);
+  child.stdout.on('data', (d) => { out += d; });
+  child.on('error', () => { clearTimeout(timer); resolve(null); });
+  child.on('close', (code) => {
+    clearTimeout(timer);
+    resolve(code === 0 && out.trim() ? out.trim() : null);
+  });
+});
+
+const warnClaudeMissing = () => {
+  console.warn('WARNING: claude CLI not found or not responding.');
+  console.warn('  Sessions will fail to start until it is available. Install it from');
+  console.warn('  https://claude.com/claude-code, log in (run `claude`, then /login), and make');
+  console.warn('  sure `claude` is on your PATH — or set CLAUDE_WEB_CLI_PATH to its absolute path.');
+};
+
 if (!noOpen && !isDaemon) {
   // 부모: 토큰을 만들어 데몬에 물려주고, URL을 출력한 뒤 곧바로 빠진다.
   const token = crypto.randomBytes(16).toString('hex');
   if (port !== 0) await assertPortFree(port);
-  const child = spawn(process.execPath, [selfPath, ...args], {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-    env: { ...process.env, CC_ON_BROWSER_DAEMON: '1', CC_ON_BROWSER_TOKEN: token },
-  });
-  child.unref();
+  // CLI 프로브는 데몬 기동 대기와 병행 — 브라우저 열림을 지연시키지 않는다.
+  // 포트 검사 통과 후에만 시작해, 조기 실패 경로에서는 실제 CLI를 호출하지 않는다.
+  const cliProbe = probeClaudeVersion();
+  // CC_ON_BROWSER_TEST_SKIP_DAEMON: bin.test.js 전용 — 진단 출력 경로를 데몬 없이 검증.
+  if (!process.env.CC_ON_BROWSER_TEST_SKIP_DAEMON) {
+    const child = spawn(process.execPath, [selfPath, ...args, '--daemon-worker'], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      env: { ...process.env, CC_ON_BROWSER_TOKEN: token },
+    });
+    child.unref();
+  }
   if (port !== 0) {
     // 데몬 stdio는 ignore라 startServer 실패가 조용히 묻힌다 — 우리 토큰에
     // 응답하는 데몬을 확인한 뒤에만 "성공" URL을 낸다. (랜덤 포트는 부모가
@@ -181,6 +222,10 @@ if (!noOpen && !isDaemon) {
   }
   console.log('Opening your browser... The server runs in the background (127.0.0.1 only)');
   console.log('and stops automatically once every tab is closed. (--no-open for a foreground server)');
+  // 백그라운드 모드에서도 CLI 미설치를 즉시 알린다 — 이전에는 --no-open에서만 경고.
+  const cliVersion = await cliProbe;
+  if (cliVersion) console.log(`claude CLI: ${cliVersion}`);
+  else warnClaudeMissing();
   process.exit(0);
 }
 
@@ -202,10 +247,15 @@ const shutdown = () => {
 // lifecycle 생성 전 호출 가능성은 ?.로 방어(그 구간은 최초 접속 대기가 커버).
 const onClientCountChange = (count, meta) => lifecycle?.onClientCountChange(count, meta);
 
+// 부모가 넘긴 토큰은 확보 즉시 env에서 제거 — 로컬 API bearer token이 데몬이
+// 스폰하는 CLI 세션과 그 자식 셸로 상속·유출되지 않게 한다(codex 지적).
+const bootToken = process.env.CC_ON_BROWSER_TOKEN || crypto.randomBytes(16).toString('hex');
+delete process.env.CC_ON_BROWSER_TOKEN;
+
 try {
   handle = await startServer({
     port,
-    token: process.env.CC_ON_BROWSER_TOKEN || crypto.randomBytes(16).toString('hex'),
+    token: bootToken,
     cliPath,
     staticDir,
     onClientCountChange: noOpen ? undefined : onClientCountChange,
@@ -238,9 +288,6 @@ if (!noOpen) {
   if (cliVersion) {
     console.log(`claude CLI: ${cliVersion}`);
   } else {
-    console.warn('WARNING: claude CLI not found or not responding.');
-    console.warn('  Sessions will fail to start until it is available. Install it from');
-    console.warn('  https://claude.com/claude-code, log in (run `claude`, then /login), and make');
-    console.warn('  sure `claude` is on your PATH — or set CLAUDE_WEB_CLI_PATH to its absolute path.');
+    warnClaudeMissing();
   }
 }

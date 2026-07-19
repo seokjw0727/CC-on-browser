@@ -1,8 +1,11 @@
 // REST API 클라이언트 — 모든 요청에 x-auth-token 헤더 (계획서 "WS 프로토콜 > REST" 절).
 import { getToken } from './store.jsx';
 
-async function get(path) {
-  const res = await fetch(path, { headers: { 'x-auth-token': getToken() } });
+async function request(path, init = {}) {
+  const res = await fetch(path, {
+    ...init,
+    headers: { 'x-auth-token': getToken(), ...(init.headers || {}) },
+  });
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
     try {
@@ -11,10 +14,14 @@ async function get(path) {
     } catch {
       /* JSON 아님 — 상태 코드로 대체 */
     }
-    throw new Error(message);
+    const err = new Error(message);
+    err.status = res.status; // 호출측이 404(이미 삭제)/409(라이브) 등을 구분
+    throw err;
   }
   return res.json();
 }
+
+const get = (path) => request(path);
 
 /** @returns {Promise<{claudeVersion, defaultCwd, port, platform}>} */
 export const fetchBootstrap = () => get('/api/bootstrap');
@@ -34,8 +41,23 @@ export const fetchProjects = () => get('/api/projects');
 export const fetchSessions = (dirName) =>
   get(`/api/sessions?dir=${encodeURIComponent(dirName)}`);
 
-/** @returns {Promise<[{dirName, cwd, sessionId, title, mtime}]>} 전 프로젝트 최근 세션(모달용) */
-export const fetchRecentSessions = () => get('/api/recent-sessions');
+/**
+ * @returns {Promise<Array<{dirName, cwd, sessionId, title, mtime, fileSize}>>}
+ * 전 프로젝트 최근 세션. fileSize = 트랜스크립트 .jsonl 바이트(대화 크기 표시용).
+ * limit 생략 시 서버 기본 12(새 세션 모달) — 사이드바 "지난 세션"만 20/50을 명시 전달.
+ */
+export const fetchRecentSessions = (limit) =>
+  get(`/api/recent-sessions${limit ? `?limit=${limit}` : ''}`);
+
+/**
+ * 세션 히스토리 파일(.jsonl) 영구 삭제 — 되돌릴 수 없음.
+ * 실패 시 err.status로 구분: 404(이미 없음) / 409(라이브 세션이 사용 중).
+ */
+export const deleteSessionFile = (dirName, sessionId) =>
+  request(
+    `/api/sessions?dir=${encodeURIComponent(dirName)}&sessionId=${encodeURIComponent(sessionId)}`,
+    { method: 'DELETE' },
+  );
 
 /** @returns {Promise<{messages: object[]}>} */
 export const fetchTranscript = (dirName, sessionId) =>

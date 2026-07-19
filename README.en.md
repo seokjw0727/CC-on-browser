@@ -2,213 +2,229 @@
 
 [한국어](README.md) · **English**
 
-A **local-only** web app for using CLI-based Claude Code from your browser.
-Instead of the terminal TUI, it gives you streaming markdown chat, tool-execution cards, permission dialogs, and a session-resume UI.
+A **local-only** web app for using the CLI-based Claude Code from your browser.
+Instead of the terminal TUI, you get streaming markdown chat, tool-execution cards,
+permission dialogs, and a session-resume UI.
 
-**No SDK, no API.** There is no `@anthropic-ai/sdk` and no `claude-agent-sdk` —
-the app drives your locally installed `claude` CLI as a child process. Authentication and billing follow your
-Claude subscription (e.g., Claude Max) entirely; no API key is required. One deliberate exception: the
-statusline's official usage percentages come from a single usage-metadata endpoint on api.anthropic.com,
-queried with the OAuth token the CLI already stores — not a model call, so it never incurs charges.
+**No SDK, no API key.** It drives your locally installed `claude` CLI as a child
+process, so authentication and billing follow your Claude subscription (e.g. Claude
+Max) entirely. The single exception: the status bar's official usage percentages are
+fetched from one api.anthropic.com usage-metadata endpoint using the subscription
+OAuth token the CLI already stored — not a model call, so it costs nothing.
+
+## Quick start
+
+**You need** — ① Windows / macOS / Linux with [Node.js](https://nodejs.org) 22+
+② the [Claude Code CLI](https://claude.com/claude-code) installed and **logged in**
+(run `claude` in a terminal → `/login`).
+
+Download `cc-on-browser-<version>.tgz` from
+[GitHub Releases](https://github.com/seokjw0727/CC-on-browser/releases) and install it
+globally (no build required):
+
+```sh
+npm install -g ./cc-on-browser-<version>.tgz
+cc-on-browser
+```
+
+It prints the access URL, **opens your default browser, and keeps the server running
+in the background** with no console window. Once every tab is closed the server stops
+itself about 10 seconds later — nothing to shut down manually.
+
+```
+Claude Code on Browser v1.5.0 — http://127.0.0.1:8787/#token=<random>
+Opening your browser... The server runs in the background (127.0.0.1 only)
+and stops automatically once every tab is closed. (--no-open for a foreground server)
+claude CLI: 2.1.215 (Claude Code)
+```
+
+Common options:
+
+```sh
+cc-on-browser --port 9000    # pick a port (-p)
+cc-on-browser --no-open      # plain foreground console server (Ctrl+C to stop)
+cc-on-browser --help         # all options
+```
+
+> Once the package is published to the npm registry, `npm install -g cc-on-browser`
+> will work too — the Releases page will say when that is live.
 
 ## What you get
 
-- **Streaming markdown chat** — renders partial messages (`--include-partial-messages`) in real time, revealed smoothly by a per-frame pacer (typewriter-style, respects reduced-motion) instead of raw delta chunks. Code highlighting (highlight.js) + XSS sanitization (DOMPurify).
-- **Tool execution cards** — Bash, Edit, Write, Read, Grep and other tool calls rendered as input/result cards; long results collapse.
-- **Thinking blocks** — extended-thinking streams shown as separate, collapsible blocks.
-- **Permission dialog** — `can_use_tool` requests pop up as a modal for allow/deny. Suggestions are labeled by their actual effect, never vague wording like "always allow". New sessions default to **bypassPermissions** (run everything without prompts) — change it anytime in the new-session modal or the composer; the dialog kicks in under confirmation-based modes. Modes are shown with Korean labels and per-mode colors: default (neutral), acceptEdits (blue), plan (green), bypassPermissions (red).
-- **Session resume** — resume past sessions of the current project; the transcript is preloaded and continued (`--resume`).
-- **Working-directory picker** — type or paste a path in the new-session modal, then click-select from the folder tree underneath.
-- **Statusline** — circular gauges for session context (vs the model's window — 200k, or 1M for `[1m]` models) and your account's official
-  5-hour / 7-day usage (%) — the same numbers as the `/usage` panel; local transcript aggregates in tooltips.
-  Context is taken from the latest per-API-call usage (input + cache) — the turn-aggregated `result.usage`
-  is not used, as it inflates with every tool round-trip.
-  Per-turn token usage lands in the chat as a small CLI-style tail (`↑ 12 ↓ 345 tok · 5.3s`) instead of the statusline.
-- **Runtime controls** — a claude.ai-style model picker (Haiku 4.5 / Sonnet 5 / Opus 4.8 / Fable 5, with
-  versions and descriptions) and an effort-level progress bar (low–max; `--effort` is spawn-only, so changing
-  it restarts the session into the same conversation — via `--resume` when the conversation exists on disk,
-  or as a fresh start before the first turn), permission-mode switching, `/` slash-command autocomplete,
-  turn interrupt (Esc). Setting-change confirmations and errors show as **transient toasts** — they never
-  pollute the chat history.
-- **Composer-centric UI** — no top bar; repo, permission mode, model, send, and usage fold into the composer. Light/dark themes, zero external font/image dependencies (brand assets are self-contained SVGs — safe under a local CSP).
-- **A living mascot (CLAW'D)** — the composer's bottom-right hosts CLAW'D transcribed from the official
-  art embedded in the Claude Code CLI itself (orange body rgb(215,119,87), black eyes, quadrant pixels),
-  reacting to session state (mood vocabulary is a scaled-down port of
-  [clawd-on-desk](https://github.com/rullerzhou-afk/clawd-on-desk)'s state mapping): blinking with
-  **cursor-following eyes** while idle, a thought bubble (three dots) while the model generates, glancing
-  left/right while tools run, claws-up juggling while a subagent (Task) runs, claws-up hopping (the
-  official arms-up pose) while a permission prompt waits, cheering when a turn completes (dizzy on error —
-  except turns you interrupted yourself),
-  falling asleep with zzz after 60s of user inactivity (waking on input), and dozing when there is no
-  session or the connection drops. Click it for a poke; four rapid pokes make it dizzy (easter egg). All
-  done with self-contained SVG frame swaps + CSS (`prefers-reduced-motion` respected, zero external images).
+- **Streaming markdown chat** — partial messages (`--include-partial-messages`)
+  rendered live, revealed smoothly by a frame-paced typewriter (respects
+  reduced-motion). Code highlighting (highlight.js) + XSS sanitization (DOMPurify).
+- **Tool-execution cards** — Bash/Edit/Write/Read/Grep calls shown as input/result
+  cards; long results collapse.
+- **Thinking blocks** — extended-thinking streams shown as separate collapsible blocks.
+- **Permission dialogs** — `can_use_tool` requests appear as a modal to allow/deny;
+  suggestions describe their actual effect instead of vague "always allow" wording.
+  **New sessions default to the `default` permission mode** — the CLI asks before
+  tool uses that need confirmation under its policy and your allow rules.
+  You can switch modes any time in the new-session modal or the composer;
+  modes are color-coded (default/uncolored, acceptEdits/blue, plan/green, trust/red).
+- **Session resume + past-session management** — the sidebar's collapsible "past
+  sessions" list (summary title · last access · transcript size) resumes a
+  conversation in one click (`--resume`); delete unneeded sessions after a
+  confirmation (live sessions are protected).
+- **Working-directory picker** — native Windows folder dialog (plain text input on
+  other platforms).
+- **Status bar** — session context (vs. the model's window — 200k, or 1M for `[1m]`
+  models) plus the account's official 5-hour/7-day utilization as rings. Per-turn
+  tokens appear as small chat tails (`↑ 12 ↓ 345 tok · 5.3s`), like the CLI.
+- **Runtime controls** — claude.ai-style model picker and effort bar, permission-mode
+  switch, `/` slash-command and `@` file-reference autocomplete, turn interrupt (Esc).
+  Confirmations and errors show as **toast notifications**.
+- **Composer-centric UI** — no top bar; repo, permission mode, model, send and usage
+  fold into the input area. Light/dark themes, zero external font/image dependencies.
+- **A living mascot (CLAW'D)** — the official art embedded in the real Claude Code
+  CLI, reacting to session state (idle blinking with cursor-tracking eyes, thinking
+  bubble, tool-scan scuttle, subagent juggling, permission hop, turn cheers, zzz after
+  60s idle — respects `prefers-reduced-motion`).
+- **Sleep survival** — if the connection drops from laptop-lid close or suspend, the
+  server keeps live CLI sessions and reattaches automatically on wake.
 
-## Requirements
+## How to use
 
-- Windows / macOS / Linux + Node.js 22 or later
-- [Claude Code CLI](https://claude.com/claude-code) installed and **logged in** (run `claude` → `/login`)
-  - The app reuses the CLI's auth state as-is. If the CLI is not logged in, session start fails.
+1. **Connect** — the default launch opens your browser automatically. For manual
+   access, open the printed `http://127.0.0.1:8787/#token=…` URL as-is (URLs without
+   the token fail authentication).
+2. **Start a session** — sidebar **새 세션 (New session)** → pick the working
+   directory → optionally change model/permission mode → start. Defaults are your
+   account's default model + the **`default` permission mode** (asks before tool
+   uses that need confirmation). The no-confirmation trust mode
+   (`bypassPermissions`) is available with a warning.
+3. **Chat** — **Enter** sends, **Shift+Enter** adds a newline. Interrupt a running
+   turn with **Esc** or the stop button.
+4. **Slash commands / @ file references** — typing `/` or `@` opens autocomplete
+   (Tab/Enter to accept).
+5. **Permissions** — in confirming modes a dialog appears before each tool run.
+   When Claude asks a question (AskUserQuestion), a question dialog with options,
+   free-text input and skip appears instead.
+6. **Model & effort** — change mid-conversation from the composer. Changing effort
+   restarts the session onto the same conversation (`--effort` is start-only).
+7. **Resume & delete** — click a past session in the sidebar to resume; the trash
+   button deletes it (live sessions are protected). Transcripts live in `~/.claude`,
+   so history survives server restarts.
+8. **Quit** — close every tab and the server stops ~10s later (`--no-open`: Ctrl+C).
+   Suspend/lid-close is not treated as quitting.
 
-## Install / Run
+## Troubleshooting
 
-### Option A — install the package (no build needed)
+| Symptom | Cause · fix |
+| --- | --- |
+| `WARNING: claude CLI not found` | CLI not installed or not on PATH. [Install it](https://claude.com/claude-code), check `claude` runs in a terminal, or set `CLAUDE_WEB_CLI_PATH` to its absolute path. |
+| Sessions fail to start | CLI not logged in — run `claude`, then `/login`. |
+| `Port 8787 is already in use` | Another instance/program owns it — pick another port: `cc-on-browser --port 9000`. |
+| 401 / blank page | You opened a URL without the token — use the full printed `#token=` URL. |
+| Browser does not open | Run with `--no-open` and open the printed URL yourself; the `BROWSER` env var selects which browser to launch. |
+| Server stops (or doesn't) unexpectedly | All tabs closed = auto-stop after ~10s (by design). Connection loss (suspend) waits as long as a session is alive (30-min grace when none). |
+| Odd behavior after a CLI update | See [Protocol warning](#protocol-warning) — please file an issue with your CLI version. |
 
-Grab `cc-on-browser-<version>.tgz` from [GitHub Releases](https://github.com/seokjw0727/CC-on-browser/releases) and install it globally:
+**Environment variables**: `PORT` (=`--port`) · `BROWSER` (command used to open the
+URL) · `CLAUDE_WEB_CLI_PATH` (absolute path to the CLI). CLI resolution order:
+`CLAUDE_WEB_CLI_PATH` → `claude` on the OS `PATH` (`claude.exe` on Windows).
 
-```sh
-npm install -g ./cc-on-browser-1.1.1.tgz
-cc-on-browser                # opens your browser; server runs in the background (default port 8787)
-cc-on-browser --port 9000    # pick a port (-p); see --help for all options
-cc-on-browser --no-open      # plain foreground console server, no browser (Ctrl+C to stop)
-```
-
-### Option B — run from source
+## Run from source / development
 
 ```sh
 git clone https://github.com/seokjw0727/CC-on-browser.git
 cd CC-on-browser
-npm run install:all   # install root (server) and client/ dependencies
+npm run install:all   # install root (server) + client/ dependencies
 npm run build         # client → client/dist
 npm start             # = node bin/cc-on-browser.mjs
 ```
 
-By default the command prints the access URL, **opens your default browser, and keeps the server
-running in the background with no console window**. Once every browser tab is closed, the server
-shuts itself down after a ~10-second grace period (page reloads reconnect well within it), so there
-is nothing to stop manually.
-
-```
-Claude Code on Browser v1.1.1 — http://127.0.0.1:8787/#token=<random-token>
-Opening your browser... The server runs in the background (127.0.0.1 only)
-and stops automatically once every tab is closed. (--no-open for a foreground server)
-```
-
-Prefer watching the logs? Use `--no-open` — no browser is launched and the process stays in the
-foreground like a regular server: open the printed URL (token included) yourself and stop it with
-`Ctrl+C`. If the `claude` CLI cannot be found, a warning with install/PATH guidance is printed
-(the server still starts, but sessions will fail).
-
-**CLI path resolution order**: the `CLAUDE_WEB_CLI_PATH` environment variable (if set) → `claude` on the
-OS `PATH` (`claude.exe` on Windows). If `claude` is on your PATH no extra setup is needed; if it lives
-somewhere unusual, point `CLAUDE_WEB_CLI_PATH` at the absolute path.
-
 ### Subscription-free demo (fake CLI)
 
-You can bring up the whole stack with a fake CLI that mimics the protocol instead of the real one:
+Bring up the whole stack against a protocol-mimicking fake CLI:
 
 ```sh
 node scripts/dev-fake.mjs                       # echo scenario (default port 8788)
-node scripts/dev-fake.mjs --scenario permission # permission-dialog scenario (works in any shell)
-node scripts/dev-fake.mjs --scenario question   # AskUserQuestion (question-dialog) scenario
+node scripts/dev-fake.mjs --scenario permission # permission-dialog scenario
+node scripts/dev-fake.mjs --scenario question   # AskUserQuestion dialog scenario
 ```
 
-If you prefer environment variables: POSIX shells use `FAKE_SCENARIO=permission node scripts/dev-fake.mjs`,
-PowerShell uses `$env:FAKE_SCENARIO='permission'; node scripts/dev-fake.mjs`.
+### Tests
 
-Tests also run exclusively against the fake CLI, so they never consume your subscription: `npm test`
+Everything runs against the fake CLI only — no subscription usage:
 
-## How to use
-
-1. **Open the app** — by default the browser opens automatically. To connect manually (`--no-open`,
-   or from another browser), open the URL printed at startup (`http://127.0.0.1:8787/#token=…`)
-   as-is. A token-less address fails authentication.
-2. **Start a new session** — click **새 세션** (new session) in the sidebar. In the modal, type/paste
-   a working directory or click one from the folder tree / recent projects, optionally change the
-   model and permission mode, then start (the effort level is adjusted from the composer after the
-   session starts — see step 6). Defaults: your account's default model + bypassPermissions.
-3. **Chat** — **Enter** sends, **Shift+Enter** inserts a newline. Responses stream as markdown, tool
-   calls render as input/result cards, extended thinking as collapsible blocks. Interrupt a running
-   turn with **Esc** or the stop button.
-4. **Slash commands** — type `/` in the composer for an autocomplete dropdown (pick with Tab/Enter).
-   Commands like `/compact` are passed through to the CLI.
-5. **Permission prompts** — under confirmation-based permission modes, a dialog pops up before a tool
-   runs; choose allow/deny. Switch the permission mode anytime from the composer. When Claude asks
-   you something via **AskUserQuestion**, a question dialog (options, free-text input, skip) appears
-   instead of the permission dialog.
-6. **Model & effort changes** — switch models mid-conversation from the composer's model picker.
-   Changing the effort level restarts the session into the same conversation (`--effort` is
-   spawn-only — via `--resume` when the conversation exists on disk, or as a fresh start before the
-   first turn).
-7. **Resume sessions** — expand a project in the sidebar and click a past session to preload its
-   transcript and continue. Conversations live in the CLI's `~/.claude` transcripts, so they survive
-   server restarts.
-8. **Reading the statusline** — the CTX gauge shows the current session's context usage against the
-   model's window (200k, or 1M for `[1m]` models); the other gauges show your account's official
-   5-hour / 7-day usage (%). Per-turn tokens appear as a small CLI-style tail in the chat
-   (`↑ 12 ↓ 345 tok · 5.3s`).
-9. **Shut down** — close every browser tab and the server exits on its own about 10 seconds later
-   (in `--no-open` foreground mode, `Ctrl+C` in the terminal). Conversations remain in the CLI
-   transcripts and can be resumed after the next start.
+```sh
+npm test              # server & client unit/integration (node --test)
+npm run build && npx playwright install chromium
+npm run test:e2e      # browser E2E (Playwright — session start, streaming, permission round-trip)
+```
 
 ## Architecture
 
 ```
 Browser (SPA: Vite + React)
-   │  WebSocket + REST (127.0.0.1, token auth, Origin validation)
+   │  WebSocket + REST (127.0.0.1, token auth, Origin checks)
    ▼
 Node server (server/src/server.js — http + ws)
    ├─ static: serves client/dist
    ├─ REST: /api/bootstrap /api/projects /api/sessions /api/transcript /api/browse /api/usage
-   └─ SessionHub ── ClaudeSession (one CLI process per session, ring-buffer event replay)
+   └─ SessionHub ── ClaudeSession (one CLI process per session, ring-buffer replay)
          │  spawn (stdio pipe, JSONL)
          ▼
       claude -p --input-format stream-json --output-format stream-json
              --verbose --include-partial-messages --permission-prompt-tool stdio
              [--resume <id>] [--model <m>] [--permission-mode <mode>] [--effort <level>]
-             (cwd = selected project)
+             (cwd = the selected project)
 ```
 
-- Tool permission requests (`can_use_tool`) reach the server over stdio; the browser's permission dialog
-  decides allow/deny and the answer is written back to the CLI.
-- The spawned CLI loads your hooks, skills, and settings as usual — the browser UI is a front end to your
-  real CLI environment.
-- All knowledge of the undocumented CLI protocol is isolated in a single module: `server/src/claude-session.js`.
+- Tool permission requests (`can_use_tool`) reach the server over stdio; the
+  browser's permission dialog decides allow/deny and replies to the CLI.
+- The spawned CLI loads your hooks, skills and settings as usual — the browser UI is
+  a front-end to your real CLI environment.
+- All undocumented-protocol knowledge is isolated in `server/src/claude-session.js`.
 
 ## Project layout
 
 ```
-bin/cc-on-browser.mjs  CLI entry point — arg parsing & preflight checks, then a background server + browser launch;
-                       auto-shutdown once every browser (WS client) is gone (npm start / global install)
+bin/cc-on-browser.mjs  CLI entry — arg parsing & pre-checks, background server + browser launch
 server/src/
   server.js          HTTP (REST + static) + WebSocket hub. 127.0.0.1-only, token/Origin auth
-  session-hub.js     Session registry — key↔ClaudeSession, event broadcast/replay relay
-  claude-session.js  Wraps one CLI child process — stream-json I/O, undocumented protocol isolated here
-  history.js         Reads ~/.claude projects/sessions/transcripts (for session resume)
-  usage.js           Local aggregation over ~/.claude transcripts — 5h/7d reference (/api/usage)
-  quota.js           Official account usage (5h/7d %) — uses the CLI's OAuth token; the only api.anthropic.com touchpoint
-  fs-api.js          Directory listing (/api/browse) — never serves file contents
-  jsonl.js           Line-delimited JSON parser
+  session-hub.js     session registry — key↔ClaudeSession, event broadcast/replay
+  claude-session.js  wraps one CLI child process — stream-json I/O, protocol isolation
+  history.js         reads ~/.claude projects/sessions/transcripts (resume & delete)
+  usage.js           local transcript aggregation — 5h/7d reference numbers (/api/usage)
+  quota.js           official account utilization (5h/7d %) — the only api.anthropic.com touchpoint
+  fs-api.js          directory listing & filename search — file contents never served
+  jsonl.js           line-oriented JSON parser
 client/src/
-  App.jsx            Shell layout & theme owner
-  lib/               store.jsx (state) · ws.js (auto-reconnect) · reduce-cli-event.js (CLI events→state) · markdown.js · api.js
+  App.jsx            shell layout & theme
+  lib/               store.jsx (state) · ws.js (auto-reconnect) · reduce-cli-event.js · markdown.js · api.js
   components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · QuestionDialog · Toasts · Clawd · Brand
-scripts/dev-fake.mjs Subscription-free demo launcher (fake CLI)
-server/test/         Integration/unit tests against the fake CLI (never runs the real claude)
-docs/superpowers/    Spec & plan documents
+scripts/dev-fake.mjs subscription-free demo launcher (fake CLI)
+server/test/         fake-CLI-based unit/integration tests (never runs the real claude)
+e2e/                 Playwright browser E2E (fake CLI stack)
+docs/superpowers/    specs & plans
 ```
 
-## Security notes
+## Security
 
-- The server binds to `127.0.0.1` only. **Never expose it remotely** (port forwarding, reverse proxies) —
-  this app drives a CLI that can access your filesystem and shell.
-- A random token generated at startup is delivered via the URL fragment (`#token=`). Do not share that URL.
-  The WebSocket re-sends it as the `?token=` query and REST as the `x-auth-token` header; the Origin header
-  is validated as well.
-- The filesystem API (`/api/browse`) lists directories only. File-content access goes through CLI tools and
-  the permission dialog.
+This app drives a CLI that can access your filesystem and shell. **Never expose it
+remotely**, never share the token URL — please read the threat model and notes in
+[SECURITY.md](SECURITY.md). Report vulnerabilities privately (see SECURITY.md), not
+via public issues.
+
+## CLI compatibility
+
+The stream-json control protocol (including `--permission-prompt-tool stdio`) is an
+**officially undocumented interface**. The protocol was **probed and verified against
+Claude Code CLI v2.1.201**, and the app is **confirmed working up to v2.1.215**. CLI
+updates may change the format; unknown messages are never dropped — they surface in
+the UI as raw events.
+
+<a id="protocol-warning"></a>If you suspect a protocol change, re-verify with the
+probe procedure in `docs/superpowers/specs/2026-07-06-claude-code-on-browser-design.md`.
 
 ## Limitations (out of v1 scope)
 
-Image attachments, subagent tree visualization, MCP server management UI, PTY terminal tabs,
-multi-browser concurrent-client sync, remote (non-localhost) access.
+Image attachments, subagent tree visualization, MCP server management UI, PTY
+terminal tabs, multi-browser concurrent session sync, remote (non-localhost) access.
 
-## Protocol warning
+## Changelog · License
 
-The stream-json control protocol (including `--permission-prompt-tool stdio`) is an **officially
-undocumented interface** (verified empirically against CLI v2.1.201). CLI updates may change the format;
-unknown messages are never dropped — they surface in the UI as raw events. If you suspect a protocol change,
-re-verify with the probe procedure in `docs/superpowers/specs/2026-07-06-claude-code-on-browser-design.md`.
-
-## License
-
-[MIT](LICENSE)
+[CHANGELOG.md](CHANGELOG.md) · [MIT](LICENSE)

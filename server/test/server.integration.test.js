@@ -702,6 +702,64 @@ test('bye/ping 프로토콜: close 메타 {bye}, pong 왕복, hasLiveSessions �
   }
 });
 
+test('DELETE /api/sessions: 인증·405 Allow·400·404·409(라이브/재개 초기화)·성공 후 파일 부재', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const auth = { headers: { 'x-auth-token': TOKEN } };
+  const delDir = path.join(projectsRoot, 'C--del-proj');
+  await fs.mkdir(delDir, { recursive: true });
+  const victim = path.join(delDir, 'dddd-4444.jsonl');
+  await fs.writeFile(
+    victim,
+    JSON.stringify({ type: 'user', cwd: 'C:\\fake', message: { role: 'user', content: [{ type: 'text', text: '삭제 대상' }] } }) + '\n',
+  );
+  const delUrl = `${base}/api/sessions?dir=C--del-proj&sessionId=dddd-4444`;
+
+  // 인증 없이는 삭제 불가(401), 파일은 그대로
+  assert.equal((await fetch(delUrl, { method: 'DELETE' })).status, 401);
+  await fs.access(victim);
+
+  // 허용되지 않은 메서드 — /api/sessions 외 경로는 Allow: GET, /api/sessions POST는 GET, DELETE
+  const notAllowed = await fetch(`${base}/api/projects`, { method: 'DELETE', ...auth });
+  assert.equal(notAllowed.status, 405);
+  assert.equal(notAllowed.headers.get('allow'), 'GET');
+  const postSessions = await fetch(`${base}/api/sessions?dir=C--del-proj`, { method: 'POST', ...auth });
+  assert.equal(postSessions.status, 405);
+  assert.equal(postSessions.headers.get('allow'), 'GET, DELETE');
+
+  // 인자 누락 400 · 없는 파일 404 · 경로 탈출 400
+  assert.equal((await fetch(`${base}/api/sessions?dir=C--del-proj`, { method: 'DELETE', ...auth })).status, 400);
+  assert.equal((await fetch(`${base}/api/sessions?dir=C--del-proj&sessionId=none`, { method: 'DELETE', ...auth })).status, 404);
+  assert.equal((await fetch(`${base}/api/sessions?dir=..&sessionId=x`, { method: 'DELETE', ...auth })).status, 400);
+
+  // 재개 초기화 중(session.sessionId=null이어도 resumeSessionId로 보호) → 409
+  const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
+  client.send({ type: 'start', startId: 'cl_del', cwd: tmpRoot, resumeSessionId: 'dddd-4444' });
+  const started = await client.next((m) => m.type === 'started' && m.startId === 'cl_del');
+  const conflict = await fetch(delUrl, { method: 'DELETE', ...auth });
+  assert.equal(conflict.status, 409);
+  await fs.access(victim); // 거부됐으니 파일 보존
+
+  // 세션 종료 후에는 삭제 허용 → {ok:true} + 파일 영구 삭제, 재삭제는 404
+  client.send({ type: 'stop', key: started.key });
+  await client.next((m) => m.type === 'exit' && m.key === started.key);
+  client.close();
+  const ok = await fetch(delUrl, { method: 'DELETE', ...auth });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { ok: true });
+  await assert.rejects(fs.access(victim), { code: 'ENOENT' });
+  assert.equal((await fetch(delUrl, { method: 'DELETE', ...auth })).status, 404);
+});
+
+test('/api/recent-sessions?limit= 계약: 비정수 400, 유효 정수 clamp 적용', async () => {
+  const auth = { headers: { 'x-auth-token': TOKEN } };
+  assert.equal((await fetch(`${base}/api/recent-sessions?limit=abc`, auth)).status, 400);
+  assert.equal((await fetch(`${base}/api/recent-sessions?limit=1.5`, auth)).status, 400);
+  const one = await (await fetch(`${base}/api/recent-sessions?limit=1`, auth)).json();
+  assert.equal(one.length, 1);
+  const clamped = await (await fetch(`${base}/api/recent-sessions?limit=-3`, auth)).json();
+  assert.equal(clamped.length, 1); // 하한 clamp → 1
+});
+
 test('static serving + SPA fallback (no auth required)', async () => {
   const index = await fetch(`${base}/`);
   assert.equal(index.status, 200);

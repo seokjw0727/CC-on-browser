@@ -11,3 +11,8 @@ design_reference.png
 
 # npm pack 산출물
 *.tgz
+
+# E2E 산출물
+e2e/.state/
+playwright-report/
+test-results/

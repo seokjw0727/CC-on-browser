@@ -5,59 +5,99 @@
 CLI 기반 Claude Code를 브라우저에서 쓰는 **로컬 전용** 웹 앱.
 터미널 TUI 대신 스트리밍 마크다운 채팅, 도구 실행 카드, 권한 다이얼로그, 세션 재개 UI를 제공합니다.
 
-**SDK/API를 사용하지 않습니다.** `@anthropic-ai/sdk`, `claude-agent-sdk` 없이,
-로컬에 설치된 `claude` CLI를 자식 프로세스로 구동합니다. 인증과 과금은 전적으로 사용자의
-Claude 구독(예: Claude Max)을 따르며, API 키가 필요 없습니다. 단 하나의 예외로, 상태줄의
-공식 사용률(%)은 CLI가 저장한 구독 OAuth 토큰으로 api.anthropic.com의 사용량 메타데이터
-endpoint 하나만 조회해 얻습니다 — 모델 호출이 아니므로 과금이 없습니다.
+**SDK/API 키를 사용하지 않습니다.** 로컬에 설치된 `claude` CLI를 자식 프로세스로 구동하므로
+인증과 과금은 전적으로 사용자의 Claude 구독(예: Claude Max)을 따릅니다. 단 하나의 예외로,
+상태줄의 공식 사용률(%)은 CLI가 저장한 구독 OAuth 토큰으로 api.anthropic.com의 사용량
+메타데이터 endpoint 하나만 조회해 얻습니다 — 모델 호출이 아니므로 과금이 없습니다.
+
+## 빠른 시작
+
+**필요한 것** — ① Windows / macOS / Linux + [Node.js](https://nodejs.org) 22 이상
+② [Claude Code CLI](https://claude.com/claude-code) 설치 + **로그인 완료**
+(터미널에서 `claude` 실행 → `/login`).
+
+[GitHub Releases](https://github.com/seokjw0727/CC-on-browser/releases)에서
+`cc-on-browser-<버전>.tgz`를 받아 전역 설치하면 끝입니다 (빌드 불필요):
+
+```sh
+npm install -g ./cc-on-browser-<버전>.tgz
+cc-on-browser
+```
+
+실행하면 접속 URL을 출력한 뒤 **기본 브라우저가 자동으로 열리고, 서버는 콘솔 창 없이
+백그라운드로** 돌아갑니다. 브라우저 탭을 모두 닫으면 약 10초 뒤 서버가 스스로 종료되므로
+따로 끌 필요가 없습니다.
+
+```
+Claude Code on Browser v1.5.0 — http://127.0.0.1:8787/#token=<랜덤토큰>
+Opening your browser... The server runs in the background (127.0.0.1 only)
+and stops automatically once every tab is closed. (--no-open for a foreground server)
+claude CLI: 2.1.215 (Claude Code)
+```
+
+자주 쓰는 옵션:
+
+```sh
+cc-on-browser --port 9000    # 포트 지정 (-p)
+cc-on-browser --no-open      # 브라우저 없이 포그라운드 콘솔 서버 (Ctrl+C로 종료)
+cc-on-browser --help         # 전체 옵션
+```
+
+> npm 레지스트리 게시 후에는 `npm install -g cc-on-browser` 한 줄로도 설치할 수
+> 있습니다 — 게시 상태는 Releases 페이지에서 안내합니다.
 
 ## 무엇을 제공하나요
 
 - **스트리밍 마크다운 채팅** — 부분 메시지(`--include-partial-messages`)를 실시간 렌더. delta 덩어리를 그대로 그리지 않고 프레임 단위 페이서로 부드럽게 드러냄(타자기식, reduced-motion 존중). 코드 하이라이트(highlight.js) + XSS 정화(DOMPurify).
 - **도구 실행 카드** — Bash·Edit·Write·Read·Grep 등 도구 호출을 입력/결과 카드로, 긴 결과는 접기.
 - **사고(thinking) 블록** — 확장 사고 스트림을 별도 블록으로 표시.
-- **권한 다이얼로그** — `can_use_tool` 요청을 모달로 띄워 허용/거부. 제안(suggestion)은 "항상 허용" 같은 모호한 문구 대신 실제 효과를 그대로 서술. 새 세션의 기본 권한 모드는 **신뢰모드(bypassPermissions)** — 새 세션 모달·컴포저에서 언제든 바꿀 수 있고, 다이얼로그는 확인이 필요한 모드에서 동작합니다. 모드는 기본모드(무색)·자동모드(파랑)·플랜모드(초록)·신뢰모드(빨강)로 색을 구분해 표시합니다.
-- **세션 재개** — 현재 프로젝트의 과거 세션 목록에서 트랜스크립트를 불러와 이어가기(`--resume`).
-- **작업 디렉터리 지정** — 새 세션 모달에서 경로를 직접 입력·붙여넣고, 그 아래 하위 폴더 트리에서 클릭으로 선택.
-- **상태줄(statusline)** — 세션 컨텍스트(모델 창 대비 — 기본 200k, `[1m]` 모델은 1M)와 계정의 공식 5시간·7일 사용률(%)을 원형
-  게이지로 표시. 컨텍스트는 API 호출별 usage(입력+캐시)의 마지막 값 기준 — result의 턴 합산
-  usage는 도구 왕복 수만큼 부풀어 쓰지 않습니다. 공식 수치는 `/usage` 패널과 동일하고, 로컬
-  트랜스크립트 집계는 툴팁 참고치로 제공.
-  턴별 토큰 입/출력은 상태줄이 아니라 CLI처럼 채팅에 작은 꼬리표(`↑ 12 ↓ 345 tok · 5.3s`)로 남습니다.
-- **런타임 컨트롤** — claude.ai식 모델 피커(Haiku 4.5 / Sonnet 5 / Opus 4.8 / Fable 5 — 버전·설명 표기)와
-  노력 수준 진행 바(low~max, `--effort`가 시작 시 전용이라 변경 시 같은 대화로 재시작 — 대화가 디스크에
-  있으면 `--resume`, 첫 턴 전이면 새로 시작), 권한 모드 전환, `/` 슬래시 커맨드 자동완성, 턴 중단(Esc).
-  설정 변경 확인과 오류는 채팅 기록에 남지 않고 **토스트 알림**으로 잠시 표시된 뒤 사라집니다.
-- **컴포저 중심 UI** — 상단 바 없이 입력창 한 곳에 레포·권한모드·모델·전송·사용량을 접어 넣은 레이아웃. 라이트/다크 테마, 외부 폰트·이미지 의존 0(브랜드 자산은 자체 내장 SVG — 로컬 CSP 안전).
-- **살아있는 마스코트(CLAW'D)** — 컴포저 우측 하단에 실제 Claude Code CLI에 내장된 공식 아트를
-  그대로 옮긴 CLAW'D(주황 몸통 rgb(215,119,87)·검정 눈, 쿼드런트 픽셀)가 세션 상태에 반응합니다
-  (무드 어휘는 [clawd-on-desk](https://github.com/rullerzhou-afk/clawd-on-desk)의 상태 매핑을 축소 이식):
-  대기 중 깜박임 + **커서를 따라가는 눈**, 응답 생성 중 말풍선(점 3개), 도구 실행 중 좌우 두리번 스캐틀,
-  서브에이전트(Task) 실행 중 집게 들고 저글링, 권한 응답 대기 시 집게 들고 폴짝(공식 arms-up 포즈),
-  턴이 끝나면 환호(에러면 어지럼 — 직접 중단한 턴은 제외), 60초 무입력이면 zzz와 함께 잠들고 입력에 깨어나며,
-  세션 없음·연결 끊김엔 졸기. 클릭하면 움찔, 빠르게 4연타하면 어지럼(이스터에그). 전부 자체 SVG
-  프레임 스왑 + CSS (`prefers-reduced-motion` 존중, 외부 이미지 0).
+- **권한 다이얼로그** — `can_use_tool` 요청을 모달로 띄워 허용/거부. 제안(suggestion)은 "항상 허용" 같은 모호한 문구 대신 실제 효과를 그대로 서술. **새 세션의 기본 권한 모드는 기본모드(default)** — CLI 정책과 사용자 허용 규칙상 확인이 필요한 도구 사용 전에 묻습니다. 새 세션 모달·컴포저에서 언제든 바꿀 수 있고, 모드는 기본모드(무색)·자동모드(파랑)·플랜모드(초록)·신뢰모드(빨강)로 색을 구분해 표시합니다.
+- **세션 재개 + 지난 세션 관리** — 사이드바의 "지난 세션" 목록(접기/펼치기, 요약 제목 · 마지막 접근 · 대화 크기)에서 클릭 한 번으로 이어가기(`--resume`), 필요 없는 세션은 확인 후 삭제.
+- **작업 디렉터리 지정** — 새 세션 모달에서 Windows 네이티브 폴더 선택 대화상자로 선택(비-Windows는 직접 입력).
+- **상태줄(statusline)** — 세션 컨텍스트(모델 창 대비 — 기본 200k, `[1m]` 모델은 1M)와 계정의 공식 5시간·7일 사용률(%)을 원형 게이지로 표시. 턴별 토큰 입/출력은 CLI처럼 채팅에 작은 꼬리표(`↑ 12 ↓ 345 tok · 5.3s`)로 남습니다.
+- **런타임 컨트롤** — claude.ai식 모델 피커와 노력 수준 진행 바, 권한 모드 전환, `/` 슬래시 커맨드·`@` 파일 참조 자동완성, 턴 중단(Esc). 설정 변경 확인과 오류는 **토스트 알림**으로 표시됩니다.
+- **컴포저 중심 UI** — 상단 바 없이 입력창 한 곳에 레포·권한모드·모델·전송·사용량을 접어 넣은 레이아웃. 라이트/다크 테마, 외부 폰트·이미지 의존 0(로컬 CSP 안전).
+- **살아있는 마스코트(CLAW'D)** — 실제 Claude Code CLI에 내장된 공식 아트를 옮긴 마스코트가 세션 상태에 반응합니다(대기 깜박임·커서 추적 눈, 응답 중 말풍선, 도구 실행 스캐틀, 서브에이전트 저글링, 권한 대기 폴짝, 턴 종료 환호, 60초 무입력 zzz — `prefers-reduced-motion` 존중).
+- **절전 생존** — 노트북 리드 닫힘·절전으로 연결만 끊긴 경우 서버가 종료되지 않고, 실행 중인 CLI 세션을 유지한 채 복귀 시 자동 재접속합니다.
 
-## 요구사항
+## 사용 방법
 
-- Windows / macOS / Linux + Node.js 22 이상
-- [Claude Code CLI](https://claude.com/claude-code) 설치 및 **로그인 완료** (`claude` 실행 → `/login`)
-  - 이 앱은 CLI의 인증 상태를 그대로 사용합니다. CLI에서 로그인돼 있지 않으면 세션 시작이 실패합니다.
+1. **접속** — 기본 실행은 브라우저가 자동으로 열립니다. 수동 접속은 기동 시 출력된
+   `http://127.0.0.1:8787/#token=…` URL을 그대로 엽니다(토큰 없는 주소는 인증 실패).
+2. **새 세션 시작** — 사이드바 **새 세션** → 작업 디렉터리 선택 → 필요하면 모델·권한
+   모드 변경 후 시작. 기본값은 계정 기본 모델 + **기본모드(default)** — 확인이 필요한
+   도구 사용 전에 묻는 모드입니다. 확인 없이 실행하는 신뢰모드(bypassPermissions)는
+   선택 시 경고와 함께 사용할 수 있습니다.
+3. **대화** — **Enter** 전송, **Shift+Enter** 줄바꿈. 진행 중인 턴은 **Esc** 또는 정지
+   버튼으로 중단합니다.
+4. **슬래시 커맨드 / @ 파일 참조** — `/`와 `@` 입력 시 자동완성 드롭다운(Tab/Enter 선택).
+5. **권한 응답** — 확인이 필요한 모드에서는 도구 실행 전에 다이얼로그가 떠 허용/거부를
+   선택합니다. Claude가 질문할 때(AskUserQuestion)는 선택지·직접 입력·건너뛰기를 갖춘
+   질문 다이얼로그가 뜹니다.
+6. **모델·노력 수준 변경** — 컴포저에서 대화 중에도 변경. 노력 수준 변경은 같은 대화로
+   세션이 재시작됩니다(`--effort`는 시작 시 전용).
+7. **세션 재개·삭제** — 사이드바 "지난 세션"에서 클릭으로 재개, 휴지통 버튼으로 삭제
+   (실행 중 세션은 보호됨). 대화 기록은 CLI가 `~/.claude`에 남기므로 서버를 껐다 켜도
+   유지됩니다.
+8. **종료** — 탭을 모두 닫으면 약 10초 뒤 자동 종료(`--no-open`은 `Ctrl+C`). 절전·리드
+   닫힘은 종료로 치지 않습니다.
 
-## 설치 / 실행
+## 문제해결 (Troubleshooting)
 
-### A. 패키지로 설치 (빌드 불필요)
+| 증상 | 원인 · 해결 |
+| --- | --- |
+| `WARNING: claude CLI not found` | CLI 미설치 또는 PATH 밖. [설치](https://claude.com/claude-code) 후 `claude`가 터미널에서 실행되는지 확인하거나, `CLAUDE_WEB_CLI_PATH`에 절대 경로를 지정하세요. |
+| 세션 시작 실패 | CLI 로그인 안 됨 — 터미널에서 `claude` 실행 → `/login`. |
+| `Port 8787 is already in use` | 다른 인스턴스/프로그램이 사용 중 — `cc-on-browser --port 9000`처럼 다른 포트 지정. |
+| 접속 시 401 / 빈 화면 | 토큰 없는 URL로 접속함 — 기동 시 출력된 `#token=` 포함 URL 전체를 사용하세요. |
+| 브라우저가 안 열림 | `--no-open`으로 포그라운드 실행 후 출력된 URL을 직접 열기. `BROWSER` 환경변수로 열 브라우저를 지정할 수도 있습니다. |
+| 서버가 저절로 꺼짐/안 꺼짐 | 탭 전부 닫기 = 약 10초 뒤 종료(정상). 절전·연결 유실은 세션이 살아있는 한 대기(정상 — 세션이 없으면 30분 뒤 정리). |
+| CLI 업데이트 후 이상 동작 | [프로토콜 경고](#프로토콜-경고) 참조 — 이슈로 CLI 버전과 함께 제보해 주세요. |
 
-[GitHub Releases](https://github.com/seokjw0727/CC-on-browser/releases)에서 `cc-on-browser-<버전>.tgz`를 받아 전역 설치합니다:
+**환경변수**: `PORT`(=`--port`) · `BROWSER`(URL을 열 명령) · `CLAUDE_WEB_CLI_PATH`(CLI 절대 경로).
+CLI 경로 해석 순서: `CLAUDE_WEB_CLI_PATH` → OS `PATH`의 `claude`(Windows는 `claude.exe`).
 
-```sh
-npm install -g ./cc-on-browser-1.1.1.tgz
-cc-on-browser                # 브라우저 자동 실행, 서버는 백그라운드 (기본 포트 8787)
-cc-on-browser --port 9000    # 포트 지정 (-p), --help 로 전체 옵션 확인
-cc-on-browser --no-open      # 브라우저 없이 포그라운드 콘솔 서버 (Ctrl+C로 종료)
-```
-
-### B. 소스에서 실행
+## 소스에서 실행 / 개발
 
 ```sh
 git clone https://github.com/seokjw0727/CC-on-browser.git
@@ -67,71 +107,25 @@ npm run build         # client → client/dist
 npm start             # = node bin/cc-on-browser.mjs
 ```
 
-기본 실행은 접속 URL을 출력한 뒤 **기본 브라우저를 자동으로 열고, 서버는 콘솔 창 없이
-백그라운드로 돌아갑니다**. 브라우저 탭을 모두 닫으면 약 10초 뒤 서버가 스스로 종료되므로
-따로 끌 필요가 없습니다(새로고침은 유예 안에 재접속되므로 안전). 노트북을 닫는 등
-절전으로 연결만 끊긴 경우에는 종료하지 않습니다 — 실행 중인 CLI 세션을 그대로 유지한 채
-재접속을 기다리고, 깨어나면 자동으로 다시 붙습니다(세션이 하나도 없으면 30분 뒤 정리).
-
-```
-Claude Code on Browser v1.1.1 — http://127.0.0.1:8787/#token=<랜덤토큰>
-Opening your browser... The server runs in the background (127.0.0.1 only)
-and stops automatically once every tab is closed. (--no-open for a foreground server)
-```
-
-콘솔 로그를 보며 띄우고 싶으면 `--no-open`을 쓰세요 — 브라우저를 열지 않고 예전처럼
-포그라운드 서버로 남으며, 출력된 URL(토큰 포함)로 직접 접속하고 `Ctrl+C`로 종료합니다.
-`claude` CLI를 찾지 못하면 설치·PATH 안내 경고가 출력됩니다(서버는 뜨지만 세션 시작은 실패).
-
-**CLI 경로 해석 순서**: `CLAUDE_WEB_CLI_PATH` 환경변수(설정 시) → OS `PATH`의 `claude`(Windows는
-`claude.exe`). `claude`가 PATH에 있으면 추가 설정이 필요 없고, 특이한 위치에 설치했다면
-`CLAUDE_WEB_CLI_PATH`로 절대 경로를 지정하세요.
-
 ### 구독 소모 없는 데모 (fake CLI)
 
 실제 CLI 대신 프로토콜을 모사하는 가짜 CLI로 전체 스택을 띄워볼 수 있습니다:
 
 ```sh
 node scripts/dev-fake.mjs                       # echo 시나리오 (기본 포트 8788)
-node scripts/dev-fake.mjs --scenario permission # 권한 다이얼로그 시나리오 (모든 셸 공통)
-node scripts/dev-fake.mjs --scenario question   # Claude의 질문(AskUserQuestion) 다이얼로그 시나리오
+node scripts/dev-fake.mjs --scenario permission # 권한 다이얼로그 시나리오
+node scripts/dev-fake.mjs --scenario question   # Claude의 질문 다이얼로그 시나리오
 ```
 
-환경변수를 선호하면 POSIX 셸은 `FAKE_SCENARIO=permission node scripts/dev-fake.mjs`,
-PowerShell은 `$env:FAKE_SCENARIO='permission'; node scripts/dev-fake.mjs` 로도 동일하게 동작합니다.
+### 테스트
 
-테스트도 전부 fake CLI로만 동작하므로 구독을 소모하지 않습니다: `npm test`
+전부 fake CLI로만 동작하므로 구독을 소모하지 않습니다:
 
-## 사용 방법
-
-1. **접속** — 기본 실행은 브라우저가 자동으로 열립니다. 수동 접속(`--no-open` 또는 다른
-   브라우저)은 기동 시 출력된 `http://127.0.0.1:8787/#token=…` URL을 그대로 엽니다.
-   토큰이 빠진 주소로는 인증에 실패합니다.
-2. **새 세션 시작** — 사이드바의 **새 세션** 버튼 → 모달에서 작업 디렉터리를 직접 입력·붙여넣거나
-   하위 폴더 트리·최근 프로젝트에서 클릭으로 선택합니다. 필요하면 모델·권한 모드를 바꾼 뒤
-   시작합니다(노력 수준은 세션 시작 후 컴포저에서 조절 — 6번 참고). 기본값은 계정 기본 모델 +
-   신뢰모드(bypassPermissions)입니다.
-3. **대화** — 입력창에서 **Enter** 전송, **Shift+Enter** 줄바꿈. 응답은 스트리밍 마크다운으로,
-   도구 호출은 입력/결과 카드로, 확장 사고는 접이식 블록으로 표시됩니다. 진행 중인 턴은 **Esc**
-   또는 정지 버튼으로 중단합니다.
-4. **슬래시 커맨드** — 입력창에서 `/`를 치면 자동완성 드롭다운이 뜹니다(Tab/Enter로 선택).
-   `/compact` 같은 커맨드가 CLI에 그대로 전달됩니다.
-5. **권한 응답** — 확인이 필요한 권한 모드에서는 도구 실행 전에 다이얼로그가 떠 허용/거부를
-   선택합니다. 권한 모드는 컴포저에서 언제든 전환할 수 있습니다. Claude가 **AskUserQuestion**으로
-   질문할 때는 권한 다이얼로그 대신 선택지·직접 입력·건너뛰기를 갖춘 질문 다이얼로그가 뜹니다.
-6. **모델·노력 수준 변경** — 컴포저의 모델 피커로 대화 중에도 모델을 바꿉니다. 노력 수준을 바꾸면
-   같은 대화로 세션이 재시작됩니다(`--effort`는 시작 시 전용 — 대화가 디스크에 있으면 `--resume`,
-   첫 턴 전이면 새로 시작).
-7. **세션 재개** — 사이드바에서 프로젝트를 펼쳐 과거 세션을 클릭하면 트랜스크립트를 불러와
-   이어갑니다. 대화 기록은 CLI가 `~/.claude`에 남기므로 서버를 껐다 켜도 유지됩니다.
-8. **상태줄 읽기** — CTX 게이지는 현재 세션의 컨텍스트 사용률(모델 창 대비 — 200k, `[1m]` 모델은 1M),
-   나머지 게이지는 계정 공식 5시간·7일 사용률(%)입니다. 턴별 토큰은 채팅의 작은 꼬리표
-   (`↑ 12 ↓ 345 tok · 5.3s`)로 확인합니다.
-9. **종료** — 브라우저 탭을 모두 닫으면 약 10초 뒤 서버가 자동 종료됩니다(`--no-open`
-   포그라운드 모드는 터미널에서 `Ctrl+C`). 노트북 리드 닫힘·절전처럼 연결만 끊긴
-   경우는 종료로 치지 않습니다 — 세션이 살아있는 한 서버가 기다렸다가 복귀 시 자동
-   재접속됩니다. 대화 기록은 CLI 트랜스크립트로 남아 있어 다음 기동 후 재개할 수
-   있습니다.
+```sh
+npm test              # 서버·클라이언트 단위/통합 (node --test)
+npm run build && npx playwright install chromium
+npm run test:e2e      # 브라우저 E2E (Playwright — 세션 시작·스트리밍·권한 왕복)
+```
 
 ## 아키텍처
 
@@ -159,16 +153,15 @@ Node 서버 (server/src/server.js — http + ws)
 ## 프로젝트 구조
 
 ```
-bin/cc-on-browser.mjs  CLI 진입점 — 인자 파싱·사전 점검 후 백그라운드 서버 기동 + 브라우저 실행,
-                       브라우저(WS 클라이언트) 전부 종료 시 자동 셧다운 (npm start·전역 설치 공용)
+bin/cc-on-browser.mjs  CLI 진입점 — 인자 파싱·사전 점검 후 백그라운드 서버 기동 + 브라우저 실행
 server/src/
   server.js          HTTP(REST + 정적 서빙) + WebSocket 허브. 127.0.0.1 전용, 토큰·Origin 인증
   session-hub.js     세션 레지스트리 — 키↔ClaudeSession, 이벤트 브로드캐스트/리플레이 중계
   claude-session.js  CLI 자식 프로세스 1개 래핑 — stream-json 송수신, 미문서 프로토콜 격리
-  history.js         ~/.claude 프로젝트·세션·트랜스크립트 읽기 (세션 재개용)
+  history.js         ~/.claude 프로젝트·세션·트랜스크립트 읽기 (세션 재개·삭제)
   usage.js           ~/.claude 트랜스크립트 로컬 집계 — 5h/7d 참고치 (/api/usage)
   quota.js           계정 공식 사용률(5h/7d %) — CLI의 OAuth 토큰 사용, 유일한 api.anthropic.com 접점
-  fs-api.js          디렉터리 나열(/api/browse) — 파일 내용은 미제공
+  fs-api.js          디렉터리 나열·파일명 검색 — 파일 내용은 미제공
   jsonl.js           라인 단위 JSON 파서
 client/src/
   App.jsx            셸 레이아웃·테마 소유
@@ -176,30 +169,31 @@ client/src/
   components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · QuestionDialog · Toasts · Clawd · Brand
 scripts/dev-fake.mjs 구독 미소모 데모 런처(fake CLI)
 server/test/         fake CLI 기반 통합·단위 테스트 (실제 claude 미실행)
+e2e/                 Playwright 브라우저 E2E (fake CLI 스택)
 docs/superpowers/    스펙·플랜 문서
 ```
 
-## 보안 주의
+## 보안
 
-- 서버는 `127.0.0.1`에만 바인드됩니다. **원격 노출(포트포워딩, 리버스 프록시)을 하지 마세요** —
-  이 앱은 사용자의 파일시스템과 셸에 접근할 수 있는 CLI를 구동합니다.
-- 기동 시 생성되는 랜덤 토큰이 URL fragment(`#token=`)로 전달됩니다. 이 URL을 공유하지 마세요.
-  WS는 `?token=` 쿼리, REST는 `x-auth-token` 헤더로 재전송해 검증하며, Origin 헤더도 검증합니다.
-- 파일시스템 API(`/api/browse`)는 디렉터리 나열만 제공합니다. 파일 내용 접근은 CLI 도구 경유 +
-  권한 다이얼로그로 통제됩니다.
+이 앱은 파일시스템과 셸에 접근할 수 있는 CLI를 구동합니다. **원격 노출 금지**, 토큰 URL
+비공유 등 반드시 [SECURITY.md](SECURITY.md)의 위협 모델과 주의사항을 읽어 주세요.
+취약점은 공개 이슈 대신 비공개로 제보 부탁드립니다(경로는 SECURITY.md 참조).
+
+## CLI 호환성
+
+stream-json 제어 프로토콜(`--permission-prompt-tool stdio` 포함)은 **공식 미문서
+인터페이스**입니다. Claude Code CLI **v2.1.201에서 프로토콜 실측 검증**했고, **v2.1.215까지
+동작 확인**했습니다. CLI 업데이트로 형식이 바뀔 수 있으며, 알 수 없는 메시지는 버리지 않고
+raw 이벤트로 UI에 전달되도록 설계돼 있습니다.
+
+<a id="프로토콜-경고"></a>프로토콜 변경이 의심되면
+`docs/superpowers/specs/2026-07-06-claude-code-on-browser-design.md`의 프로브 절차로 재검증하세요.
 
 ## 제한 사항 (v1 범위 밖)
 
 이미지 첨부, 서브에이전트 트리 시각화, MCP 서버 관리 UI, PTY 터미널 탭,
 다중 브라우저 클라이언트 동시 접속 동기화, 원격(비 localhost) 접근.
 
-## 프로토콜 경고
+## 변경 이력 · 라이선스
 
-stream-json 제어 프로토콜(`--permission-prompt-tool stdio` 포함)은 **공식 미문서 인터페이스**입니다
-(CLI v2.1.201에서 실측 검증). CLI 업데이트로 형식이 바뀔 수 있으며, 알 수 없는 메시지는 버리지 않고
-raw 이벤트로 UI에 전달되도록 설계돼 있습니다. 프로토콜 변경이 의심되면
-`docs/superpowers/specs/2026-07-06-claude-code-on-browser-design.md`의 프로브 절차로 재검증하세요.
-
-## 라이선스
-
-[MIT](LICENSE)
+[CHANGELOG.md](CHANGELOG.md) · [MIT](LICENSE)
