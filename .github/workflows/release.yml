@@ -76,9 +76,6 @@ jobs:
       - name: Install (locked, reproducible)
         run: npm ci && npm ci --prefix client
 
-      - name: Unit & integration tests
-        run: npm test
-
       - name: Verify tag matches package.json version
         if: steps.cfg.outputs.tag != ''
         run: |
@@ -93,6 +90,10 @@ jobs:
           TARBALL=$(ls cc-on-browser-*.tgz)
           echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
           sha256sum "$TARBALL" | tee "$TARBALL.sha256"
+
+      # pack 다음에 실행 — bin 테스트 일부는 pack이 빌드한 client/dist를 전제한다.
+      - name: Unit & integration tests
+        run: npm test
 
       - name: Browser E2E (against the dist the pack just built)
         run: |
