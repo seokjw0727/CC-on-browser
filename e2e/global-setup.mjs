@@ -4,7 +4,7 @@
 // 파싱으로 URL 획득, 준비 타임아웃·조기 종료 감지, 실패 시 이미 뜬 자식 정리.
 // URL은 e2e/.state/servers.json 으로 worker에 전달한다(teardown이 삭제).
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,7 +12,39 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 const STATE_DIR = path.join(here, '.state');
 const STATE_FILE = path.join(STATE_DIR, 'servers.json');
+// 세션 히스토리 루트 — 반드시 격리한다. 서버 기본값은 사용자의 실제
+// ~/.claude/projects라, 삭제를 다루는 테스트가 진짜 대화 기록을 지울 수 있다.
+const PROJECTS_ROOT = path.join(STATE_DIR, 'projects');
 const READY_TIMEOUT_MS = 30_000;
+
+// 가짜 트랜스크립트 씨앗 — history.js의 파싱 규칙(cwd는 아무 줄의 cwd 필드,
+// 제목은 첫 비-meta user 메시지)에 맞춘 최소 형태. 정렬은 mtime 기준이므로
+// 파일 쓰기 순서가 아니라 utimes로 명시한다(파일시스템 타임스탬프 해상도 무관).
+// cwd는 반드시 실재하는 디렉터리여야 한다 — 재개는 그 경로를 작업 디렉터리로
+// CLI를 스폰하므로, 가짜 경로를 넣으면 spawn이 ENOENT로 죽는다.
+const SEED_SESSIONS = [
+  { dirName: 'e2e-seed-alpha-dir', rel: '.', sessionId: 'e2e-seed-alpha', title: 'E2E 씨앗 알파', ageMs: 60_000 },
+  { dirName: 'e2e-seed-beta-dir', rel: 'client', sessionId: 'e2e-seed-beta', title: 'E2E 씨앗 베타', ageMs: 120_000 },
+];
+
+function seedProjects() {
+  const now = Date.now();
+  for (const seed of SEED_SESSIONS) {
+    const s = { ...seed, cwd: path.resolve(root, seed.rel) };
+    const dir = path.join(PROJECTS_ROOT, s.dirName);
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${s.sessionId}.jsonl`);
+    writeFileSync(
+      file,
+      [
+        JSON.stringify({ type: 'summary', cwd: s.cwd, sessionId: s.sessionId }),
+        JSON.stringify({ type: 'user', cwd: s.cwd, message: { role: 'user', content: s.title } }),
+      ].join('\n') + '\n',
+    );
+    const t = new Date(now - s.ageMs);
+    utimesSync(file, t, t);
+  }
+}
 
 function startFakeServer(scenario) {
   return new Promise((resolve, reject) => {
@@ -23,7 +55,8 @@ function startFakeServer(scenario) {
         cwd: root,
         // FAKE_PLATFORM=linux: Windows에서도 cwd 직접 입력 UI를 띄워 네이티브
         // 폴더 대화상자 없이 자동화한다(dev-fake → startServer platform 주입).
-        env: { ...process.env, FAKE_PLATFORM: 'linux' },
+        // FAKE_PROJECTS_ROOT: 히스토리 루트를 테스트 소유 임시 디렉터리로 격리.
+        env: { ...process.env, FAKE_PLATFORM: 'linux', FAKE_PROJECTS_ROOT: PROJECTS_ROOT },
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       },
@@ -86,6 +119,8 @@ export default async function globalSetup() {
   // 경우(= 그 토큰을 아는 우리 dev-fake가 확실)에만 종료한다(codex 지적).
   await reclaimStaleServers();
   rmSync(STATE_DIR, { recursive: true, force: true });
+  // 서버를 띄우기 전에 시딩 — 첫 요청부터 목록이 결정적이어야 한다.
+  seedProjects();
   const started = [];
   try {
     for (const scenario of ['echo', 'permission']) {

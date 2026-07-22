@@ -61,12 +61,19 @@ cc-on-browser --help         # all options
   suggestions describe their actual effect instead of vague "always allow" wording.
   **New sessions default to the `default` permission mode** — the CLI asks before
   tool uses that need confirmation under its policy and your allow rules.
-  You can switch modes any time in the new-session modal or the composer;
+  You can switch between default/acceptEdits/plan any time in the composer;
   modes are color-coded (default/uncolored, acceptEdits/blue, plan/green, trust/red).
-- **Session resume + past-session management** — the sidebar's collapsible "past
-  sessions" list (summary title · last access · transcript size) resumes a
-  conversation in one click (`--resume`); delete unneeded sessions after a
-  confirmation (live sessions are protected).
+  **Trust mode (`bypassPermissions`) can only be selected at session start** (in the
+  new-session modal) — a session started in any other mode cannot switch into trust
+  mode at runtime (enforced server-side). A session started in trust mode may leave
+  and return to it.
+- **Session resume + past-session management** — the **new-session modal's "past
+  sessions" list** (summary title · last access · transcript size; 20 by default,
+  50 via "더 보기 / show more") resumes a conversation in one click (`--resume`);
+  delete unneeded sessions after a confirmation (live sessions are protected).
+  Resuming uses **the model and permission mode selected in that same modal** —
+  leaving the model at "(기본 모델)" omits `--model`, so the session keeps whatever
+  model it was using. The sidebar now lists only currently open sessions.
 - **Working-directory picker** — native Windows folder dialog (plain text input on
   other platforms).
 - **Status bar** — session context (vs. the model's window — 200k, or 1M for `[1m]`
@@ -93,7 +100,14 @@ cc-on-browser --help         # all options
    directory → optionally change model/permission mode → start. Defaults are your
    account's default model + the **`default` permission mode** (asks before tool
    uses that need confirmation). The no-confirmation trust mode
-   (`bypassPermissions`) is available with a warning.
+   (`bypassPermissions`) is available with a warning, and **only at session
+   start** — switching into it mid-session is blocked. Resuming happens in the same
+   modal, so the model and permission mode selected there apply to it too (this is
+   the only way to resume in trust mode). To avoid choosing every time, set a
+   **default model and default permission mode under the sidebar's "설정"
+   (Settings)** — they seed the new-session modal's initial selection and never
+   affect already-running sessions. The model list is reported by the CLI at session
+   `init`, so you must start one session before a default model can be picked.
 3. **Chat** — **Enter** sends, **Shift+Enter** adds a newline. Interrupt a running
    turn with **Esc** or the stop button.
 4. **Slash commands / @ file references** — typing `/` or `@` opens autocomplete
@@ -103,9 +117,10 @@ cc-on-browser --help         # all options
    free-text input and skip appears instead.
 6. **Model & effort** — change mid-conversation from the composer. Changing effort
    restarts the session onto the same conversation (`--effort` is start-only).
-7. **Resume & delete** — click a past session in the sidebar to resume; the trash
-   button deletes it (live sessions are protected). Transcripts live in `~/.claude`,
-   so history survives server restarts.
+7. **Resume & delete** — open **새 세션 (New session)** and click a past session to
+   resume it (with the model/mode selected above); the trash button deletes it (live
+   sessions are protected). Transcripts live in `~/.claude`, so history survives
+   server restarts.
 8. **Quit** — close every tab and the server stops ~10s later (`--no-open`: Ctrl+C).
    Suspend/lid-close is not treated as quitting.
 

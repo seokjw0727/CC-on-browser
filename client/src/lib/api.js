@@ -44,7 +44,8 @@ export const fetchSessions = (dirName) =>
 /**
  * @returns {Promise<Array<{dirName, cwd, sessionId, title, mtime, fileSize}>>}
  * 전 프로젝트 최근 세션. fileSize = 트랜스크립트 .jsonl 바이트(대화 크기 표시용).
- * limit 생략 시 서버 기본 12(새 세션 모달) — 사이드바 "지난 세션"만 20/50을 명시 전달.
+ * 유일한 소비처는 새 세션 모달의 "지난 세션" 목록으로, 20(기본)/50("더 보기")을
+ * 명시 전달한다. limit 생략 시 서버 기본 12.
  */
 export const fetchRecentSessions = (limit) =>
   get(`/api/recent-sessions${limit ? `?limit=${limit}` : ''}`);

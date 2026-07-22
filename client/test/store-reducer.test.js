@@ -107,6 +107,42 @@ test("started(replaceKey): 새 탭이 옛 탭을 대체하고 resume 시딩이 �
   assert.equal(s.pendingStarts.size, 0);
 });
 
+test('started(재개): 모달에서 고른 모델이 spawnModel 계보로 시딩된다', () => {
+  // 새 세션 모달의 지난 세션 재개는 사용자가 고른 모델을 그대로 스폰 --model로
+  // 넘긴다(카탈로그 대조를 통과한 값). spawnModel은 "검증된 스폰 인자"만 담는
+  // 계보라 Composer의 effort 재시작이 이 값을 재사용한다.
+  let s = createInitialState();
+  s = registerStart(s, 'cl_m', {
+    cwd: 'C:\\p',
+    model: 'sonnet',
+    resumeSessionId: 'sess-old',
+    preloadModel: 'claude-opus-4-8', // 트랜스크립트에서 읽은 표시용 해석 id
+  });
+  s = reducer(s, serverMsg({ type: 'started', startId: 'cl_m', key: 'm1' }));
+
+  const ns = s.sessions.get('m1');
+  assert.equal(ns.model, 'sonnet', '표시 모델은 실제 스폰 인자를 따른다');
+  assert.equal(ns.spawnModel, 'sonnet', '스폰 계보에 사용자가 고른 값이 실린다');
+});
+
+test('started(재개): 모델을 고르지 않으면 spawnModel은 null이고 preloadModel은 표시 전용', () => {
+  // 모달에서 "(기본 모델)"을 두면 --model을 생략해 그 세션이 쓰던 모델이 유지된다.
+  // 이때 트랜스크립트에서 읽은 해석 id는 표시(피커 라벨·CTX 분모)에만 쓰이고
+  // 스폰 인자 계보로 승격되면 안 된다 — 구식이거나 [1m] 접미사가 탈락했을 수 있다.
+  let s = createInitialState();
+  s = registerStart(s, 'cl_n', {
+    cwd: 'C:\\p',
+    model: null,
+    resumeSessionId: 'sess-old',
+    preloadModel: 'claude-opus-4-8',
+  });
+  s = reducer(s, serverMsg({ type: 'started', startId: 'cl_n', key: 'n1' }));
+
+  const ns = s.sessions.get('n1');
+  assert.equal(ns.model, 'claude-opus-4-8', '표시용으로는 이월된다');
+  assert.equal(ns.spawnModel, null, '검증되지 않은 값은 스폰 계보로 승격되지 않는다');
+});
+
 test('started(재개 프리로드): 메시지·sessionId·usage가 started 커밋에 원자적으로 시딩된다', () => {
   // 별도 커밋으로 뒤늦게 주입하면 ChatView seenRef가 히스토리를 신규 메시지로
   // 오인(등장 애니·타자기 출력)한다 — 반드시 started 한 커밋에 실려야 한다.
@@ -131,6 +167,30 @@ test('started(재개 프리로드): 메시지·sessionId·usage가 started 커�
   assert.equal(ns.ctxFromCalls, true, '호출별 usage 출처 플래그 이월 — result 합산이 못 덮는다');
   assert.equal(ns.hasCompletedTurn, true);
   assert.equal(s.activeKey, 'r1');
+});
+
+test('started: spawnPermissionMode 계보 시딩 — 지정 모드는 그대로, 미지정은 default', () => {
+  // 지정 모드 시딩 (신뢰모드 스폰 → 계보에 남아 UI 신뢰모드 노출 자격이 된다)
+  let s = createInitialState();
+  s = registerStart(s, 'cl_pm', { cwd: 'C:\\p', permissionMode: 'bypassPermissions' });
+  s = reducer(s, serverMsg({ type: 'started', startId: 'cl_pm', key: 'pm1' }));
+  assert.equal(s.sessions.get('pm1').spawnPermissionMode, 'bypassPermissions');
+  assert.equal(s.sessions.get('pm1').permissionMode, 'bypassPermissions');
+
+  // 미지정 → default 폴백 (비신뢰 스폰)
+  let s2 = createInitialState();
+  s2 = registerStart(s2, 'cl_pm2', { cwd: 'C:\\p' });
+  s2 = reducer(s2, serverMsg({ type: 'started', startId: 'cl_pm2', key: 'pm2' }));
+  assert.equal(s2.sessions.get('pm2').spawnPermissionMode, 'default');
+
+  // 런타임 모드 변경(update-session의 permissionMode 갱신)이 계보를 덮지 않는다
+  const s3 = reducer(s, {
+    type: 'update-session',
+    key: 'pm1',
+    fn: (sess) => ({ ...sess, permissionMode: 'plan' }),
+  });
+  assert.equal(s3.sessions.get('pm1').permissionMode, 'plan');
+  assert.equal(s3.sessions.get('pm1').spawnPermissionMode, 'bypassPermissions', '계보는 불변');
 });
 
 test('started(resume 없는 재시작): 게이트는 닫힌 채 시딩된다', () => {

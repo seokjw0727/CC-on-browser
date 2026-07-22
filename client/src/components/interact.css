@@ -138,10 +138,6 @@
   color: var(--danger);
 }
 
-.rs-meta {
-  font-size: 11px;
-}
-
 .sidebar-empty {
   display: flex;
   flex-direction: column;
@@ -154,6 +150,11 @@
 }
 .empty-mascot {
   opacity: 0.32;
+}
+/* 히스토리가 사이드바를 떠났으므로(→ 새 세션 모달) 길 안내를 한 줄 덧붙인다. */
+.empty-hint {
+  font-size: 11.5px;
+  opacity: 0.75;
 }
 
 .sidebar-error {
@@ -911,51 +912,98 @@ select.mode-trust:focus {
   font-size: 12.5px;
   min-width: 0;
 }
-/* 최근 세션 목록 — 클릭하면 재개 */
-.recent-sessions {
+/* ----- 지난 세션 목록 (새 세션 모달) — 히스토리의 유일한 창구 -----
+   행은 래퍼 + 형제 버튼 2개(재개 / 삭제)다. 버튼 안에 버튼을 넣을 수 없으므로
+   래퍼를 클릭 대상으로 삼지 않는다. cwd를 몰라 재개가 막힌 행도 삭제는 가능. */
+.past-field { min-width: 0; }
+.past-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 220px;
+  max-height: 240px;
   overflow-y: auto;
 }
-.recent-session-item {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-areas: 'title time' 'sub sub';
-  gap: 1px 8px;
+.past-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   /* flex column 스크롤 목록에서 행 압착 방지 */
   flex: none;
-  text-align: left;
-  background: none;
-  border: none;
-  padding: 7px 10px;
+  padding: 4px 4px 4px 6px;
   border-radius: var(--r-sm);
-  color: var(--text);
-  cursor: pointer;
   min-width: 0;
 }
-.recent-session-item:hover:not(:disabled):not([aria-disabled='true']) {
-  background: var(--surface-2);
+.past-row:hover { background: var(--surface-2); }
+.past-resume {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
 }
-.recent-session-item:disabled,
-.recent-session-item[aria-disabled='true'] {
-  opacity: 0.5;
-  cursor: default;
-}
-.recent-session-item .rs-title {
-  grid-area: title;
+.past-resume[aria-disabled='true'] { cursor: default; opacity: 0.6; }
+.past-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
 }
-.recent-session-item .rs-sub {
-  grid-area: sub;
-  font-size: 11.5px;
+.past-sub { font-size: 11px; }
+/* 삭제 버튼 — hover에서 드러나되 키보드 포커스·터치(coarse 포인터)에선 항상 보인다. */
+.past-del {
+  flex: none;
+  cursor: pointer;
+  color: var(--text-faint);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s;
 }
-.recent-session-item .rs-time {
-  grid-area: time;
-  font-size: 11px;
-  white-space: nowrap;
+.past-row:hover .past-del,
+.past-del:focus-visible { opacity: 1; }
+@media (hover: none) {
+  .past-del { opacity: 1; }
 }
+.past-del:hover:not(:disabled) { color: var(--danger); }
+.past-del:disabled { cursor: default; }
+/* 목록 상태 문구 — 사이드바의 .dir-loading/.dir-empty와 별개(들여쓰기가 다르다).
+   .past-status는 role="status" 컨테이너로, 비어 있을 때 자리를 차지하지 않는다. */
+.past-status:empty { display: none; }
+.past-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.past-note-error { color: var(--danger); }
+.past-retry {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.past-retry:hover { background: var(--surface-2); }
+.past-more-btn {
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  flex: none;
+}
+.past-more-btn:hover { background: var(--surface-2); color: var(--text); }
 .picker-row {
   display: flex;
   gap: 12px;
@@ -1149,73 +1197,10 @@ select.mode-trust:focus {
 }
 .sess-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
 .sess-dot.live { background: var(--accent); }
-.dir-loading, .dir-empty { padding: 4px 8px 4px 22px; font-size: 12px; }
 
-/* ----- 지난 세션 행 — 재개(2줄 본문) + hover/focus 삭제 버튼 ----- */
-.sess-row.past { padding: 4px 4px 4px 8px; }
-.sess-row.past:hover { background: var(--surface-2); }
-.past-lines {
-  display: flex; flex-direction: column; gap: 1px;
-  flex: 1; min-width: 0;
-}
-.past-sub { font-size: 11px; }
-.sess-row.past .sess-main[aria-disabled='true'] { cursor: default; opacity: 0.6; }
-.session-del {
-  flex: none;
-  cursor: pointer;
-  color: var(--text-faint);
-  background: none;
-  border: none;
-  border-radius: 6px;
-  padding: 3px 6px;
-  font-size: 12px;
-  opacity: 0;
-  transition: opacity 0.12s, color 0.12s;
-}
-.sess-row.past:hover .session-del,
-.session-del:focus-visible {
-  opacity: 1;
-}
-.session-del:hover:not(:disabled) { color: var(--danger); }
-.session-del:disabled { cursor: default; }
-.past-more-btn {
-  width: 100%;
-  padding: 5px 8px;
-  border-radius: var(--r-sm);
-  font-size: 12px;
-}
-.past-more-btn:hover { background: var(--surface-2); color: var(--text); }
-
-/* 지난 세션 헤더 토글 — .sidebar-h의 타이포·::after 구분선을 그대로 물려받는
-   버튼 변형. 버튼 기본 스타일만 리셋하고 폭은 margin(좌우 4px)을 뺀 전폭. */
-button.sidebar-h-toggle {
-  width: calc(100% - 8px);
-  background: none;
-  border: none;
-  padding: 0;
-  font-family: inherit;
-  cursor: pointer;
-}
-button.sidebar-h-toggle:hover { color: var(--text-dim); }
-/* 섹션 chevron — 펼침(기본)은 아래(90°), 접힘은 오른쪽(0°) */
-.sect-chevron {
-  width: 12px;
-  height: 12px;
-  flex: none;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transform: rotate(90deg);
-  transition: transform var(--dur-fast) var(--ease-out);
-}
-.sidebar-h-toggle[aria-expanded='false'] .sect-chevron { transform: rotate(0deg); }
-@media (prefers-reduced-motion: reduce) {
-  .sect-chevron { transition: none; }
-}
-
-/* 삭제 확인 모달 */
+/* 삭제 확인 모달 — 새 세션 모달 위에 겹쳐 뜬다. 같은 z-index에서도 DOM 순서상
+   뒤라 위에 쌓이지만, 의도를 명시해 두어 순서가 바뀌어도 깨지지 않게 한다. */
+.confirm-overlay { z-index: 51; }
 .confirm-modal { max-width: 380px; }
 .confirm-target { font-weight: 600; margin: 0 0 6px; }
 .confirm-note { margin: 0; font-size: 12.5px; }
@@ -1667,6 +1652,19 @@ button.sidebar-h-toggle:hover { color: var(--text-dim); }
   gap: 8px;
 }
 .setting-label { font-size: 12px; color: var(--text-dim); }
+/* 기본 모델·기본 권한 모드 셀렉트 — 값이 길어도 행이 밀리지 않게 상한을 둔다.
+   권한 모드는 모달 select와 같은 mode-* 색 클래스를 공유한다. */
+.setting-select {
+  max-width: 210px;
+  min-width: 0;
+  font-size: 12px;
+}
+.setting-select:disabled { opacity: 0.5; cursor: default; }
+.setting-note {
+  margin-top: -6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
 .switch {
   position: relative;
   width: 34px;

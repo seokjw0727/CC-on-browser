@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Claude Code on Browser">
+  <!-- 브라우저 탭 아이콘. Brand.jsx의 Sparkle(10방향 선버스트)과 같은 기하를 정적으로
+       고정한 것 — 경로는 그 알고리즘(viewBox 24, 중심 12,12)의 산출물이다.
+       탭 바는 밝기가 제각각이라 currentColor 대신 브랜드 색을 박아 둔다:
+       배경 --bg(#1e1c1a), 마크 --accent(#d97757). -->
+  <rect width="32" height="32" rx="7" fill="#1e1c1a"/>
+  <g transform="translate(4 4)" fill="#d97757">
+    <path d="M12 12 Q16.62 9.9 23 12 Q16.62 14.1 12 12 Z"/>
+    <path d="M12 12 Q14.991 12.87 16.596 16.596 Q12.87 14.991 12 12 Z"/>
+    <path d="M12 12 Q14.1 16.62 12 23 Q9.9 16.62 12 12 Z"/>
+    <path d="M12 12 Q11.13 14.991 7.404 16.596 Q9.009 12.87 12 12 Z"/>
+    <path d="M12 12 Q7.38 14.1 1 12 Q7.38 9.9 12 12 Z"/>
+    <path d="M12 12 Q9.009 11.13 7.404 7.404 Q11.13 9.009 12 12 Z"/>
+    <path d="M12 12 Q9.9 7.38 12 1 Q14.1 7.38 12 12 Z"/>
+    <path d="M12 12 Q12.87 9.009 16.596 7.404 Q14.991 11.13 12 12 Z"/>
+  </g>
+</svg>

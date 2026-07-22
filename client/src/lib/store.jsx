@@ -34,9 +34,9 @@ export function getToken() {
 const StoreContext = createContext(null);
 let startCounter = 0;
 
-// 종료된 세션이 '종료' 배지로 남아 있다가 사이드바 "지난 세션"으로 넘어가기까지의
-// 유예(사용자 의도: 닫기 → 3초 후 이동). 기준 시점은 CLI exit 확인 시점이며,
-// 제거 후에도 히스토리에서 재개할 수 있어 데이터 손실이 아니다.
+// 종료된 세션이 '종료' 배지로 남아 있다가 사이드바 목록에서 사라지기까지의
+// 유예(사용자 의도: 닫기 → 3초 후 제거). 기준 시점은 CLI exit 확인 시점이며,
+// 제거 후에도 새 세션 모달의 "지난 세션"에서 재개할 수 있어 데이터 손실이 아니다.
 const EXITED_UI_RETENTION_MS = 3_000;
 
 export function StoreProvider({ children }) {
@@ -116,7 +116,11 @@ export function StoreProvider({ children }) {
     () => ({
       /** Raw WS send (client->server schema). Returns false if not connected. */
       send: (obj) => (wsRef.current ? wsRef.current.send(obj) : false),
-      /** Start a new CLI session; returns startId. */
+      /**
+       * Start a new CLI session.
+       * @returns startId, or null if the WS send failed (전송 실패는 토스트로도
+       * 알리지만, 호출측이 "시작됐다"고 후속 UI를 진행하지 않도록 값으로도 알린다).
+       */
       startSession: (opts) => {
         const startId = `cl_${++startCounter}`;
         dispatch({ type: 'register-start', startId, opts });
@@ -136,6 +140,7 @@ export function StoreProvider({ children }) {
           });
         if (!ok) {
           dispatch({ type: 'server-message', message: { type: 'error', startId, message: 'WebSocket이 연결되어 있지 않습니다.' } });
+          return null;
         }
         return startId;
       },

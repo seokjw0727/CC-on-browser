@@ -1,8 +1,12 @@
-// 사이드바 — wordmark / [새 세션](cwd 피커 모달) / 현재 세션(활성 프로젝트 라이브)
-// / 다른 열린 세션(타 프로젝트 라이브 전환·종료) / 지난 세션(전 프로젝트 최근 —
-// 재개·확인 후 영구 삭제, 닫힌 세션은 3초 뒤 여기로 넘어온다)
+// 사이드바 — wordmark / [새 세션](모달) / 현재 세션(활성 프로젝트 라이브)
+// / 다른 열린 세션(타 프로젝트 라이브 전환·종료)
 // / 하단 고정 통계·설정 버튼(.sidebar-foot) — 패널은 화면 중앙 모달로 표시.
-import { useEffect, useMemo, useRef, useState } from 'react';
+//
+// 사이드바는 "지금 열려 있는 세션"만 다룬다. 히스토리(지난 세션)의 조회·재개·삭제는
+// 전부 새 세션 모달 한 곳으로 모았다(2026-07-21) — 상시 노출되던 "지난 세션" 섹션과
+// 방금 닫힌 세션의 로컬 캡처 로직은 함께 사라졌다. 모달은 열릴 때와 열린 세션 집합이
+// 바뀔 때 서버 목록을 다시 받으므로 로컬 캡처 없이도 신선하다.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../lib/store.jsx';
 import {
   deleteSessionFile,
@@ -22,23 +26,26 @@ import {
   mergeRecentSessions,
   shortDir,
 } from '../lib/sessionTree.js';
-import { fmtAgo, fmtBytes, fmtReset, fmtTok, shortPath } from '../lib/format.js';
+import { fmtAgo, fmtBytes, fmtReset, fmtTok } from '../lib/format.js';
 import { buildHeatmap } from '../lib/usage-grid.js';
 import { MODE_LABEL, MODE_CLASS, MODES } from '../lib/permission-modes.js';
+import {
+  DEFAULT_MODEL_KEY,
+  DEFAULT_MODE_KEY,
+  loadDefaults,
+  resolveDefaultModel,
+  writePref,
+} from '../lib/preferences.js';
 import { Sparkle, Mascot } from './Brand.jsx';
 import { useFocusTrap } from '../lib/useFocusTrap.js';
 import { usePresence } from '../lib/usePresence.js';
 import './interact.css';
 
-// 지난 세션 목록 크기 — 기본 20, "더 보기" 클릭 시 50(서버 clamp 상한).
+// 모달 "지난 세션" 목록 크기 — 기본 20, "더 보기" 클릭 시 50(서버 clamp 상한).
 const PAST_LIMIT_DEFAULT = 20;
 const PAST_LIMIT_MAX = 50;
-// 방금 닫힌 세션 로컬 캡처 보관 상한 — 서버 목록 등장·삭제·재라이브 시 제거된다.
-const CLOSED_LOCAL_MAX = 5;
-// 재개 busy 안전망 — started가 끝내 도착하지 않을 때 행 잠금을 회수하는 상한.
+// 재개 잠금 안전망 — 트랜스크립트 요청이 끝내 정착하지 않을 때 잠금을 회수한다.
 const RESUME_BUSY_TIMEOUT_MS = 15_000;
-// 지난 세션 섹션 접힘 상태 localStorage 키 — 접힘일 때만 '1' 저장, 펼침 시 제거.
-const PAST_COLLAPSED_KEY = 'ccob-past-collapsed';
 
 const STATUS_BADGE = {
   idle: { label: '대기', cls: 'idle' },
@@ -69,21 +76,121 @@ function fmtTime(ms) {
   }
 }
 
-// ----- 새 세션 모달 (cwd = 윈도우 파일 탐색기로 선택 + 최근 세션 재개) -----
-function NewSessionModal({ initInfo, defaultCwd, platform, onStart, onResume, onClose, presenceStatus }) {
+const rowKeyOf = (s) => `${s.dirName}\n${s.sessionId}`;
+
+// 신뢰모드 선택 시의 공통 경고 — 새 세션 모달과 설정(기본 모드)이 함께 쓴다.
+function TrustModeWarning() {
+  return (
+    <div className="mode-warning">
+      ⚠ 신뢰모드(bypassPermissions): 모든 도구가 확인 없이 실행됩니다. 파일
+      수정·명령 실행이 즉시 반영되므로 신뢰할 수 있는 작업에만 사용하세요.
+    </div>
+  );
+}
+
+// ----- 새 세션 모달 (cwd = 윈도우 파일 탐색기로 선택 + 지난 세션 재개·삭제) -----
+function NewSessionModal({
+  defaultCwd,
+  platform,
+  onStart,
+  onResume,
+  onClose,
+  onHistoryChanged,
+  presenceStatus,
+  // 재개 잠금은 모달 밖(Sidebar)이 소유한다 — 모달을 닫았다 다시 열어도 잠금이
+  // 살아 있어야 중복 재개를 막을 수 있다(codex 지적: 모달 안의 ref는 리마운트로 초기화됨).
+  resumingKey,
+}) {
+  const { state, notify } = useStore();
   const [cwd, setCwd] = useState(defaultCwd || '');
-  const [model, setModel] = useState('');
-  // 기본 권한 모드 = 기본모드(default, 매번 확인) — 공개 배포 기본값(2026-07-19).
-  // 이전 기본이던 신뢰모드(bypassPermissions)는 모달 셀렉트에서 선택할 수 있고,
-  // 선택 시 경고 문구가 함께 표시된다.
-  const [mode, setMode] = useState('default');
+  // 모델·권한 모드의 초기값은 설정(설정 패널 → localStorage)에서 가져온다.
+  // 여기서 바꾸는 값은 이번 세션 한정 — 기본값 자체는 설정에서만 바뀐다.
+  const [model, setModel] = useState(() => loadDefaults().model);
+  const [mode, setMode] = useState(() => loadDefaults().mode);
   const [error, setError] = useState(null);
   const [browsing, setBrowsing] = useState(false); // 네이티브 폴더 대화상자 대기 중
-  const [recent, setRecent] = useState([]); // 최근 세션(전 프로젝트)
+
+  // ----- 지난 세션(전 프로젝트 최근) -----
+  const [past, setPast] = useState(null); // null=아직 못 받음 | 서버 목록 Array
+  const [pastError, setPastError] = useState(false);
+  // 실제 요청 진행 여부 — past===null로는 표현할 수 없다. 첫 요청이 실패하면
+  // past는 계속 null이지만 로딩은 끝났고, 반대로 재조회·"더 보기"는 목록이
+  // 있는 채로 진행 중이다(codex 지적: aria-busy가 둘 다 틀렸었다).
+  const [pastLoading, setPastLoading] = useState(true);
+  const [limit, setLimit] = useState(PAST_LIMIT_DEFAULT);
+  const [deletingRow, setDeletingRow] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null); // 삭제 확인 대상
+  const genRef = useRef(0); // 요청 세대 — 늦은 응답이 새 목록을 덮지 못하게
+  const pastHeadingRef = useRef(null); // 삭제로 🗑이 사라졌을 때의 포커스 착지점
+  // 확인 모달을 연 🗑 버튼 — 닫힐 때 포커스를 돌려줄 대상. 삭제가 성공하면 그
+  // 버튼이 사라지므로 목록 제목으로 갈아 끼운다. 자동 포착(직전 활성 요소)에
+  // 맡기지 않는 이유는 useFocusTrap 주석 참조(inert 적용과의 경합).
+  const restoreTargetRef = useRef(null);
+
+  // 삭제 확인 모달의 presence — 페이드아웃(140ms)까지 포함해 아래 모달을 잠근다.
+  // confirmDel(즉시 null이 됨)에 묶으면 애니메이션 도중 아래가 먼저 풀린다.
+  const { mounted: confirmMounted, status: confirmStatus } = usePresence(!!confirmDel, 140);
+  const lastConfirmRef = useRef(null);
+  // 렌더 중 ref를 쓰지 않는다 — 버려지는 동시성 렌더가 커밋되지 않은 대상을
+  // 페이드아웃 UI로 흘릴 수 있다(codex 지적). usePresence 자체가 effect 기반이라
+  // effect에서 갱신해도 표시 타이밍은 같다.
+  useEffect(() => {
+    if (confirmDel) lastConfirmRef.current = confirmDel;
+  }, [confirmDel]);
+
   // 포커스 트랩 — 모달이 열린 동안 Tab을 안에 가두고, 닫히면 여는 버튼으로 복원.
   // 초기 포커스는 첫 포커서블(닫기 버튼)로 폴백한다 — 폴더 선택 버튼은 platform 부트스트랩
   // 전(초기 null)과 비-Windows에서 disabled라 초기 포커스 대상으로 지정하면 트랩이 깨진다.
   const dialogRef = useFocusTrap(true);
+
+  const models = Array.isArray(state.initInfo?.models) ? state.initInfo.models : [];
+  // 셀렉트에 실제로 보이는 값 = 스폰에 쓰일 값. 카탈로그에 없는 값(설정에 남은
+  // 구버전 id, init 전이라 검증 불가)은 (기본 모델)로 보이고 --model도 생략된다.
+  const modelValue = resolveDefaultModel(model, models);
+
+  // 라이브 세션은 지난 세션 목록에서 숨긴다. 재개 세션은 fork로 새 sessionId를
+  // 받을 수 있어 원본(resumeSourceId)도 라이브로 취급하고, 아직 started가 오지
+  // 않은 재개 요청(pendingStarts)까지 포함한다 — 그러지 않으면 서버가 삭제를
+  // 409로 거부하는 유령 행이 남는다.
+  const liveIds = useMemo(() => {
+    const ids = new Set();
+    for (const s of state.sessions.values()) {
+      if (s.sessionId) ids.add(s.sessionId);
+      if (s.resumeSourceId) ids.add(s.resumeSourceId);
+    }
+    for (const opts of state.pendingStarts.values()) {
+      if (opts?.resumeSessionId) ids.add(opts.resumeSessionId);
+    }
+    return ids;
+  }, [state.sessions, state.pendingStarts]);
+
+  // 열린 세션 "집합"이 바뀔 때만 재조회하기 위한 안정 키 — state.sessions는
+  // 스트리밍 이벤트마다 새 Map으로 갈리므로 그대로 의존하면 토큰마다 요청한다.
+  const sessionsKey = useMemo(
+    () => [...state.sessions.keys()].sort().join('\n'),
+    [state.sessions],
+  );
+
+  const refreshPast = useCallback(async (nextLimit) => {
+    const gen = ++genRef.current;
+    setPastLoading(true);
+    try {
+      const list = await fetchRecentSessions(nextLimit);
+      if (genRef.current !== gen) return; // 뒤늦은 응답 — 최신 요청이 상태를 소유
+      setPast(Array.isArray(list) ? list : []);
+      setPastError(false);
+      setPastLoading(false);
+    } catch {
+      if (genRef.current !== gen) return;
+      setPastError(true); // 기존 목록은 유지한 채 오류 문구만
+      setPastLoading(false);
+    }
+  }, []);
+
+  // 최초 1회 + "더 보기"(limit) + 열린 세션 집합 변화 — 단일 effect라 초기 중복 요청 없음.
+  useEffect(() => {
+    refreshPast(limit);
+  }, [limit, sessionsKey, refreshPast]);
 
   // 윈도우 파일 탐색기(네이티브 폴더 선택 대화상자)로 작업 디렉터리를 선택한다 —
   // 인앱 경로 입력/폴더 트리 탐색을 완전히 대체(사용자 요청). 취소 시 기존 값 유지.
@@ -102,22 +209,16 @@ function NewSessionModal({ initInfo, defaultCwd, platform, onStart, onResume, on
     }
   };
 
-  // 최근 세션 로드(모달이 열릴 때 1회) — 실패는 조용히 빈 목록으로 둔다.
-  useEffect(() => {
-    let alive = true;
-    fetchRecentSessions()
-      .then((list) => {
-        if (alive) setRecent(Array.isArray(list) ? list : []);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const models = Array.isArray(initInfo?.models) ? initInfo.models : [];
+  // 재개가 진행 중이면 모달 전체가 잠긴다 — 닫기(✕·취소·Esc·배경 클릭)와 새
+  // 세션 시작까지 포함. 진행 중 모달이 사라지면 사용자는 무슨 일이 일어나는지
+  // 알 수 없고, 다른 행을 눌러도 조용히 무시되는 상태가 된다.
+  const resuming = !!resumingKey;
+  const requestClose = () => {
+    if (!resuming) onClose();
+  };
 
   const start = () => {
+    if (resuming) return;
     const trimmed = cwd.trim();
     if (!trimmed) {
       setError('작업 디렉터리를 선택하세요 (📂 폴더 선택).');
@@ -125,132 +226,275 @@ function NewSessionModal({ initInfo, defaultCwd, platform, onStart, onResume, on
     }
     onStart({
       cwd: trimmed,
-      model: model || null,
+      model: modelValue || null,
       permissionMode: mode,
       resumeSessionId: null,
     });
   };
 
-  return (
-    <div
-      className={`modal-overlay${presenceStatus === 'closing' ? ' closing' : ''}`}
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') {
-          e.stopPropagation();
-          onClose();
-        }
-      }}
-    >
-      <div ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-label="새 세션">
-        <div className="modal-title">
-          새 세션
-          <span className="spacer" />
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="닫기" data-tip="닫기">
-            ✕
-          </button>
-        </div>
+  // 재개 — 여기서 고른 모델·권한 모드가 그대로 스폰 인자가 된다.
+  // 잠금·성공 후 모달 닫기는 부모(onResume)가 책임진다.
+  const resumeRow = (s) => {
+    if (resuming || deletingRow || !s.cwd) return;
+    onResume(s, { model: modelValue || null, permissionMode: mode });
+  };
 
-        <div className="modal-body">
-        <div className="picker-field">
-          <span className="dim">작업 디렉터리 (cwd)</span>
-          <div className="cwd-path-row">
+  const confirmDelete = async () => {
+    const target = confirmDel;
+    if (!target || deletingRow) return;
+    const rowKey = rowKeyOf(target);
+    setDeletingRow(rowKey);
+    try {
+      await deleteSessionFile(target.dirName, target.sessionId);
+      notify('세션을 완전히 삭제했습니다.');
+    } catch (err) {
+      if (err?.status === 404) {
+        notify('이미 삭제된 세션입니다.'); // 외부 삭제와 수렴 — 아래 낙관적 제거 공유
+      } else if (err?.status === 409) {
+        // 서버가 라이브 세션 파일을 지키는 정상 응답 — 행을 지우면 안 된다.
+        notify('실행 중인 세션은 삭제할 수 없습니다. 먼저 세션을 종료하세요.', 'error');
+        setDeletingRow(null);
+        setConfirmDel(null);
+        refreshPast(limit);
+        return;
+      } else {
+        notify(`삭제 실패: ${String(err.message ?? err)}`, 'error');
+        setDeletingRow(null);
+        return; // 확인 모달 유지 — 재시도/취소 선택
+      }
+    }
+    // 여기(성공·404)서는 확인 모달을 연 🗑 버튼이 곧 사라진다 — 포커스 착지점을
+    // 목록 제목으로 갈아 끼운다(확인 모달 언마운트 시 읽힌다).
+    restoreTargetRef.current = pastHeadingRef.current;
+    // 낙관적 제거(성공·404 공통): 재조회가 실패해도 삭제된 행이 부활하지 않도록
+    // 먼저 목록에서 빼고 나서 갱신을 시도한다.
+    setPast((cur) => (Array.isArray(cur) ? cur.filter((s) => rowKeyOf(s) !== rowKey) : cur));
+    setDeletingRow(null);
+    setConfirmDel(null);
+    onHistoryChanged?.();
+    refreshPast(limit);
+  };
+
+  const pastReady = Array.isArray(past);
+  const rows = mergeRecentSessions({ fetched: pastReady ? past : [], liveIds });
+  const canLoadMore = pastReady && limit === PAST_LIMIT_DEFAULT && past.length >= PAST_LIMIT_DEFAULT;
+
+  // 지난 세션 행 — 재개(2줄 본문)와 삭제를 형제 버튼으로(버튼 중첩 금지).
+  // cwd를 모르면 재개만 막고 삭제는 계속 허용한다(정리 경로를 남긴다).
+  const pastRow = (s) => {
+    const rowKey = rowKeyOf(s);
+    const thisResuming = resumingKey === rowKey;
+    const deleting = deletingRow === rowKey;
+    // 재개는 한 번에 하나만 — 진행 중에는 모든 행의 재개를 잠근다(조용히 무시되는
+    // 버튼을 남기지 않기 위해 시각·보조기술 상태도 함께 끈다).
+    const resumeBlocked = resuming || !!deletingRow || !s.cwd;
+    const title = s.title || '(제목 없음)';
+    // 서브라인: 디렉터리 · 마지막 접근(상대) · 대화 크기
+    const meta = [shortDir(s.cwd) || s.dirName, fmtAgo(s.mtime), fmtBytes(s.fileSize)]
+      .filter(Boolean)
+      .join(' · ');
+    // 절대 시각·정확 바이트는 재개 버튼의 단일 툴팁에 통합 — 부모 행에 따로 달면
+    // 자식 버튼 툴팁이 hover/focus를 선점해 가려지고 키보드 사용자에게 닿지 않는다.
+    const tip = [
+      s.cwd ? `재개: ${s.cwd}` : 'cwd를 알 수 없어 재개할 수 없습니다',
+      fmtTime(s.mtime),
+      s.fileSize != null ? `${s.fileSize.toLocaleString()} bytes` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    return (
+      <div key={rowKey} className="past-row">
+        <button
+          type="button"
+          className="past-resume"
+          aria-disabled={resumeBlocked}
+          data-tip={tip}
+          onClick={() => resumeRow(s)}
+        >
+          <span className="past-lines">
+            <span className="truncate">{title}</span>
+            <span className="past-sub dim truncate">{thisResuming ? '재개하는 중…' : meta}</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          className="past-del"
+          aria-label={`세션 삭제: ${title}`}
+          data-tip="완전히 삭제"
+          disabled={resuming || deleting}
+          onClick={(e) => {
+            restoreTargetRef.current = e.currentTarget;
+            setConfirmDel(s);
+          }}
+        >
+          🗑
+        </button>
+      </div>
+    );
+  };
+
+  return (
+    <>
+      <div
+        className={`modal-overlay${presenceStatus === 'closing' ? ' closing' : ''}`}
+        // 확인 모달이 떠 있는 동안(페이드아웃 포함)에는 아래 레이어 전체를 비활성화 —
+        // 배경 클릭으로 새 세션 모달이 먼저 닫히거나 Tab이 새는 것을 막는다.
+        inert={confirmMounted ? true : undefined}
+        onMouseDown={(e) => e.target === e.currentTarget && requestClose()}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            e.stopPropagation();
+            requestClose();
+          }
+        }}
+      >
+        <div ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-label="새 세션">
+          <div className="modal-title">
+            새 세션
+            <span className="spacer" />
             <button
               type="button"
-              className="browse-native-btn primary"
-              onClick={browseNative}
-              aria-disabled={browsing || platform !== 'win32'}
-              data-tip={platform === 'win32' ? '윈도우 파일 탐색기로 폴더 선택' : '네이티브 폴더 선택은 Windows에서만 지원됩니다'}
+              className="icon-btn"
+              onClick={requestClose}
+              disabled={resuming}
+              aria-label="닫기"
+              data-tip="닫기"
             >
-              {browsing ? '탐색기 여는 중…' : '📂 폴더 선택 (파일 탐색기)'}
+              ✕
             </button>
           </div>
-          {/* 선택된 경로 표시 — Windows가 아니면 직접 입력 폴백. */}
-          {platform === 'win32' ? (
-            <div className="cwd-selected" data-tip={cwd || undefined}>
-              {cwd ? <span className="truncate">{cwd}</span> : <span className="dim">아직 선택된 폴더가 없습니다</span>}
-            </div>
-          ) : (
-            <input
-              type="text"
-              value={cwd}
-              aria-label="작업 디렉터리 경로"
-              placeholder="/path/to/project"
-              onChange={(e) => setCwd(e.target.value)}
-            />
-          )}
-        </div>
 
-        {recent.length > 0 && (
-          <div className="picker-field">
-            <span className="dim">최근 세션 — 클릭하면 이어서 재개합니다</span>
-            <div className="recent-sessions">
-              {recent.map((s) => (
+          <div className="modal-body">
+            <div className="picker-field">
+              <span className="dim">작업 디렉터리 (cwd)</span>
+              <div className="cwd-path-row">
                 <button
-                  key={`${s.dirName}/${s.sessionId}`}
                   type="button"
-                  className="recent-session-item"
-                  aria-disabled={!s.cwd}
-                  data-tip={s.cwd ? `재개: ${s.cwd}` : 'cwd를 알 수 없어 재개할 수 없습니다'}
-                  onClick={() => s.cwd && onResume(s)}
+                  className="browse-native-btn primary"
+                  onClick={browseNative}
+                  aria-disabled={browsing || platform !== 'win32'}
+                  data-tip={platform === 'win32' ? '윈도우 파일 탐색기로 폴더 선택' : '네이티브 폴더 선택은 Windows에서만 지원됩니다'}
                 >
-                  <span className="rs-title truncate">{s.title || '(제목 없음)'}</span>
-                  <span className="rs-sub dim truncate">{s.cwd || s.dirName}</span>
-                  <span className="rs-time dim">{fmtTime(s.mtime)}</span>
+                  {browsing ? '탐색기 여는 중…' : '📂 폴더 선택 (파일 탐색기)'}
                 </button>
-              ))}
+              </div>
+              {/* 선택된 경로 표시 — Windows가 아니면 직접 입력 폴백. */}
+              {platform === 'win32' ? (
+                <div className="cwd-selected" data-tip={cwd || undefined}>
+                  {cwd ? <span className="truncate">{cwd}</span> : <span className="dim">아직 선택된 폴더가 없습니다</span>}
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  value={cwd}
+                  aria-label="작업 디렉터리 경로"
+                  placeholder="/path/to/project"
+                  onChange={(e) => setCwd(e.target.value)}
+                />
+              )}
+            </div>
+
+            <div className="picker-row">
+              <label className="picker-field">
+                <span className="dim">모델</span>
+                <select value={modelValue} onChange={(e) => setModel(e.target.value)}>
+                  <option value="">(기본 모델 — 재개 시 기존 모델 유지)</option>
+                  {models.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.displayName || m.value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="picker-field">
+                <span className="dim">권한 모드</span>
+                <select
+                  className={MODE_CLASS[mode] || undefined}
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value)}
+                >
+                  {PERMISSION_MODES.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {mode === 'bypassPermissions' && <TrustModeWarning />}
+
+            {error && <div className="sidebar-error">{error}</div>}
+
+            {/* 지난 세션 — 히스토리의 유일한 창구(조회·재개·삭제). 위에서 고른
+                모델·권한 모드가 재개에도 그대로 적용된다. */}
+            <div className="picker-field past-field">
+              <span className="dim" id="past-sessions-heading" tabIndex={-1} ref={pastHeadingRef}>
+                지난 세션 — 클릭하면 위 설정으로 이어서 재개합니다
+              </span>
+              <div
+                className="past-list"
+                role="group"
+                aria-labelledby="past-sessions-heading"
+                aria-busy={pastLoading || resuming}
+              >
+                {/* 비동기 상태(로딩·오류·비어 있음·재개 중)는 role="status"로 묶어
+                    스크린 리더에 알린다 — 시각 표시만으로는 전달되지 않는다. */}
+                <div role="status" className="past-status">
+                  {pastLoading && !pastReady && !pastError && (
+                    <span className="dim past-note">불러오는 중…</span>
+                  )}
+                  {pastError && (
+                    <span className="past-note past-note-error">
+                      <span className="dim">지난 세션을 불러오지 못했습니다.</span>
+                      <button type="button" className="past-retry" onClick={() => refreshPast(limit)}>
+                        다시 시도
+                      </button>
+                    </span>
+                  )}
+                  {pastReady && !pastError && rows.length === 0 && (
+                    <span className="dim past-note">지난 세션 없음</span>
+                  )}
+                  {resuming && <span className="dim past-note">세션을 재개하는 중…</span>}
+                </div>
+                {rows.map((s) => pastRow(s))}
+                {canLoadMore && (
+                  <button
+                    type="button"
+                    className="past-more-btn dim"
+                    onClick={() => setLimit(PAST_LIMIT_MAX)}
+                  >
+                    더 보기 (최근 {PAST_LIMIT_MAX}개)
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-        )}
 
-        <div className="picker-row">
-          <label className="picker-field">
-            <span className="dim">모델</span>
-            <select value={model} onChange={(e) => setModel(e.target.value)}>
-              <option value="">(기본 모델)</option>
-              {models.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.displayName || m.value}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="picker-field">
-            <span className="dim">권한 모드</span>
-            <select
-              className={MODE_CLASS[mode] || undefined}
-              value={mode}
-              onChange={(e) => setMode(e.target.value)}
-            >
-              {PERMISSION_MODES.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        {mode === 'bypassPermissions' && (
-          <div className="mode-warning">
-            ⚠ 신뢰모드(bypassPermissions): 모든 도구가 확인 없이 실행됩니다. 파일
-            수정·명령 실행이 즉시 반영되므로 신뢰할 수 있는 작업에만 사용하세요.
+          <div className="modal-actions">
+            <button type="button" onClick={requestClose} disabled={resuming}>
+              취소
+            </button>
+            <button type="button" className="btn-primary" onClick={start} disabled={resuming}>
+              {resuming ? '재개하는 중…' : '세션 시작'}
+            </button>
           </div>
-        )}
-
-        {error && <div className="sidebar-error">{error}</div>}
-        </div>
-
-        <div className="modal-actions">
-          <button type="button" onClick={onClose}>
-            취소
-          </button>
-          <button type="button" className="btn-primary" onClick={start}>
-            세션 시작
-          </button>
         </div>
       </div>
-    </div>
+
+      {/* 삭제 확인 — 새 세션 모달의 형제로 렌더(중첩 금지: 두 포커스 트랩이 서로
+          간섭하지 않게). DOM 순서상 뒤라 같은 z-index에서도 위에 쌓인다. */}
+      {confirmMounted && lastConfirmRef.current && (
+        <ConfirmDeleteModal
+          target={lastConfirmRef.current}
+          presenceStatus={confirmStatus}
+          busy={!!deletingRow}
+          restoreRef={restoreTargetRef}
+          onConfirm={confirmDelete}
+          onClose={() => !deletingRow && setConfirmDel(null)}
+        />
+      )}
+    </>
   );
 }
 
@@ -464,10 +708,29 @@ function Retrospective({ notify }) {
   );
 }
 
-// 설정 패널 — 테마(라이트/다크 세그먼트) +
+// 설정 패널 — 테마(라이트/다크 세그먼트) / 새 세션 기본값(모델·권한 모드) /
 // 디버그 raw 이벤트 표시 스위치(store debugRaw + localStorage 'ccob-debug').
+//
+// 기본값은 "새 세션 모달을 열 때의 초기 선택값"에만 쓰인다 — 실행 중 세션이나
+// 이미 열려 있는 모달에는 소급 적용하지 않는다.
 function SettingsPanel({ theme, onSetTheme }) {
   const { state, setDebug } = useStore();
+  const [defaults, setDefaults] = useState(() => loadDefaults());
+  // 모델 카탈로그는 CLI가 세션 init에서 보고한다 — 앱을 켜고 아직 아무 세션도
+  // 시작하지 않았다면 비어 있어 고를 수 없다(안내 문구로 대체).
+  const models = Array.isArray(state.initInfo?.models) ? state.initInfo.models : [];
+  const catalogReady = models.length > 0;
+  const modelValue = resolveDefaultModel(defaults.model, models);
+
+  const setDefaultModel = (value) => {
+    setDefaults((cur) => ({ ...cur, model: value }));
+    writePref(DEFAULT_MODEL_KEY, value);
+  };
+  const setDefaultMode = (value) => {
+    setDefaults((cur) => ({ ...cur, mode: value }));
+    writePref(DEFAULT_MODE_KEY, value);
+  };
+
   return (
     <div className="settings-panel">
       <div className="setting-row">
@@ -491,6 +754,51 @@ function SettingsPanel({ theme, onSetTheme }) {
           </button>
         </div>
       </div>
+
+      <div className="setting-row">
+        <label className="setting-label" htmlFor="default-model-select" data-tip="새 세션 모달을 열 때 미리 선택되는 모델입니다">
+          기본 모델
+        </label>
+        <select
+          id="default-model-select"
+          className="setting-select"
+          value={modelValue}
+          disabled={!catalogReady}
+          onChange={(e) => setDefaultModel(e.target.value)}
+        >
+          <option value="">(기본 모델)</option>
+          {models.map((m) => (
+            <option key={m.value} value={m.value}>
+              {m.displayName || m.value}
+            </option>
+          ))}
+        </select>
+      </div>
+      {!catalogReady && (
+        <div className="dim setting-note">
+          모델 목록은 CLI가 세션을 시작할 때 알려줍니다 — 세션을 한 번 시작하면 여기서 고를 수 있습니다.
+        </div>
+      )}
+
+      <div className="setting-row">
+        <label className="setting-label" htmlFor="default-mode-select" data-tip="새 세션 모달을 열 때 미리 선택되는 권한 모드입니다">
+          기본 권한 모드
+        </label>
+        <select
+          id="default-mode-select"
+          className={`setting-select ${MODE_CLASS[defaults.mode] || ''}`.trim()}
+          value={defaults.mode}
+          onChange={(e) => setDefaultMode(e.target.value)}
+        >
+          {PERMISSION_MODES.map((m) => (
+            <option key={m.value} value={m.value}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      {defaults.mode === 'bypassPermissions' && <TrustModeWarning />}
+
       <div className="setting-row">
         <span
           className="setting-label"
@@ -601,52 +909,26 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
   const [defaultCwd, setDefaultCwd] = useState('');
   const [platform, setPlatform] = useState(null); // 네이티브 폴더 선택 버튼 노출 판단
   const [footPanel, setFootPanel] = useState(null); // null | 'stats' | 'settings'
-
-  // ----- 지난 세션(전 프로젝트 최근) 상태 -----
-  const [recent, setRecent] = useState(null); // null=loading | 서버 목록 Array
-  const [recentError, setRecentError] = useState(false);
-  const [recentLimit, setRecentLimit] = useState(PAST_LIMIT_DEFAULT);
-  // 행 busy — 재개/삭제를 분리해 서로의 표시를 덮지 않게 한다(둘 다 새 작업 차단).
-  const [resumingRow, setResumingRow] = useState(null);
-  const [deletingRow, setDeletingRow] = useState(null);
-  const [confirmDel, setConfirmDel] = useState(null); // 삭제 확인 모달 대상 세션
-  // 섹션 접힘 — 표시만 제어한다(접혀 있어도 refreshRecent·closedLocal 병합·삭제는
-  // 계속 돌아 배지·목록이 신선하게 유지된다). localStorage는 차단 컨텍스트에서
-  // throw할 수 있어 항상 try/catch 가드(ccob-debug 패턴).
-  const [pastCollapsed, setPastCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(PAST_COLLAPSED_KEY) === '1';
-    } catch {
-      return false;
+  // 재개 잠금 — 모달 밖에 두어 모달을 닫았다 다시 열어도 유지된다. ref는 첫 await
+  // 전에 동기적으로 세우는 실제 관문이고, state는 UI 표시용 미러다.
+  const [resumingKey, setResumingKey] = useState(null);
+  const resumeLockRef = useRef(false);
+  const resumeTimerRef = useRef(null);
+  // 시도 세대 — watchdog이 잠금을 회수하면 이 값을 올려 그 시도를 폐기한다.
+  // 폐기된 시도는 뒤늦게 응답이 와도 세션을 만들지 않고, 뒤이은 새 시도의
+  // 잠금·모달 상태도 건드리지 않는다(codex 지적: 타임아웃 후 재시도 이중 스폰).
+  const resumeAttemptRef = useRef(0);
+  const releaseResume = useCallback(() => {
+    if (resumeTimerRef.current) {
+      clearTimeout(resumeTimerRef.current);
+      resumeTimerRef.current = null;
     }
-  });
-  const togglePastCollapsed = () => setPastCollapsed((cur) => !cur);
-  // 영속화는 updater 밖(effect)에서 — StrictMode는 updater를 중복 호출할 수 있어
-  // 부수효과를 두면 안 된다(codex 지적). 마운트 직후 1회 쓰기는 초기 읽기와 동일값.
-  useEffect(() => {
-    try {
-      if (pastCollapsed) localStorage.setItem(PAST_COLLAPSED_KEY, '1');
-      else localStorage.removeItem(PAST_COLLAPSED_KEY);
-    } catch {
-      // 저장 실패해도 세션 내 토글은 동작
-    }
-  }, [pastCollapsed]);
-  const recentGenRef = useRef(0); // 요청 세대 — 오래된 응답이 새 목록을 덮지 못하게
-  const recentLimitRef = useRef(recentLimit);
-  recentLimitRef.current = recentLimit;
-  // 방금 닫힌 세션 로컬 캡처(최대 5) — 서버 top-N 밖이어도 "지난 세션" 이동을 보장.
-  const [closedLocal, setClosedLocal] = useState([]);
-  const addClosedLocal = (entries) => {
-    if (entries.length === 0) return;
-    setClosedLocal((cur) => {
-      let next = cur;
-      for (const e of entries) {
-        const k = `${e.dirName}\n${e.sessionId}`;
-        next = [e, ...next.filter((s) => `${s.dirName}\n${s.sessionId}` !== k)];
-      }
-      return next.slice(0, CLOSED_LOCAL_MAX);
-    });
-  };
+    resumeLockRef.current = false;
+    setResumingKey(null);
+  }, []);
+  useEffect(() => () => {
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+  }, []);
 
   // 에러는 영구 배너 대신 토스트(자동 소멸)로 — 모달 내부의 폼 검증 문구만 인라인 유지.
   const refreshProjects = async () => {
@@ -657,22 +939,6 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
     } catch (err) {
       notify(String(err.message ?? err), 'error');
       return null;
-    }
-  };
-
-  const refreshRecent = async (limit = recentLimitRef.current) => {
-    const gen = ++recentGenRef.current;
-    try {
-      const list = await fetchRecentSessions(limit);
-      if (recentGenRef.current !== gen) return; // 뒤늦은 응답 폐기
-      // 서버 목록에 등장한 로컬 캡처는 정리(서버 항목이 진실)
-      const seen = new Set(list.map((s) => `${s.dirName}\n${s.sessionId}`));
-      setClosedLocal((cur) => cur.filter((s) => !seen.has(`${s.dirName}\n${s.sessionId}`)));
-      setRecent(list);
-      setRecentError(false);
-    } catch {
-      if (recentGenRef.current !== gen) return;
-      setRecentError(true); // 기존 목록은 유지한 채 오류 문구만
     }
   };
 
@@ -687,68 +953,19 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 지난 세션 로드 — 마운트 시 + "더 보기"로 limit이 바뀔 때.
-  useEffect(() => {
-    refreshRecent(recentLimit);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recentLimit]);
-
-  // 세션이 사이드바(세션 맵)에서 사라지는 순간을 감지한다. exited로 끝난 세션(=3초
-  // 유예 후 제거)만 로컬 캡처 — effort 재시작의 교체 제거는 같은 sessionId의 라이브가
-  // 새로 생기므로 캡처하지 않는다(liveIds 필터로도 이중 방어).
-  const prevSessionsRef = useRef(new Map()); // key -> {cwd, sessionId, status, title}
-  useEffect(() => {
-    const prev = prevSessionsRef.current;
-    const next = new Map();
-    for (const s of state.sessions.values()) {
-      next.set(s.key, {
-        cwd: s.cwd ?? null,
-        sessionId: s.sessionId ?? null,
-        status: s.status,
-        title: deriveSessionTitle(s.messages),
-      });
-    }
-    prevSessionsRef.current = next;
-    const gone = [...prev].filter(([key]) => !next.has(key)).map(([, info]) => info);
-    if (gone.length === 0) return;
-    const closed = gone.filter((g) => g.status === 'exited' && g.sessionId && g.cwd);
-    // 1) 동기 캡처 — 지금 아는 projects로 dirName을 해석해 라이브 목록에서 빠지는
-    //    렌더와 같은 사이클에 "지난 세션"으로 나타나게 한다(이동의 원자성).
-    const unresolved = [];
-    const immediate = [];
-    for (const c of closed) {
-      const entry = {
-        cwd: c.cwd,
-        sessionId: c.sessionId,
-        title: c.title,
-        mtime: Date.now(), // 닫힘 시각 — 최신 정렬로 맨 위에 보이게
-      };
-      const proj = state.projects.find((p) => p.cwd === c.cwd);
-      if (proj) immediate.push({ ...entry, dirName: proj.dirName });
-      else unresolved.push(entry);
-    }
-    addClosedLocal(immediate);
-    // 2) 후속 갱신 — 프로젝트 재조회(count·mtime)로 미해석 dirName을 해석하고
-    //    서버 최근 목록을 다시 받는다(실패해도 1)의 동기 캡처는 유지).
-    (async () => {
-      const projects = await refreshProjects();
-      if (projects) {
-        addClosedLocal(
-          unresolved.flatMap((c) => {
-            const proj = projects.find((p) => p.cwd === c.cwd);
-            return proj ? [{ ...c, dirName: proj.dirName }] : [];
-          }),
-        );
-      }
-      refreshRecent();
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.sessions]);
-
-  // 성공 시 true — 호출측(지난 세션 행)이 busy 유지/해제를 판단한다.
-  const resumeSession = async (project, meta) => {
+  // 성공 시 true — 호출측(모달)이 busy 유지/해제와 모달 닫기를 판단한다.
+  // model/permissionMode는 모달에서 고른 값. 신뢰모드는 스폰 시에만 진입할 수
+  // 있으므로 모달 재개가 신뢰모드로 이어가는 유일한 경로다.
+  const resumeSession = async (
+    project,
+    meta,
+    { permissionMode = 'default', model = null, shouldProceed } = {},
+  ) => {
     try {
       const { messages } = await fetchTranscript(project.dirName, meta.sessionId);
+      // 트랜스크립트가 도착하기까지 시간이 걸린다 — 그 사이 이 시도가 폐기됐다면
+      // (watchdog 타임아웃 등) 여기서 멈춘다. 스폰 직전이 마지막 관문이다.
+      if (shouldProceed && !shouldProceed()) return false;
       // 트랜스크립트를 여기서 미리 reduce해 started 커밋에 원자적으로 시딩한다.
       // (별도 커밋으로 뒤늦게 주입하면 ChatView seenRef가 히스토리를 신규 메시지로
       // 오인해 등장 애니·타자기 출력을 탄다 — store-reducer 'started' 주석 참조.)
@@ -756,10 +973,12 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
         (acc, m) => reduceCliEvent(acc, m),
         createSessionState(),
       );
-      startSession({
+      const startId = startSession({
         cwd: project.cwd,
-        model: null,
-        permissionMode: 'default', // 새 세션 기본과 동일 — 컴포저에서 변경 가능
+        // 사용자가 모달에서 고른 모델(카탈로그 대조를 통과한 값)만 스폰 --model로
+        // 나간다. null이면 --model 생략 = 그 세션이 쓰던 모델 유지.
+        model,
+        permissionMode,
         resumeSessionId: meta.sessionId,
         // 표시 전용 모델 이월(스폰 --model엔 불사용 — 트랜스크립트의 해석 id는
         // 구식이거나 [1m] 접미사가 탈락했을 수 있어 스폰 인자로는 위험).
@@ -772,54 +991,44 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
         // result성 이벤트가 합산 usage로 컨텍스트를 덮는 경로를 원천 차단(방어).
         preloadCtxFromCalls: pre.ctxFromCalls,
       });
-      return true;
+      // startSession은 WS 전송이 실패하면 null을 준다 — 그때는 "시작됨"으로
+      // 취급하지 않는다(모달을 닫지 않고 잠금도 푼다). 오류는 이미 토스트로 표시된다.
+      return startId !== null;
     } catch (err) {
       notify(String(err.message ?? err), 'error');
       return false;
     }
   };
 
-  // ----- 지난 세션 행 동작 (재개·삭제 — 행 단위 busy 공유) -----
-  const rowKeyOf = (s) => `${s.dirName}\n${s.sessionId}`;
-
-  // 재개 busy는 전송 성공 후에도 유지한다 — CLI spawn(수 초) 동안 행이 남아 있어
-  // 중복 재개가 가능하기 때문. started 도착으로 행이 목록에서 사라지면(아래 effect)
-  // 해제되고, started가 끝내 안 오는 경우는 안전망 타임아웃이 푼다.
-  const resumePast = async (s) => {
-    if (resumingRow || deletingRow) return;
-    setResumingRow(rowKeyOf(s));
-    const ok = await resumeSession(
-      { dirName: s.dirName, cwd: s.cwd },
-      { sessionId: s.sessionId },
-    );
-    if (!ok) setResumingRow(null);
-  };
-
-  const confirmDelete = async () => {
-    const target = confirmDel;
-    if (!target || deletingRow) return;
-    const rowKey = rowKeyOf(target);
-    setDeletingRow(rowKey);
+  // 모달의 지난 세션 행 재개 — 잠금 획득 → 재개 → (성공 시) 모달 닫기.
+  // 잠금은 첫 await 전에 동기적으로 세우고, finally에서 반드시 회수한다.
+  // 트랜스크립트 요청이 끝내 정착하지 않는 경우는 watchdog이 회수한다.
+  const resumeFromModal = async (s, opts) => {
+    if (resumeLockRef.current) return false;
+    const attempt = ++resumeAttemptRef.current;
+    const isCurrent = () => resumeAttemptRef.current === attempt;
+    resumeLockRef.current = true;
+    setResumingKey(`${s.dirName}\n${s.sessionId}`);
+    resumeTimerRef.current = setTimeout(() => {
+      // 세대를 올려 이 시도를 폐기한 뒤에 잠금을 푼다 — 뒤늦게 도착한 응답이
+      // 세션을 만들거나 사용자의 재시도를 방해하지 못하게.
+      resumeAttemptRef.current += 1;
+      notify('재개 응답이 오지 않아 잠금을 해제했습니다. 다시 시도해 주세요.', 'error');
+      releaseResume();
+    }, RESUME_BUSY_TIMEOUT_MS);
+    let ok = false;
     try {
-      await deleteSessionFile(target.dirName, target.sessionId);
-      notify('세션을 완전히 삭제했습니다.');
-    } catch (err) {
-      if (err?.status === 404) {
-        notify('이미 삭제된 세션입니다.'); // 외부 삭제와 수렴 — 아래 낙관적 제거 공유
-      } else {
-        notify(`삭제 실패: ${String(err.message ?? err)}`, 'error');
-        setDeletingRow(null);
-        return; // 모달 유지 — 재시도/취소 선택
-      }
+      ok = await resumeSession(
+        { dirName: s.dirName, cwd: s.cwd },
+        { sessionId: s.sessionId },
+        { ...opts, shouldProceed: isCurrent },
+      );
+    } finally {
+      // 폐기된 시도는 이미 남의 것이 된 잠금·타이머를 건드리지 않는다.
+      if (isCurrent()) releaseResume();
     }
-    // 낙관적 제거(성공·404 공통): 재조회가 실패해도 삭제된 행이 부활하지 않도록
-    // fetched·closedLocal 양쪽에서 즉시 제거한 뒤에 갱신을 시도한다.
-    setClosedLocal((cur) => cur.filter((s) => rowKeyOf(s) !== rowKey));
-    setRecent((cur) => (Array.isArray(cur) ? cur.filter((s) => rowKeyOf(s) !== rowKey) : cur));
-    setDeletingRow(null);
-    setConfirmDel(null);
-    refreshProjects();
-    refreshRecent(); // 갱신 실패는 recentError 표시일 뿐 삭제 결과와 무관
+    if (ok && isCurrent()) closeModal();
+    return ok;
   };
 
   const openSessions = [...state.sessions.values()];
@@ -830,32 +1039,6 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
     activeKey: state.activeKey,
   });
   const liveOthers = tree.others.filter((n) => n.live.length > 0);
-
-  // 지난 세션 파생 목록 — 서버 최근 + 방금 닫힌 로컬 캡처, 라이브 제외.
-  // 재개 세션은 fork로 새 sessionId를 받을 수 있어 원본(resumeSourceId)도 라이브로
-  // 취급한다 — 원본 행이 목록에 남으면 서버가 삭제를 409로 거부하는 유령 행이 된다.
-  const liveIds = new Set(
-    openSessions.flatMap((s) => [s.sessionId, s.resumeSourceId]).filter(Boolean),
-  );
-  const pastSessions = mergeRecentSessions({
-    fetched: Array.isArray(recent) ? recent : [],
-    closedLocal,
-    liveIds,
-  });
-  const pastReady = Array.isArray(recent);
-
-  // 재개 busy 해제 — 대상 행이 목록에서 사라지면(started로 라이브 전환) 풀고,
-  // started가 오지 않는 실패 경로는 타임아웃 안전망으로 회수한다.
-  const resumingGone = !!resumingRow && !pastSessions.some((s) => rowKeyOf(s) === resumingRow);
-  useEffect(() => {
-    if (!resumingRow) return undefined;
-    if (resumingGone) {
-      setResumingRow(null);
-      return undefined;
-    }
-    const t = setTimeout(() => setResumingRow(null), RESUME_BUSY_TIMEOUT_MS);
-    return () => clearTimeout(t);
-  }, [resumingRow, resumingGone]);
 
   // 라이브 세션 행 — 렌더 헬퍼(요소 인스턴스화가 아니라 호출)로 두어 DOM을 안정화.
   // 매 렌더마다 새 컴포넌트 타입이 생기지 않으므로 React가 remount 없이 patch한다.
@@ -899,55 +1082,7 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
     );
   };
 
-  // 지난 세션 행 — 재개(본문)와 삭제(우측)를 형제 버튼으로(중첩 버튼 금지).
-  const pastRow = (s) => {
-    const rowKey = rowKeyOf(s);
-    const busy = resumingRow === rowKey || deletingRow === rowKey;
-    const title = s.title || '(제목 없음)';
-    // 서브라인: 디렉터리 · 마지막 접근(상대) · 대화 크기 — 크기는 서버 항목에만 있고
-    // 방금 닫힌 로컬 캡처(fileSize 없음)는 서버 갱신으로 교체될 때 채워진다.
-    const meta = [shortDir(s.cwd) || s.dirName, fmtAgo(s.mtime), fmtBytes(s.fileSize)]
-      .filter(Boolean)
-      .join(' · ');
-    // 절대 시각·정확 바이트는 재개 버튼의 단일 툴팁에 통합 — 부모 행에 따로 달면
-    // 자식 버튼 툴팁이 hover/focus를 선점해 가려지고 키보드 사용자에게 닿지 않는다.
-    const tip = [
-      s.cwd ? `재개: ${s.cwd}` : 'cwd를 알 수 없어 재개할 수 없습니다',
-      fmtTime(s.mtime),
-      s.fileSize != null ? `${s.fileSize.toLocaleString()} bytes` : null,
-    ]
-      .filter(Boolean)
-      .join(' · ');
-    return (
-      <div key={rowKey} className="sess-row past">
-        <button
-          type="button"
-          className="sess-main past-main"
-          aria-disabled={!s.cwd || busy}
-          data-tip={tip}
-          onClick={() => s.cwd && !busy && resumePast(s)}
-        >
-          <span className="sess-dot" aria-hidden="true" />
-          <span className="past-lines">
-            <span className="truncate">{title}</span>
-            <span className="past-sub dim truncate">{meta}</span>
-          </span>
-        </button>
-        <button
-          type="button"
-          className="session-del"
-          aria-label={`세션 삭제: ${title}`}
-          data-tip="완전히 삭제"
-          disabled={busy}
-          onClick={() => setConfirmDel(s)}
-        >
-          🗑
-        </button>
-      </div>
-    );
-  };
-
-  // 디렉토리 그룹 — 라이브 세션 전용(히스토리는 "지난 세션" 섹션으로 단일화).
+  // 디렉토리 그룹 — 라이브 세션 전용(히스토리는 새 세션 모달의 "지난 세션"으로 단일화).
   // 헤더는 클릭 동작이 없는 라벨이고, 배지는 열린 세션 수를 표시한다.
   const dirGroup = (node) => (
     <div key={node.key} className={`dir-group${node.active ? ' active-dir' : ''}`}>
@@ -1000,58 +1135,11 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
           </>
         )}
 
-        {/* 지난 세션 — 닫힌 세션이 3초 뒤 넘어오는 곳. 라이브가 없어도 항상 표시.
-            헤더는 접기/펼치기 토글 — 접힘은 표시만 숨기고 갱신 로직은 계속 돈다. */}
-        {(openSessions.length > 0 || !pastReady || recentError || pastSessions.length > 0) && (
-          <>
-            <button
-              type="button"
-              className="sidebar-h sidebar-h-toggle"
-              aria-expanded={!pastCollapsed}
-              aria-controls="past-sessions-list"
-              onClick={togglePastCollapsed}
-            >
-              <svg className="sect-chevron" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="m6 3.5 4.5 4.5L6 12.5" />
-              </svg>
-              지난 세션
-              {pastReady && (
-                // 배지 = 로드된(라이브 제외 병합) 개수 — 서버 페이지가 가득 찼으면
-                // 전체가 더 있을 수 있다는 뜻의 N+ 표기.
-                <span className="badge">
-                  {pastSessions.length}
-                  {recent.length >= recentLimit ? '+' : ''}
-                </span>
-              )}
-            </button>
-            <div id="past-sessions-list" hidden={pastCollapsed}>
-              {!pastReady && !recentError && <div className="dim dir-loading">불러오는 중…</div>}
-              {recentError && (
-                <div className="dim dir-loading">지난 세션을 불러오지 못했습니다.</div>
-              )}
-              {pastSessions.map((s) => pastRow(s))}
-              {pastReady && !recentError && pastSessions.length === 0 && (
-                <div className="dim dir-empty">지난 세션 없음</div>
-              )}
-              {pastReady &&
-                recentLimit === PAST_LIMIT_DEFAULT &&
-                recent.length >= PAST_LIMIT_DEFAULT && (
-                  <button
-                    type="button"
-                    className="past-more-btn dim"
-                    onClick={() => setRecentLimit(PAST_LIMIT_MAX)}
-                  >
-                    더 보기 (최근 {PAST_LIMIT_MAX}개)
-                  </button>
-                )}
-            </div>
-          </>
-        )}
-
-        {openSessions.length === 0 && pastReady && !recentError && pastSessions.length === 0 && (
+        {openSessions.length === 0 && (
           <div className="sidebar-empty">
             <Mascot scale={5} className="empty-mascot" />
             <span className="dim">새 세션을 시작하면 여기에 표시됩니다</span>
+            <span className="dim empty-hint">지난 대화는 “+ 새 세션”에서 이어갈 수 있습니다</span>
           </div>
         )}
       </div>
@@ -1067,18 +1155,17 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
           컴포저 레포 pill로 열 수 있어야 하므로 display:none 서브트리를 피한다. */}
       <NewSessionPresence
         open={modalOpen}
-        initInfo={state.initInfo}
         defaultCwd={defaultCwd}
         platform={platform}
         onClose={closeModal}
         onStart={(opts) => {
-          closeModal();
-          startSession(opts);
+          if (startSession(opts) !== null) closeModal();
         }}
-        onResume={(s) => {
-          closeModal();
-          resumeSession({ dirName: s.dirName, cwd: s.cwd }, { sessionId: s.sessionId });
-        }}
+        // 재개는 전송(startSession 등록)이 끝난 뒤에 모달을 닫는다 — 먼저 닫으면
+        // 모달이 언마운트되며 중복 재개 가드까지 사라진다(codex 지적).
+        onResume={resumeFromModal}
+        resumingKey={resumingKey}
+        onHistoryChanged={refreshProjects}
       />
 
       {/* 통계·설정 모달도 aside 밖 — 새 세션 모달과 같은 이유. */}
@@ -1088,25 +1175,19 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
         theme={theme}
         onSetTheme={onSetTheme}
       />
-
-      {/* 지난 세션 삭제 확인 — 영구 삭제라 항상 확인을 선행한다. */}
-      <ConfirmDeletePresence
-        target={confirmDel}
-        busy={!!deletingRow}
-        onConfirm={confirmDelete}
-        onClose={() => !deletingRow && setConfirmDel(null)}
-      />
     </>
   );
 }
 
 // 삭제 확인 모달 — 새 세션 모달과 같은 overlay/trap 패턴, 삭제 중에는 닫기 차단.
-function ConfirmDeleteModal({ target, presenceStatus, busy, onConfirm, onClose }) {
-  const dialogRef = useFocusTrap(true);
+// restoreRef: 닫힐 때 포커스를 돌려줄 대상. 취소면 이 모달을 연 🗑 버튼, 삭제
+// 성공이면 (그 버튼이 사라지므로) 지난 세션 목록 제목 — 호출측이 갈아 끼운다.
+function ConfirmDeleteModal({ target, presenceStatus, busy, restoreRef, onConfirm, onClose }) {
+  const dialogRef = useFocusTrap(true, undefined, restoreRef);
   const title = target.title || target.sessionId;
   return (
     <div
-      className={`modal-overlay${presenceStatus === 'closing' ? ' closing' : ''}`}
+      className={`modal-overlay confirm-overlay${presenceStatus === 'closing' ? ' closing' : ''}`}
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
@@ -1119,7 +1200,16 @@ function ConfirmDeleteModal({ target, presenceStatus, busy, onConfirm, onClose }
         <div className="modal-title">
           세션 삭제
           <span className="spacer" />
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="닫기" data-tip="닫기">
+          {/* 삭제 중에는 취소·삭제와 함께 닫기도 잠근다 — 눌러도 아무 일이
+              일어나지 않는 버튼을 보조기술에 활성으로 알리지 않기 위해. */}
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={onClose}
+            disabled={busy}
+            aria-label="닫기"
+            data-tip="닫기"
+          >
             ✕
           </button>
         </div>
@@ -1140,15 +1230,6 @@ function ConfirmDeleteModal({ target, presenceStatus, busy, onConfirm, onClose }
       </div>
     </div>
   );
-}
-
-// 닫힘 페이드아웃 동안 마지막 대상을 유지 — FootModalPresence와 같은 패턴.
-function ConfirmDeletePresence({ target, ...rest }) {
-  const { mounted, status } = usePresence(!!target, 140);
-  const lastTargetRef = useRef(target);
-  if (target) lastTargetRef.current = target;
-  if (!mounted || !lastTargetRef.current) return null;
-  return <ConfirmDeleteModal target={lastTargetRef.current} presenceStatus={status} {...rest} />;
 }
 
 // 새 세션 모달의 닫힘 애니메이션 — usePresence로 페이드아웃 동안 마운트를 유지한 뒤 제거.

@@ -6,6 +6,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Full bilingual (EN/KO) release notes live on the
 [GitHub Releases](https://github.com/seokjw0727/CC-on-browser/releases) page.
 
+## [1.6.0] - 2026-07-21
+
+> 지난 세션 모달 통합 · 신뢰모드 시작 전용화 · 새 세션 기본값 설정 · favicon.
+
+### Changed
+- **Past-session management moved into the new-session modal.** The sidebar now
+  lists only currently open sessions; the modal's "recent sessions" became a full
+  "past sessions" manager (two-line rows with directory / last access / transcript
+  size, per-row delete with confirmation, "show more" 20→50, loading/error/retry
+  states, live-session 409 handling).
+- **Resuming applies the model and permission mode selected in the modal** (leaving
+  the model empty omits `--model`, keeping the session's previous model). Duplicate
+  resume is guarded by an attempt-generation lock with a 15s watchdog.
+- **Trust mode (`bypassPermissions`) is now start-only.** Sessions spawned in any
+  other mode can no longer switch into trust mode mid-session (enforced server-side;
+  the composer hides the option and permission-dialog escalation suggestions are
+  filtered). Trust-spawned sessions may still leave and return to it.
+
+### Added
+- **Default model & default permission mode** in Settings (localStorage-persisted,
+  validated against the CLI's model catalog before spawning) — they seed the
+  new-session modal's initial selection. The model list becomes available after the
+  first session `init`.
+- **Browser tab icon** (`favicon.svg`, the brand sparkle mark).
+- E2E: isolated `projectsRoot` seeding (`FAKE_PROJECTS_ROOT`) so history list /
+  resume-with-arguments / deletion are tested against disposable fixtures — the
+  real `~/.claude/projects` is never touched. New scenarios for modal history,
+  settings defaults, resume spawn arguments, and confirmed deletion.
+- Focus-trap restore targets (`useFocusTrap` third argument) so deleting a session
+  from the nested confirm dialog lands focus on the list heading instead of `<body>`.
+
+### Fixed
+- `startSession` now reports WebSocket send failure to callers, so the new-session
+  modal no longer closes as if a session had started while disconnected.
+
 ## [1.5.0] - 2026-07-19
 
 > 공개 릴리스 준비 — 기본 권한 모드 안전화, 지난 세션 UX, E2E·릴리스 자동화. (First public-release-ready version.)

@@ -323,7 +323,7 @@ export async function startServer({
           json(res, 200, await listSessions(projectsRoot, url.searchParams.get('dir')));
           return;
         case '/api/recent-sessions': {
-          // 전 프로젝트 세션을 mtime순으로 집계 — 새 세션 모달·사이드바 "지난 세션".
+          // 전 프로젝트 세션을 mtime순으로 집계 — 새 세션 모달의 "지난 세션" 목록.
           // limit: 생략 시 12, 비정수는 400(usage-daily와 동일 계약), 1..50 clamp.
           const rawLimit = url.searchParams.get('limit');
           let limit = 12;
