@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Full bilingual (EN/KO) release notes live on the
 [GitHub Releases](https://github.com/seokjw0727/CC-on-browser/releases) page.
 
-## [1.6.0] - 2026-07-21
+## [1.6.0] - 2026-07-22
 
 > 지난 세션 모달 통합 · 신뢰모드 시작 전용화 · 새 세션 기본값 설정 · favicon.
 
@@ -19,7 +19,7 @@ Full bilingual (EN/KO) release notes live on the
 - **Resuming applies the model and permission mode selected in the modal** (leaving
   the model empty omits `--model`, keeping the session's previous model). Duplicate
   resume is guarded by an attempt-generation lock with a 15s watchdog.
-- **Trust mode (`bypassPermissions`) is now start-only.** Sessions spawned in any
+- **BREAKING — Trust mode (`bypassPermissions`) is now start-only.** Sessions spawned in any
   other mode can no longer switch into trust mode mid-session (enforced server-side;
   the composer hides the option and permission-dialog escalation suggestions are
   filtered). Trust-spawned sessions may still leave and return to it.
@@ -137,6 +137,7 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
+[1.6.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/seokjw0727/CC-on-browser/compare/v1.3.0...v1.3.1
