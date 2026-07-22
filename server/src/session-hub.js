@@ -144,12 +144,20 @@ export class SessionHub extends EventEmitter {
     const entry = this.#require(key);
     const pending = entry.pendingPermissions.get(requestId);
     if (!pending) return false;
+    // 신뢰모드는 스폰 시에만 진입 가능 — 제안 경유 우회(setMode: bypassPermissions)를
+    // 서버에서 걸러낸다. 해당 항목만 제거하고 addRules 등 나머지 제안은 보존한다.
+    const filteredPermissions =
+      Array.isArray(updatedPermissions) && entry.session.spawnPermissionMode !== 'bypassPermissions'
+        ? updatedPermissions.filter(
+          (p) => !(p && p.type === 'setMode' && p.mode === 'bypassPermissions'),
+        )
+        : updatedPermissions;
     const result = behavior === 'allow'
       ? {
         behavior: 'allow',
         updatedInput: updatedInput ?? pending.input ?? {},
-        ...(Array.isArray(updatedPermissions) && updatedPermissions.length > 0
-          ? { updatedPermissions }
+        ...(Array.isArray(filteredPermissions) && filteredPermissions.length > 0
+          ? { updatedPermissions: filteredPermissions }
           : {}),
       }
       : { behavior: 'deny', message: message || '사용자가 거부했습니다' };

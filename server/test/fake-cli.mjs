@@ -8,6 +8,8 @@
 // 관찰용 env:
 //   FAKE_ECHO_DELAY_MS     echo 응답 전 지연(기본 0 — 즉답, 테스트 계약 유지)
 //   FAKE_SUBAGENT_MS       subagent 도구 실행 시간(기본 1500ms, 0 허용)
+//   FAKE_SUGGEST_BYPASS=1  permission 시나리오의 제안에 setMode(bypassPermissions) 추가
+//                          — 신뢰모드 제안 필터(session-hub) 계약 검증용
 // 지연 중 interrupt가 오면 대기 턴을 취소하고 is_error result로 닫는다(실 CLI 미러).
 import { createJsonlParser } from '../src/jsonl.js';
 
@@ -272,6 +274,11 @@ function handle(msg) {
           input: { file_path: 'C:\\fake\\x.txt', content: 'hi' },
           description: 'Write file',
           permission_suggestions: [
+            // 실 CLI가 신뢰모드 진입을 제안하는 형상 재현 — addRules와 함께 보내
+            // "금지 항목만 걸러지고 나머지는 보존"되는 부분 필터 계약을 검증한다.
+            ...(process.env.FAKE_SUGGEST_BYPASS === '1'
+              ? [{ type: 'setMode', mode: 'bypassPermissions', destination: 'session' }]
+              : []),
             {
               type: 'addRules',
               rules: [{ toolName: 'Write' }],

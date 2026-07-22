@@ -327,6 +327,60 @@ test('(l) question: AskUserQuestion 요청은 requiresUserInteraction=true, allo
   }
 });
 
+test('(m) 신뢰모드 가드: 비신뢰 스폰 세션의 bypassPermissions 전환은 거부되고 CLI에 전송되지 않는다', async () => {
+  const session = makeSession('echo'); // permissionMode 미지정 = 비신뢰 스폰
+  const exit = trackExit(session);
+  try {
+    await session.start();
+    assert.equal(session.spawnPermissionMode, undefined);
+    const statuses = [];
+    session.on('event', (m) => {
+      if (m.type === 'system' && m.subtype === 'status') statuses.push(m.permissionMode);
+    });
+    await assert.rejects(
+      () => session.setPermissionMode('bypassPermissions'),
+      /신뢰모드는 세션 시작 시에만/,
+    );
+    // 미전송 검증 — fake-cli는 set_permission_mode마다 system/status를 방출하고
+    // stdin을 직렬 처리하므로, 이어지는 plan 전환의 status가 도착한 시점에
+    // bypass status가 관측되지 않았다면 애초에 CLI로 나가지 않은 것이다.
+    const statusP = waitForEvent(session, (m) => m.type === 'system' && m.subtype === 'status');
+    await session.setPermissionMode('plan');
+    await statusP;
+    assert.deepEqual(statuses, ['plan']);
+  } finally {
+    await shutdown(session, exit);
+  }
+});
+
+test('(n) 신뢰모드 스폰 세션: --permission-mode 전달, 타 모드 전환 후 신뢰모드 복귀 허용', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const session = new ClaudeSession({
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    cwd: process.cwd(),
+    permissionMode: 'bypassPermissions',
+  });
+  const exit = trackExit(session);
+  try {
+    const initInfo = await session.start();
+    assert.equal(session.spawnPermissionMode, 'bypassPermissions');
+    const i = initInfo.argv.indexOf('--permission-mode');
+    assert.ok(i >= 0, `--permission-mode not in argv: ${initInfo.argv.join(' ')}`);
+    assert.equal(initInfo.argv[i + 1], 'bypassPermissions');
+    await session.setPermissionMode('plan');
+    // 신뢰모드로 시작한 세션은 복귀 가능 — 스폰 계보가 기준이므로 거부되지 않는다
+    const statusP = waitForEvent(
+      session,
+      (m) => m.type === 'system' && m.subtype === 'status' && m.permissionMode === 'bypassPermissions',
+    );
+    await session.setPermissionMode('bypassPermissions');
+    await statusP;
+  } finally {
+    await shutdown(session, exit);
+  }
+});
+
 test('(g2) setMaxThinkingTokens wire format — subtype/필드명이 실측 프로토콜과 일치', async () => {
   const session = makeSession('echo');
   const exit = trackExit(session);

@@ -87,11 +87,12 @@ export default function PermissionDialog() {
       req={req}
       sessionKey={session.key}
       queueCount={queue.length}
+      trustEligible={session.spawnPermissionMode === 'bypassPermissions'}
     />
   );
 }
 
-function PermissionPrompt({ req, sessionKey, queueCount }) {
+function PermissionPrompt({ req, sessionKey, queueCount, trustEligible }) {
   const { send } = useStore();
   const [reason, setReason] = useState('');
   const [checked, setChecked] = useState(() => new Set());
@@ -100,7 +101,12 @@ function PermissionPrompt({ req, sessionKey, queueCount }) {
   const allowRef = useRef(null);
   const dialogRef = useFocusTrap(true, allowRef);
 
-  const suggestions = Array.isArray(req.suggestions) ? req.suggestions : [];
+  // 신뢰모드 진입 제안은 비적격(비신뢰 스폰) 세션에서 원천 제거 — 렌더 숨김이 아니라
+  // 배열 자체를 필터해 checked 인덱스와 allow()의 updatedPermissions가 어긋나지 않게
+  // 한다. 서버(session-hub)도 같은 필터를 두므로 이는 보조 방어.
+  const suggestions = (Array.isArray(req.suggestions) ? req.suggestions : []).filter(
+    (s) => trustEligible || !(s && s.type === 'setMode' && s.mode === 'bypassPermissions'),
+  );
 
   const respond = (payload) => {
     if (submitted) return;

@@ -16,6 +16,10 @@ export function createSessionState(partial = {}) {
     // (실측 2026-07-11: 1M 모델에서 1000000). null이면 카탈로그 휴리스틱으로 폴백.
     contextWindow: null,
     permissionMode: 'default',
+    // 스폰 계보 — 세션이 실제로 어떤 --permission-mode로 시작됐는지. 신뢰모드
+    // (bypassPermissions)는 스폰 시에만 진입 가능하므로, 런타임 permissionMode와
+    // 달리 불변이며 신뢰모드 UI 노출 자격 판정에 쓴다(spawnModel 패턴과 동일).
+    spawnPermissionMode: 'default',
     maxThinkingTokens: null, // 사고 예산 — 서버 setThinking 채널용으로 유지(현재 UI 미노출)
     effort: null, // 노력 수준(low|medium|high|xhigh|max) — null=CLI 기본(high), spawn 전용
     // --resume 게이트: 완결 턴 ≥1(result 관측) 또는 재개로 시작한 세션만 트랜스크립트가
@@ -108,6 +112,7 @@ function handleServerMessage(state, msg) {
           spawnModel: opts.model ?? null, // 실제 스폰 인자만 계보에 남긴다
 
           permissionMode: opts.permissionMode ?? 'default',
+          spawnPermissionMode: opts.permissionMode ?? 'default',
           effort: opts.effort ?? null,
           // 재개로 시작한 세션은 원본 트랜스크립트가 디스크에 있음 — resume 게이트 통과
           hasCompletedTurn: opts.resumeSessionId != null,

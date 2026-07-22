@@ -288,6 +288,133 @@ test('(d2) allow with updatedPermissions is forwarded to CLI', async () => {
   client.close();
 });
 
+test('(d3) 신뢰모드 가드: 비신뢰 세션의 WS setPermissionMode(bypass)는 error, CLI 미전송', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
+  client.send({ type: 'start', startId: 'cl_guard', cwd: tmpRoot, permissionMode: 'default' });
+  const started = await client.next((m) => m.type === 'started' && m.startId === 'cl_guard');
+  const key = started.key;
+
+  client.send({ type: 'setPermissionMode', key, mode: 'bypassPermissions' });
+  const err = await client.next((m) => m.type === 'error' && m.key === key);
+  assert.match(err.message, /신뢰모드는 세션 시작 시에만/);
+
+  // 미전송 검증: 이어지는 plan 전환의 status가 도착한 시점까지 bypass status가
+  // 없어야 한다 (fake-cli는 set_permission_mode마다 system/status를 방출).
+  client.send({ type: 'setPermissionMode', key, mode: 'plan' });
+  await client.next(
+    (m) => m.type === 'event' && m.key === key
+      && m.payload.type === 'system' && m.payload.subtype === 'status'
+      && m.payload.permissionMode === 'plan',
+  );
+  const bypassStatus = client.messages.find(
+    (m) => m.type === 'event' && m.key === key
+      && m.payload.type === 'system' && m.payload.subtype === 'status'
+      && m.payload.permissionMode === 'bypassPermissions',
+  );
+  assert.equal(bypassStatus, undefined, 'bypass 전환이 CLI에 전달되면 안 된다');
+  client.send({ type: 'stop', key });
+  client.close();
+});
+
+test('(d4) 제안 필터 계약: 비신뢰 세션은 setMode(bypass)만 제거되고 addRules는 보존', async () => {
+  process.env.FAKE_SCENARIO = 'permission';
+  process.env.FAKE_SUGGEST_BYPASS = '1';
+  try {
+    const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
+    client.send({ type: 'start', startId: 'cl_filt', cwd: tmpRoot, permissionMode: 'default' });
+    const started = await client.next((m) => m.type === 'started' && m.startId === 'cl_filt');
+    const key = started.key;
+
+    client.send({ type: 'send', key, text: 'do write' });
+    const permReq = await client.next((m) => m.type === 'permission_request' && m.key === key);
+    // fake-cli가 setMode(bypass) + addRules 두 제안을 함께 보낸다 — 부분 필터 전제
+    assert.equal(permReq.suggestions.length, 2);
+    assert.equal(permReq.suggestions[0].type, 'setMode');
+    assert.equal(permReq.suggestions[1].type, 'addRules');
+
+    client.send({
+      type: 'permission', key, requestId: permReq.requestId,
+      behavior: 'allow', updatedInput: permReq.input,
+      updatedPermissions: permReq.suggestions, // 둘 다 수락 시도 (위조 클라이언트 상황 포함)
+    });
+    const allowResult = await client.next(
+      (m) => m.type === 'event' && m.key === key && m.payload.type === 'result',
+    );
+    // 금지 항목만 제거되고 나머지는 그대로 CLI에 도달해야 한다 — 전체 삭제 구현은 실패
+    assert.deepEqual(allowResult.payload.echo_response.updatedPermissions, [permReq.suggestions[1]]);
+
+    // setMode(bypass)만 수락한 경우: 필터 후 빈 배열 → updatedPermissions 필드 자체가 생략
+    client.send({ type: 'send', key, text: 'do write again' });
+    const permReq2 = await client.next(
+      (m) => m.type === 'permission_request' && m.key === key && m.requestId !== permReq.requestId,
+    );
+    client.send({
+      type: 'permission', key, requestId: permReq2.requestId,
+      behavior: 'allow', updatedInput: permReq2.input,
+      updatedPermissions: [permReq2.suggestions[0]],
+    });
+    const allowResult2 = await client.next(
+      (m) => m.type === 'event' && m.key === key && m.payload.type === 'result'
+        && m.payload.echo_response,
+    );
+    assert.equal(allowResult2.payload.echo_response.updatedPermissions, undefined);
+    client.send({ type: 'stop', key });
+    client.close();
+  } finally {
+    delete process.env.FAKE_SUGGEST_BYPASS;
+  }
+});
+
+test('(d5) 신뢰모드 스폰 세션: setMode(bypass) 제안 보존 + 런타임 신뢰 복귀 허용', async () => {
+  process.env.FAKE_SCENARIO = 'permission';
+  process.env.FAKE_SUGGEST_BYPASS = '1';
+  try {
+    const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
+    client.send({
+      type: 'start', startId: 'cl_trust', cwd: tmpRoot, permissionMode: 'bypassPermissions',
+    });
+    const started = await client.next((m) => m.type === 'started' && m.startId === 'cl_trust');
+    const key = started.key;
+    // 스폰 인자 확인 — 픽스처 진단 argv
+    const argv = started.initInfo.argv;
+    assert.equal(argv[argv.indexOf('--permission-mode') + 1], 'bypassPermissions');
+
+    client.send({ type: 'send', key, text: 'do write' });
+    const permReq = await client.next((m) => m.type === 'permission_request' && m.key === key);
+    // 선행 단언 — 제안에 setMode(bypass)+addRules가 실제로 실려 있어야
+    // 아래 "보존" 검증이 공허해지지 않는다 (codex 지적).
+    assert.deepEqual(
+      permReq.suggestions.map((s) => s.type),
+      ['setMode', 'addRules'],
+    );
+    assert.equal(permReq.suggestions[0].mode, 'bypassPermissions');
+    client.send({
+      type: 'permission', key, requestId: permReq.requestId,
+      behavior: 'allow', updatedInput: permReq.input,
+      updatedPermissions: permReq.suggestions,
+    });
+    const allowResult = await client.next(
+      (m) => m.type === 'event' && m.key === key && m.payload.type === 'result',
+    );
+    // 신뢰 스폰 세션은 필터하지 않는다 — 두 제안 모두 CLI에 도달
+    assert.deepEqual(allowResult.payload.echo_response.updatedPermissions, permReq.suggestions);
+
+    // 타 모드 전환 후 신뢰 복귀도 허용된다
+    client.send({ type: 'setPermissionMode', key, mode: 'plan' });
+    client.send({ type: 'setPermissionMode', key, mode: 'bypassPermissions' });
+    await client.next(
+      (m) => m.type === 'event' && m.key === key
+        && m.payload.type === 'system' && m.payload.subtype === 'status'
+        && m.payload.permissionMode === 'bypassPermissions',
+    );
+    client.send({ type: 'stop', key });
+    client.close();
+  } finally {
+    delete process.env.FAKE_SUGGEST_BYPASS;
+  }
+});
+
 test('start: effort 검증 — 무효값은 spawn 전에 거부, 유효값은 정상 시작', async () => {
   process.env.FAKE_SCENARIO = 'echo';
   const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);

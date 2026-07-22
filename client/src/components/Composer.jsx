@@ -516,6 +516,12 @@ export default function Composer() {
   };
   const changeMode = (mode) => {
     if (!session || !mode) return;
+    // 신뢰모드는 스폰 시에만 진입 가능(서버가 권위 경계) — UI에서도 미리 막고 안내.
+    // 신뢰모드로 스폰된 세션의 복귀만 허용한다.
+    if (mode === 'bypassPermissions' && session.spawnPermissionMode !== 'bypassPermissions') {
+      notify('신뢰모드는 세션 시작 시에만 설정할 수 있습니다', 'error');
+      return;
+    }
     if (!send({ type: 'setPermissionMode', key: session.key, mode })) return;
     dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, permissionMode: mode }) });
     notify(`권한 모드 변경: ${MODE_LABEL[mode] ?? mode}`);
@@ -760,7 +766,14 @@ export default function Composer() {
                 data-tip="권한 모드 (setPermissionMode)"
                 onChange={(e) => changeMode(e.target.value)}
               >
-                {MODES.map((m) => (
+                {MODES.filter(
+                  (m) =>
+                    m !== 'bypassPermissions' ||
+                    session.spawnPermissionMode === 'bypassPermissions' ||
+                    // 표시 정합성 폴백 — CLI가 현재 모드를 신뢰로 보고 중이면
+                    // 옵션을 남겨 select가 빈 값으로 렌더되지 않게 한다(진입은 changeMode가 차단).
+                    session.permissionMode === 'bypassPermissions',
+                ).map((m) => (
                   <option key={m} value={m}>
                     {MODE_LABEL[m]}
                   </option>

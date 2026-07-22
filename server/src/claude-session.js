@@ -122,7 +122,17 @@ export class ClaudeSession extends EventEmitter {
     await this.#sendControlRequest({ subtype: 'set_model', model });
   }
 
+  /** 스폰 시 --permission-mode로 전달된 모드 (미지정이면 undefined = CLI 기본 default) */
+  get spawnPermissionMode() {
+    return this.#permissionMode;
+  }
+
   async setPermissionMode(mode) {
+    // 신뢰모드는 스폰 시에만 진입 가능 — 런타임 전환 요청은 CLI에 보내지 않고 거부한다.
+    // 신뢰모드로 스폰된 세션만 타 모드로 갔다가 복귀할 수 있다.
+    if (mode === 'bypassPermissions' && this.#permissionMode !== 'bypassPermissions') {
+      throw new Error('신뢰모드는 세션 시작 시에만 설정할 수 있습니다');
+    }
     await this.#sendControlRequest({ subtype: 'set_permission_mode', mode });
   }
 
