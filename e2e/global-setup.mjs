@@ -1,4 +1,4 @@
-// E2E 전역 셋업 — fake CLI 스택 서버 2대(echo·permission)를 스폰한다.
+// E2E 전역 셋업 — fake CLI 스택 서버 3대(echo·permission·bulk)를 스폰한다.
 // fake CLI의 시나리오는 서버 기동 시 고정되므로 시나리오별 서버가 필요하다.
 // 수명주기 계약(설계도 §2): --port 0(OS 할당)으로 충돌 회피, stdout은 청크 누적
 // 파싱으로 URL 획득, 준비 타임아웃·조기 종료 감지, 실패 시 이미 뜬 자식 정리.
@@ -56,7 +56,14 @@ function startFakeServer(scenario) {
         // FAKE_PLATFORM=linux: Windows에서도 cwd 직접 입력 UI를 띄워 네이티브
         // 폴더 대화상자 없이 자동화한다(dev-fake → startServer platform 주입).
         // FAKE_PROJECTS_ROOT: 히스토리 루트를 테스트 소유 임시 디렉터리로 격리.
-        env: { ...process.env, FAKE_PLATFORM: 'linux', FAKE_PROJECTS_ROOT: PROJECTS_ROOT },
+        env: {
+          ...process.env,
+          FAKE_PLATFORM: 'linux',
+          FAKE_PROJECTS_ROOT: PROJECTS_ROOT,
+          // bulk 시나리오의 한 턴 분량 — 채팅 윈도잉(기본 창 200)의 경계를 넘겨야
+          // "창 상한 · 더 보기 · 모두 불러오기"를 관측할 수 있다.
+          FAKE_BULK_COUNT: '500',
+        },
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       },
@@ -123,7 +130,7 @@ export default async function globalSetup() {
   seedProjects();
   const started = [];
   try {
-    for (const scenario of ['echo', 'permission']) {
+    for (const scenario of ['echo', 'permission', 'bulk']) {
       started.push(await startFakeServer(scenario));
     }
     // 상태 기록 실패도 같은 정리 범위 — 서버만 남고 파일이 없는 상태를 만들지 않는다.

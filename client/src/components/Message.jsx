@@ -1,7 +1,7 @@
 // message 아이템 하나를 kind별로 렌더.
 // assistant-text는 delta 덩어리를 그대로 그리지 않고 rAF 페이서(lib/stream-pace)로
 // 매 프레임 조금씩 드러내 타자기처럼 부드럽게 출력한다(reduced-motion이면 즉시 전체).
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { render } from '../lib/markdown.js';
 import { fmtTok } from '../lib/format.js';
 import { nextShown } from '../lib/stream-pace.js';
@@ -16,7 +16,9 @@ function rawSummary(payload) {
 
 // 디버그 모드 — 프로토콜 내부(raw) 이벤트를 노출할지. 기본 꺼짐. 개발 시
 // localStorage.setItem('ccob-debug','1') 또는 window.__CCOB_DEBUG=true로 켠다.
-function debugEnabled() {
+// ChatView가 이 값을 store의 debugRaw와 합쳐 `debug` prop으로 내려 준다 — Message가
+// memo라서 여기서 직접 읽으면 토글해도 기존 메시지가 다시 렌더되지 않는다.
+export function debugEnabled() {
   try {
     if (typeof window === 'undefined') return false;
     if (window.__CCOB_DEBUG === true) return true;
@@ -155,7 +157,7 @@ function CompactionSummary({ item }) {
   );
 }
 
-export default function Message({ item, isNew }) {
+function Message({ item, isNew, debug = false }) {
   const enter = isNew ? ' msg-enter' : '';
   switch (item.kind) {
     case 'user-text':
@@ -234,7 +236,7 @@ export default function Message({ item, isNew }) {
     case 'raw':
       // 프로토콜 내부 이벤트(미지 타입·시스템 서브타입·고아 tool_result 등)는 사용자가
       // 볼 필요가 없어 기본 숨김이다 — 디버그 모드에서만 접이식으로 노출한다.
-      if (!debugEnabled()) return null;
+      if (!debug) return null;
       return (
         <details className={`msg-raw${enter}`}>
           <summary className="dim">{rawSummary(item.payload)}</summary>
@@ -246,3 +248,14 @@ export default function Message({ item, isNew }) {
       return null;
   }
 }
+
+// 스트리밍 델타마다 스토어 상태가 바뀌어 ChatView가 리렌더되는데, 리듀서는 새 messages
+// 배열을 만들면서도 **건드리지 않은 아이템의 객체 참조는 그대로 넘긴다**(reduce-cli-event의
+// updateByUid는 대상 uid만 교체하고 나머지는 원본 객체를 그대로 둔다). 그래서 memo가
+// 정확히 "바뀐 메시지 하나"만 다시 그린다.
+// 실측 2026-07-27(메시지 1920개, 응답 1개 스트리밍 200델타):
+//   - memo만 적용(윈도잉 없음): 총 블로킹 1961ms → 0ms
+//   - 윈도잉 위에 얹었을 때의 추가 이득: JS 799→417ms, 레이아웃 525→98ms, 스타일 189→45ms
+// 주의 — memo가 걸린 뒤로는 렌더 중에 읽는 **외부 가변 상태가 있으면 안 된다**:
+// 그래서 raw 표시 여부(debugRaw/window.__CCOB_DEBUG)를 debug prop으로 받는다.
+export default memo(Message);

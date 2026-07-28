@@ -10,6 +10,7 @@ import { reduceCliEvent } from '../lib/reduce-cli-event.js';
 import { openSubagents } from '../lib/subagents.js';
 import { fmtTok, fmtReset, shortPath, contextWindowFor } from '../lib/format.js';
 import { MODES, MODE_LABEL, MODE_CLASS } from '../lib/permission-modes.js';
+import { familyOf, buildModelOptions } from '../lib/model-catalog.js';
 import { EFFORT_LEVELS, DEFAULT_EFFORT, effortLabel, isUiEffort } from '../lib/effort.js';
 import ActiveModes from './ActiveModes.jsx';
 import SubagentPanel from './SubagentPanel.jsx';
@@ -102,41 +103,8 @@ function menuArrowNav(e) {
   next?.focus();
 }
 
-// claude.ai 모델 피커를 본딴 카탈로그 — 표시 이름·설명은 claude.ai 서비스 문구 기준,
-// 전송 value·버전은 CLI initialize의 실측 목록(value/resolvedModel)에서 취한다.
-const MODEL_FAMILIES = [
-  { family: 'haiku', name: 'Haiku', fallbackValue: 'haiku', fallbackVersion: '4.5', desc: '빠른 응답이 필요한 가벼운 작업에 최적' },
-  { family: 'sonnet', name: 'Sonnet', fallbackValue: 'sonnet', fallbackVersion: '5', desc: '일상 업무를 위한 똑똑하고 효율적인 모델' },
-  { family: 'opus', name: 'Opus', fallbackValue: 'opus', fallbackVersion: '4.8', desc: '복잡한 과제를 위한 강력한 대형 모델' },
-  { family: 'fable', name: 'Fable', fallbackValue: 'claude-fable-5', fallbackVersion: '5', desc: '가장 어렵고 긴 작업을 위한 최고 성능 모델' },
-];
-
-function parseVersion(resolvedModel) {
-  const m = /claude-[a-z]+-(\d+)(?:-(\d+))?/.exec(String(resolvedModel ?? ''));
-  if (!m) return null;
-  return m[2] ? `${m[1]}.${m[2]}` : m[1];
-}
-
-function familyOf(model) {
-  const s = String(model ?? '').toLowerCase();
-  return MODEL_FAMILIES.find((f) => s.includes(f.family)) ?? null;
-}
-
-function buildModelOptions(models) {
-  return MODEL_FAMILIES.map((f) => {
-    const entry = models.find(
-      (m) =>
-        m.value !== 'default' &&
-        `${m.resolvedModel ?? ''} ${m.value ?? ''} ${m.displayName ?? ''}`.toLowerCase().includes(f.family),
-    );
-    return {
-      ...f,
-      value: entry?.value ?? f.fallbackValue,
-      version: parseVersion(entry?.resolvedModel) ?? f.fallbackVersion,
-      cliEntry: entry ?? null,
-    };
-  });
-}
+// 모델 카탈로그(MODEL_FAMILIES·parseVersion·familyOf·buildModelOptions)는
+// ../lib/model-catalog.js로 분리 — node --test에서 직접 import해 회귀 테스트한다.
 
 // ----- 모델 피커 (claude.ai식 메뉴: 이름 + 버전 + 설명 + 체크) -----
 function ModelPicker({ session, options, disabled, onSelect }) {

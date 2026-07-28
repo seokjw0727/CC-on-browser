@@ -198,6 +198,153 @@ test('지난 세션 재개 — 모달에서 고른 모델·권한 모드가 실�
   await expect(modelPill).toContainText('Sonnet');
 });
 
+// ----- 채팅 목록 윈도잉(client/src/lib/chat-window.js) 계약 -----
+// bulk 시나리오가 한 프롬프트에 assistant 메시지 500개를 뱉는다 — CLI→서버→WS→리듀서
+// 경로를 그대로 통과시켜야 실제 회귀를 잡는다(페이지 상태 직접 주입은 그 경로를 건너뛴다).
+// 기본 창 200개이므로 500개는 창 경계를 넘긴다.
+// 창에 들어온 아이템 수 — 창 200개는 assistant 메시지뿐 아니라 사용자 발화·
+// 턴 사용량 아이템도 함께 센다(리듀서가 만드는 message 아이템 단위가 창의 단위다).
+const winItems = (page) => page.locator('.msg-list > *:not(.load-earlier)');
+const bulkMsgs = (page) => page.locator('.msg-list .msg-assistant');
+
+// prompt에 'raw'가 들어가면 fake CLI가 미지 이벤트를 하나 더 흘린다(디버그 토글 관측용).
+// 그 아이템은 디버그가 꺼져 있으면 렌더되지 않으므로 보이는 개수가 하나 줄어든다.
+async function startBulkSession(page, { prompt = 'bulk', visible = 200 } = {}) {
+  await startSession(page, servers.bulk.url);
+  const input = page.getByLabel('메시지 입력');
+  await input.fill(prompt);
+  await input.press('Enter');
+  // 창 상한이 곧 관측 지점 — 500개를 보내도 창 200개에서 멈춰야 한다.
+  await expect(winItems(page)).toHaveCount(visible);
+}
+
+test('윈도잉 — 500개를 받아도 기본 창 200개만 DOM에 남고 "더 보기"가 나타난다', async ({ page }) => {
+  await startBulkSession(page);
+  // 창의 첫 메시지는 300번(=500-200)이어야 한다 — 꼬리 200개.
+  await expect(bulkMsgs(page).first()).toHaveText('bulk-301');
+  await expect(bulkMsgs(page).last()).toHaveText('bulk-499');
+  // 창 밖 302개 = 전체 502 - 창 200.
+  await expect(page.locator('.load-earlier-btn').first()).toContainText('302');
+  // 하단 자동 고정은 유지된다(대량 유입이 "사용자 스크롤"로 오인되지 않아야 한다).
+  expect(
+    await page.evaluate(() => {
+      const el = document.querySelector('.chat-scroll');
+      return el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    }),
+  ).toBe(true);
+});
+
+test('윈도잉 — "더 보기"는 한 단계만 열고 읽던 위치를 유지한다', async ({ page }) => {
+  await startBulkSession(page);
+  // 버튼이 보이는 위치까지 올린다(사용자가 버튼을 보고 누르는 상황).
+  await page.evaluate(() => { document.querySelector('.chat-scroll').scrollTop = 0; });
+  // 타자기 출력이 끝나야 높이가 확정된다 — 진행 중에 재면 위치가 계속 움직인다.
+  await expect(page.locator('.msg-list .msg-assistant').first()).toHaveText('bulk-301');
+  await expect(page.getByText('bulk-305', { exact: true })).toHaveText('bulk-305');
+  const anchorTop = () =>
+    page.evaluate(() => {
+      const el = [...document.querySelectorAll('.msg-list .msg-assistant')]
+        .find((e) => e.innerText.trim() === 'bulk-305');
+      return el ? Math.round(el.getBoundingClientRect().top) : null;
+    });
+  const before = await anchorTop();
+  await page.locator('.load-earlier-btn').first().click();
+  // 전체가 아니라 한 단계(200개)만 더 — 창 400개.
+  await expect(winItems(page)).toHaveCount(400);
+  await expect(bulkMsgs(page).first()).toHaveText('bulk-101');
+  // 위에 200개가 붙어도 읽던 메시지는 화면에서 움직이지 않는다.
+  expect(Math.abs((await anchorTop()) - before)).toBeLessThanOrEqual(4);
+  // 새로 드러난 과거 메시지는 등장 애니메이션을 타지 않는다.
+  expect(
+    await page.evaluate(() =>
+      [...document.querySelectorAll('.msg-list .msg-enter')].filter((e) =>
+        /^bulk-1\d\d$/.test(e.innerText.trim()),
+      ).length,
+    ),
+  ).toBe(0);
+});
+
+test('윈도잉 — "모두 불러오기"는 하단으로 돌아와도 유지되고, "↓ 최신으로"가 창을 되돌린다', async ({ page }) => {
+  await startBulkSession(page);
+  await page.evaluate(() => { document.querySelector('.chat-scroll').scrollTop = 0; });
+  await page.locator('.load-earlier-btn.subtle').click();
+  // 전부 = 사용자 발화 1 + assistant 500 + 턴 사용량 1
+  await expect(winItems(page)).toHaveCount(502);
+  // 버튼이 사라진 자리에 안내가 남고 포커스가 그리로 옮겨간다(키보드 접근성).
+  const done = page.locator('.load-earlier.done');
+  await expect(done).toBeVisible();
+  await expect(done).toBeFocused();
+
+  // 하단으로 내려가도 펼친 상태가 풀리면 안 된다 — 풀리면 Ctrl+F 복원 계약이 깨진다.
+  await page.evaluate(() => {
+    const el = document.querySelector('.chat-scroll');
+    el.scrollTop = el.scrollHeight;
+  });
+  await expect(winItems(page)).toHaveCount(502);
+
+  // 되돌리는 유일한 경로: "↓ 최신으로"(그리고 세션 전환).
+  await page.evaluate(() => { document.querySelector('.chat-scroll').scrollTop = 0; });
+  await page.locator('.jump-latest').click();
+  await expect(winItems(page)).toHaveCount(200);
+});
+
+test('윈도잉 — raw 디버그 토글이 memo에 삼켜지지 않는다', async ({ page }) => {
+  // Message가 memo라 store의 debugRaw 변화가 prop으로 내려가지 않으면 기존 메시지가
+  // 다시 그려지지 않는다. 토글 → 즉시 반영이 계약이다.
+  // 'raw' 프롬프트로 미지 구조화 이벤트를 유도한다 → kind:'raw' 아이템(기본 숨김).
+  await startBulkSession(page, { prompt: 'raw', visible: 199 });
+  await expect(page.locator('.msg-raw')).toHaveCount(0);
+
+  await page.getByRole('button', { name: '설정' }).click();
+  const settings = page.getByRole('dialog', { name: '설정' });
+  await settings.getByRole('switch', { name: '디버그 메시지 표시' }).click();
+  await settings.getByRole('button', { name: '닫기' }).click();
+  // 토글 직후, 새 메시지 없이 기존 raw 이벤트가 드러나야 한다.
+  await expect(page.locator('.msg-raw').first()).toBeVisible();
+});
+
+test('세션 전환 — 되돌아온 세션의 기존 메시지는 등장 애니를 다시 타지 않는다', async ({ page }) => {
+  // 등장 워터마크는 ref라 "렌더 중 리셋"이 통하지 않는다. 렌더 중 setState는 그 렌더를
+  // 폐기하고 다시 렌더하는데, 실제로 커밋되는 그 두 번째 렌더에서는 전환 감지 플래그가
+  // 이미 false다. 워터마크가 이전 세션 값으로 남으면 돌아온 세션의 기존 대화가 통째로
+  // "새 메시지"로 판정돼 애니가 재생된다 — 창 안 메시지 수만큼.
+  await startBulkSession(page); // 세션 A: 502개(창 200)
+  await expect(page.locator('.msg-list .msg-enter')).toHaveCount(0);
+
+  // 세션 B를 같은 페이지에서 새로 연다 — 메시지 0개라 워터마크가 A보다 훨씬 작아진다.
+  await page.getByRole('button', { name: '새 세션', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '새 세션' });
+  await dialog.getByLabel('작업 디렉터리 경로').fill(process.cwd());
+  await dialog.getByRole('button', { name: '세션 시작' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByLabel('메시지 입력')).toBeEnabled();
+  await expect(page.locator('.sess-row.live')).toHaveCount(2);
+
+  // msg-enter는 다음 렌더에서 떨어지는 일시적 클래스다 — 재시도형 단언으로 나중에 세면
+  // 이미 0이라 회귀를 놓친다. 전환 직전에 관측기를 심어 "한 번이라도 붙었는지"를 본다.
+  await page.evaluate(() => {
+    window.__maxEnter = 0;
+    const tick = () => {
+      const n = document.querySelectorAll('.msg-list .msg-enter').length;
+      if (n > window.__maxEnter) window.__maxEnter = n;
+    };
+    window.__enterObs = new MutationObserver(tick);
+    window.__enterObs.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+    tick();
+  });
+
+  // A로 되돌아간다(비활성 라이브 행 = A).
+  await page.locator('.sess-row.live:not(.active) .sess-main').click();
+  await expect(bulkMsgs(page).last()).toHaveText('bulk-499');
+  await expect(winItems(page)).toHaveCount(200);
+  expect(await page.evaluate(() => window.__maxEnter)).toBe(0);
+});
+
 // 파괴적 — 시딩된 히스토리를 실제로 지우므로 이 파일의 마지막에 둔다.
 // 자기 시드를 먼저 되살려 재시도(CI retries)에도 결정적으로 동작한다.
 test('지난 세션 삭제 — 확인 후 목록에서 사라진다', async ({ page }) => {

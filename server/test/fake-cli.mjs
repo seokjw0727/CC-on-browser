@@ -5,9 +5,11 @@
 //   | start-fail(스폰 직후 stderr 출력 후 즉시 종료 — --resume 실패류 재현)
 //   | subagent(Task tool_use → 지연 → tool_result → result — 마스코트 juggle 관찰용)
 //   | question(AskUserQuestion — can_use_tool에 requires_user_interaction:true, 실 CLI 2026-07-12 실측 미러)
+//   | bulk(프롬프트 1회당 assistant 텍스트 N개 — 채팅 윈도잉 계약 e2e용)
 // 관찰용 env:
 //   FAKE_ECHO_DELAY_MS     echo 응답 전 지연(기본 0 — 즉답, 테스트 계약 유지)
 //   FAKE_SUBAGENT_MS       subagent 도구 실행 시간(기본 1500ms, 0 허용)
+//   FAKE_BULK_COUNT        bulk 시나리오가 한 턴에 뱉는 메시지 수(기본 500)
 //   FAKE_SUGGEST_BYPASS=1  permission 시나리오의 제안에 setMode(bypassPermissions) 추가
 //                          — 신뢰모드 제안 필터(session-hub) 계약 검증용
 // 지연 중 interrupt가 오면 대기 턴을 취소하고 is_error result로 닫는다(실 CLI 미러).
@@ -370,6 +372,35 @@ function handle(msg) {
         });
         emitResult('subagent turn done', {}, turn);
       }, subagentMs);
+      return;
+    }
+    if (scenario === 'bulk') {
+      // 대량 메시지 시나리오 — 채팅 목록 윈도잉(client/src/lib/chat-window.js)의
+      // 계약을 e2e로 검증하려면 한 번의 전송으로 수백 개의 정상 이벤트가 CLI→서버→
+      // WS→리듀서 경로를 그대로 통과해야 한다. 사용자 프롬프트마다 FAKE_BULK_COUNT개의
+      // assistant 텍스트 메시지를 순서대로 뱉는다(각 메시지에 순번을 실어 창 경계를 단언).
+      const n = Number(process.env.FAKE_BULK_COUNT) || 500;
+      for (let i = 0; i < n; i++) {
+        out({
+          type: 'assistant',
+          message: {
+            id: `msg_bulk_${turn}_${i}`,
+            role: 'assistant',
+            model: assistantModel,
+            content: [{ type: 'text', text: `bulk-${i}` }],
+          },
+          session_id: SESSION_ID,
+        });
+      }
+      // 프롬프트에 'raw'가 들어오면 미지의 구조화 이벤트를 하나 더 흘린다 — 리듀서가
+      // kind:'raw'로 담고 뷰는 디버그 토글로만 노출하므로, 그 토글이 Message의 memo에
+      // 삼켜지지 않는지 e2e가 관측할 지점이 된다(echo 시나리오는 raw를 만들지 않아
+      // 검증할 수가 없었다). 프롬프트로 가른 이유는 기본 bulk 턴의 아이템 수를
+      // 창 계약 단언과 어긋나지 않게 유지하려는 것이다.
+      if (extractText(msg).includes('raw')) {
+        out({ type: 'ccob_fake_unknown', note: 'debug probe', session_id: SESSION_ID });
+      }
+      emitResult(`bulk ${n} done`, {}, turn);
       return;
     }
     // echo 시나리오: text_delta ×3 → assistant → result

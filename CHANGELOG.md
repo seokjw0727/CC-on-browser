@@ -6,6 +6,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Full bilingual (EN/KO) release notes live on the
 [GitHub Releases](https://github.com/seokjw0727/CC-on-browser/releases) page.
 
+## [Unreleased]
+
+## [1.7.0] - 2026-07-28
+
+> 긴 대화 성능·메모리 개선 — 메시지 창(윈도잉) · 렌더 메모이제이션 · 대량 유입 시 하단 고정 수정.
+> (Long-conversation performance & memory: message windowing, render memoization,
+> bottom-following fix.)
+
+### Changed
+- **BEHAVIOR — by default the chat keeps only the most recent 200 messages in the page.**
+  Older messages are one click away ("이전 메시지 N개 더 보기" / "모두 불러오기"),
+  and expanding preserves your reading position. The trade-off: messages outside
+  the window are absent from the page, so **Ctrl+F, select-all/copy, printing and
+  screen-reader browsing do not reach them** until you load them. An expansion
+  sticks until you press "↓ 최신으로" or switch sessions. Scrolling up freezes the
+  top of the window so incoming messages cannot shift what you are reading.
+- **Model picker fallback updated for Claude Opus 5** (`claude-opus-5`, released
+  2026-07). The Opus family's fallback display version is now `5` (was `4.8`);
+  the catalog helpers (`MODEL_FAMILIES` / `parseVersion` / `familyOf` /
+  `buildModelOptions`) moved from `Composer.jsx` into
+  `client/src/lib/model-catalog.js` so they can be regression-tested with
+  `node --test`. This only affects the fallback label shown when the CLI
+  catalog has no matching Opus entry or its `resolvedModel` cannot be parsed;
+  when the catalog does match, both the version shown and the value sent to the
+  CLI still come from it. The picker's family list itself is hard-coded and
+  unchanged — all four families are always offered.
+
+### Added
+- Regression cover for the window contract: `client/test/chat-window.test.js`
+  (`node --test`) pins the window arithmetic across the default / reading-up /
+  expanded states, and a new `bulk` fake-CLI scenario (hundreds of messages in one
+  turn) backs five browser tests — the default 200-item window, "load earlier"
+  anchoring, "load all" + focus handoff, the raw-debug toggle surviving
+  memoization, and switching away to another session and back without replaying
+  the entrance animation over the whole history.
+
+### Fixed
+- **Long conversations no longer freeze the UI or balloon browser memory.** Two
+  causes, both measured (Chromium + CDP, 1920 messages, one streamed reply of 200
+  deltas): every streaming delta re-rendered the *entire* message tree, and the
+  whole conversation stayed in the DOM (a heap snapshot attributed **72% of the
+  heap to DOM nodes**, 27.8 MB of 38.7 MB). `Message` is now memoized and the chat
+  list renders a window of the most recent messages. Main-thread blocking during a
+  streamed reply dropped from **3851 ms to 0 ms**, and the heap snapshot from
+  **38.7 MB to 17.6 MB** (DOM 27.8 MB → 3.5 MB) for a session with 20 KB tool
+  outputs.
+- **Bulk event arrival no longer breaks bottom-following.** Replaying hundreds of
+  events at once (reconnect, resume) left the view stranded far above the latest
+  message: while the list was still growing, a scroll event reporting a stale
+  `scrollTop` was read as "the user scrolled up", which cancelled auto-follow (and,
+  with windowing, froze the window in place). The scroll handler now treats an
+  event as a user scroll only when `scrollTop` actually moved away from where we
+  last pinned it. Measured with 400 turns pushed in one go: **53,634 px above the
+  bottom (window stuck at 1200 items) → 0 px (200 items)**.
+- `updateByUid` in the event reducer walks backwards and copies with `slice`
+  instead of `map` — per-delta cost at 8000 messages went from 75 µs to ~5 µs.
+  (The array copy remains, so garbage volume is largely unchanged: 13.5 → 12.6 MB
+  per streamed block at 4000 messages.)
+
 ## [1.6.0] - 2026-07-22
 
 > 지난 세션 모달 통합 · 신뢰모드 시작 전용화 · 새 세션 기본값 설정 · favicon.
@@ -137,6 +196,8 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.3.1...v1.4.0

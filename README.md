@@ -29,7 +29,7 @@ cc-on-browser
 따로 끌 필요가 없습니다.
 
 ```
-Claude Code on Browser v1.5.0 — http://127.0.0.1:8787/#token=<랜덤토큰>
+Claude Code on Browser v1.7.0 — http://127.0.0.1:8787/#token=<랜덤토큰>
 Opening your browser... The server runs in the background (127.0.0.1 only)
 and stops automatically once every tab is closed. (--no-open for a foreground server)
 claude CLI: 2.1.215 (Claude Code)

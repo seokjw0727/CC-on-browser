@@ -33,6 +33,46 @@
   gap: 18px;
 }
 
+/* ----- 윈도잉: 이전 메시지 불러오기 ----- */
+/* 평상시엔 최근 N개만 DOM에 둔다(lib/chat-window.js). 그 위로 잘려 나간 구간을
+   여는 컨트롤 — 대화가 창을 넘길 때만 나타난다. */
+.load-earlier {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 2px 0 6px;
+}
+.load-earlier-btn {
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 13px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.load-earlier-btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.load-earlier-btn.subtle {
+  background: none;
+  border-color: transparent;
+}
+.load-earlier-btn.subtle:hover {
+  border-color: var(--border);
+}
+/* 전부 불러온 뒤 버튼 자리에 남는 안내 — 사라진 버튼의 포커스를 받는다. */
+.load-earlier.done {
+  font-size: 12px;
+  padding: 4px 0 8px;
+}
+.load-earlier.done:focus-visible {
+  outline: 2px solid var(--border-strong);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
 /* ----- 그리팅(빈 상태) ----- */
 .greeting {
   margin: auto;

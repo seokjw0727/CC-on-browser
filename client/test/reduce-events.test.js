@@ -13,6 +13,41 @@ test('finalizeCompactionCards: running 카드를 done으로 닫고, 없으면 �
   assert.equal(finalizeCompactionCards(none), none, '변화 없으면 같은 참조');
 });
 
+// updateByUid의 계약 — Message의 React.memo가 여기에 얹혀 있다. 델타 하나가
+// "바뀐 블록 하나"만 새 참조로 만들고 나머지 아이템의 객체 참조를 그대로 넘겨야
+// memo가 bailout한다. 이게 깨지면 성능 회귀가 조용히 돌아온다(설계도 §1 ①).
+test('스트리밍 델타는 대상 블록만 새 참조로 바꾸고 나머지 메시지 참조는 보존한다', () => {
+  const stream = (s, ev) => reduceCliEvent(s, { type: 'stream_event', event: ev });
+  let s = createSessionState();
+  // 앞쪽에 확정 메시지 몇 개를 쌓고, 그 뒤에 스트리밍 블록을 연다.
+  s = reduceCliEvent(s, { type: 'user', message: { role: 'user', content: '첫 질문' } });
+  s = reduceCliEvent(s, { type: 'user', message: { role: 'user', content: '둘째 질문' } });
+  s = stream(s, { type: 'message_start', message: { id: 'msg_1' } });
+  s = stream(s, { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+  const before = s.messages;
+  assert.equal(before.length, 3);
+
+  s = stream(s, { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '안녕' } });
+
+  assert.notEqual(s.messages, before, '배열은 새로 만들어진다(React가 변화를 보게)');
+  assert.equal(s.messages[0], before[0], '앞선 메시지는 같은 객체 참조여야 memo가 bailout한다');
+  assert.equal(s.messages[1], before[1]);
+  assert.notEqual(s.messages[2], before[2], '대상 블록만 새 객체');
+  assert.equal(s.messages[2].text, '안녕');
+});
+
+test('열려 있는 블록이 없으면(uid 불일치) 세션 객체를 그대로 돌려준다', () => {
+  let s = createSessionState();
+  s = reduceCliEvent(s, { type: 'user', message: { role: 'user', content: '질문' } });
+  // content_block_stop은 streaming.blocks에 uid가 없으면 아무것도 하지 않는다.
+  const before = s;
+  const after = reduceCliEvent(s, {
+    type: 'stream_event',
+    event: { type: 'content_block_stop', index: 7 },
+  });
+  assert.equal(after, before, '변화가 없으면 같은 세션 참조(불필요한 리렌더 방지)');
+});
+
 const userEvent = (content, extra = {}) => ({
   type: 'user',
   message: { role: 'user', content },

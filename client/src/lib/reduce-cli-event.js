@@ -40,14 +40,32 @@ function append(session, item) {
   };
 }
 
+// 스트리밍 델타의 주 경로 — 대화가 길수록 이 함수가 가장 자주 불린다.
+// .map은 항목마다 콜백을 부르지만 스트리밍이 건드리는 블록은 사실상 항상 끝쪽이므로,
+// 뒤에서부터 찾아 slice(=단순 복사) + 인덱스 대입으로 바꾼다. 불일치 시 원본 세션을
+// 그대로 돌려주는(참조 불변) 계약은 유지된다.
+// 의미 차이 하나: 예전 .map은 같은 uid가 여러 개면 전부 갱신했고 이건 마지막 하나만
+// 갱신한다. 현재 호출 경로에서는 관측되지 않는다 — uid는 이 모듈의 단조 증가 카운터
+// (nextUid)가 발급하고, 프리로드(재개 트랜스크립트·effort 재시작)도 같은 카운터가
+// 발급한 값을 그대로 들고 오기 때문이다. 다만 이건 코드가 강제하는 불변식은 아니어서
+// (preloadMessages는 uid를 검증하지 않고 uidSeq를 전진시키지도 않는다) 외부에서 임의
+// uid를 주입하는 경로가 생기면 함께 손봐야 한다 — codex 지적.
+// 배열 복사 자체는 남으므로 CPU 상수 개선이지 O(1)이 되는 건 아니다: 실측(node,
+// 400델타)으로 델타당 N=8000에서 75µs → 5.1µs이지만, 같은 조건 브라우저 측정에서
+// 200델타 전체가 ~1ms라 JS 400ms대의 1%에도 못 미치는 부차적 항목이다.
 function updateByUid(session, uid, fn) {
-  let hit = false;
-  const messages = session.messages.map((m) => {
-    if (m.uid !== uid) return m;
-    hit = true;
-    return fn(m);
-  });
-  return hit ? { ...session, messages } : session;
+  const msgs = session.messages;
+  let idx = -1;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].uid === uid) {
+      idx = i;
+      break;
+    }
+  }
+  if (idx < 0) return session;
+  const messages = msgs.slice();
+  messages[idx] = fn(msgs[idx]);
+  return { ...session, messages };
 }
 
 function findLastIndex(arr, pred) {
