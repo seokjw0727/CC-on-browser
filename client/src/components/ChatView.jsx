@@ -76,20 +76,17 @@ export default function ChatView() {
   // (아래 pinBottom이 갱신한다).
   const lastScrollTopRef = useRef(0);
 
-  // 세션 전환 리셋(등장 워터마크 + 창)은 effect가 아니라 렌더 단계에서 동기적으로 한다.
+  // 세션 전환 시 창(expand/readStart) 리셋은 effect가 아니라 렌더 단계에서 한다.
   // 이유: activeKey가 바뀌면 스토어의 세션 Map은 이미 그 세션의 전체 messages를
   // 들고 있으므로(비활성 세션도 계속 이벤트를 누적함) 전환 직후 첫 렌더에서 바로
-  // session.messages가 "새 세션의 기존 메시지들"로 채워진다. 이 시점의 워터마크는
-  // 아직 이전 세션 기준이라 전부 isNew=true로 계산되고, uid가 전부 달라 해당
-  // 메시지 DOM은 실제로 새로 mount되어 애니가 그대로 재생돼 버린다.
-  // 이후 [session?.key] effect가 리셋해도 pinned가 이미 true였다면
-  // setPinned(true)는 동일 값이라 React가 리렌더를 bail-out하므로 보정 렌더가
-  // 아예 없다 — 즉 이미 재생된 애니를 되돌릴 기회가 없다(React 공식 문서가
-  // "prop 변화에 따른 state 조정"에서 effect 대신 렌더 중 조정을 권하는 바로 그 사례).
-  // 그래서 이전 key를 state로 추적하다가 바뀐 걸 감지하면 그 자리에서 즉시 창
-  // (expand/readStart)을 리셋한다 — 둘 다 state라 갱신값이 다시 도는 렌더로 넘어간다.
-  // 등장 워터마크는 ref라 이 자리에서 리셋할 수 없고(아래 seenCount 주석 참고),
-  // "어느 세션에서 잰 값인지"를 함께 들고 다니는 방식으로 같은 목적을 이룬다.
+  // session.messages가 "새 세션의 기존 메시지들"로 채워진다. 이때 이전 세션 기준의
+  // 값으로 계산하면 그 메시지 DOM이 새로 mount되면서 애니가 그대로 재생돼 버리는데,
+  // [session?.key] effect로 뒤늦게 고치려 해도 pinned가 이미 true면 setPinned(true)는
+  // 동일 값이라 React가 리렌더를 bail-out해 보정 렌더 자체가 없다 — 즉 이미 재생된
+  // 애니를 되돌릴 기회가 없다(React 공식 문서가 "prop 변화에 따른 state 조정"에서
+  // effect 대신 렌더 중 조정을 권하는 바로 그 사례).
+  // expand/readStart는 state라 여기서 리셋하면 갱신값이 다시 도는 렌더로 넘어간다.
+  // 반면 등장 워터마크는 ref라 이 방식이 통하지 않는다 — 아래 seenCount 주석 참고.
   const [seenSessionKey, setSeenSessionKey] = useState(session?.key);
   const sessionChanged = seenSessionKey !== session?.key;
   if (sessionChanged) {
@@ -163,7 +160,7 @@ export default function ChatView() {
   }, []);
 
   // 세션 전환 시 고정 복원 + 최하단으로 + 뷰 전환 애니 재생
-  // (seen 리셋은 위 렌더 단계에서 이미 끝났으므로 여기서는 건드리지 않는다 —
+  // (워터마크·창은 렌더 단계에서 이미 정리됐으므로 여기서는 건드리지 않는다 —
   // 여기서 다시 하면 한 프레임 늦어 위에서 설명한 플리커가 재발한다.)
   useEffect(() => {
     pinnedRef.current = true;
