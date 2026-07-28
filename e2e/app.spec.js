@@ -309,7 +309,10 @@ test('세션 전환 — 되돌아온 세션의 기존 메시지는 등장 애니
   // 이미 false다. 워터마크가 이전 세션 값으로 남으면 돌아온 세션의 기존 대화가 통째로
   // "새 메시지"로 판정돼 애니가 재생된다 — 창 안 메시지 수만큼.
   await startBulkSession(page); // 세션 A: 502개(창 200)
-  await expect(page.locator('.msg-list .msg-enter')).toHaveCount(0);
+  // 여기서 msg-enter가 0인지는 단언하지 않는다 — 방금 도착한 200개는 실제로 새
+  // 메시지라 클래스가 붙어 있는 게 맞고, 그게 벗겨지는 건 이후 ChatView 렌더가
+  // 우연히 한 번 더 도는지에 달려 있어 환경마다 다르다(로컬 0 / CI 200).
+  // 관측 기준선은 아래에서 B로 전환한 뒤 잡는다.
 
   // 세션 B를 같은 페이지에서 새로 연다 — 메시지 0개라 워터마크가 A보다 훨씬 작아진다.
   await page.getByRole('button', { name: '새 세션', exact: true }).click();
@@ -337,6 +340,9 @@ test('세션 전환 — 되돌아온 세션의 기존 메시지는 등장 애니
     });
     tick();
   });
+  // 기준선 — B 화면에는 애니 대상이 없어야 한다. 여기가 0이 아니면 아래 단언은
+  // 회귀가 아니라 오염된 기준선을 보고 실패하는 것이다.
+  expect(await page.evaluate(() => window.__maxEnter)).toBe(0);
 
   // A로 되돌아간다(비활성 라이브 행 = A).
   await page.locator('.sess-row.live:not(.active) .sess-main').click();
