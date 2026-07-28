@@ -7,7 +7,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
 import Message, { debugEnabled } from './Message.jsx';
-import { expandStart, windowStartFor } from '../lib/chat-window.js';
+import { WINDOW_SIZE, expandStart, windowStartFor } from '../lib/chat-window.js';
 import { Sparkle } from './Brand.jsx';
 import './chat.css';
 
@@ -332,9 +332,12 @@ export default function ChatView() {
           )}
         </div>
       </div>
-      {!pinned && (
+      {/* 하단에 있어도 창을 펼쳐 둔 상태(sticky)면 버튼을 남긴다 — 펼친 동안은 대화
+          전체가 DOM에 있는데, 이걸 되돌리는 유일한 조작이 이 버튼이라 숨겨 버리면
+          접으려고 일부러 위로 스크롤해야 한다(codex 지적). */}
+      {(!pinned || sticky) && (
         <button type="button" className="jump-latest" onClick={jumpToLatest}>
-          ↓ 최신으로
+          {pinned ? `최근 ${WINDOW_SIZE}개만 보기` : '↓ 최신으로'}
         </button>
       )}
     </div>

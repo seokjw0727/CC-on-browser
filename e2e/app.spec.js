@@ -281,9 +281,15 @@ test('윈도잉 — "모두 불러오기"는 하단으로 돌아와도 유지되
     el.scrollTop = el.scrollHeight;
   });
   await expect(winItems(page)).toHaveCount(502);
+  // 다만 접는 버튼은 하단에서도 남아 있어야 한다 — 펼친 동안은 대화 전체가 DOM에
+  // 있는데 되돌리는 조작이 이것뿐이라, 숨기면 접으려고 위로 스크롤해야 한다.
+  await expect(page.locator('.jump-latest')).toHaveText('최근 200개만 보기');
+  await page.locator('.jump-latest').click();
+  await expect(winItems(page)).toHaveCount(200);
 
-  // 되돌리는 유일한 경로: "↓ 최신으로"(그리고 세션 전환).
+  // 위로 읽는 중에는 같은 버튼이 "최신으로" 역할을 한다.
   await page.evaluate(() => { document.querySelector('.chat-scroll').scrollTop = 0; });
+  await expect(page.locator('.jump-latest')).toHaveText('↓ 최신으로');
   await page.locator('.jump-latest').click();
   await expect(winItems(page)).toHaveCount(200);
 });
@@ -293,6 +299,13 @@ test('윈도잉 — raw 디버그 토글이 memo에 삼켜지지 않는다', asy
   // 다시 그려지지 않는다. 토글 → 즉시 반영이 계약이다.
   // 'raw' 프롬프트로 미지 구조화 이벤트를 유도한다 → kind:'raw' 아이템(기본 숨김).
   await startBulkSession(page, { prompt: 'raw', visible: 199 });
+  // 턴이 끝날 때까지 기다린다 — fake CLI는 bulk 500개 → raw 프로브 → result 순서라,
+  // 여기서 기다리지 않으면 창 개수 199는 "raw가 숨겨져서"가 아니라 "아직 안 와서"
+  // 맞아떨어질 수 있고(스트리밍 중 198개 지점), 그러면 아래 토글은 기존 메시지를
+  // 드러내는 게 아니라 새로 도착한 메시지를 그리는 것이라 memo 계약을 검증하지
+  // 못한다(codex 지적). 사용량 아이템은 result 이후에만 생긴다.
+  await expect(page.locator('.msg-list .msg-usage')).toHaveCount(1);
+  await expect(winItems(page)).toHaveCount(199);
   await expect(page.locator('.msg-raw')).toHaveCount(0);
 
   await page.getByRole('button', { name: '설정' }).click();
