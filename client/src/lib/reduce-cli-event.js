@@ -125,6 +125,12 @@ function reduceCommandInvocation(session, name, args, optimistic) {
   if (name === 'clear') {
     const consumed = !optimistic ? consumeOptimistic(session, (m) => m.kind === 'cleared') : null;
     next = consumed || append(session, { kind: 'cleared', ...(optimistic ? { optimistic: true } : {}) });
+    // /clear는 CLI 컨텍스트를 비운다 — 모델 호출이 없어 assistant/result가 오지 않으므로
+    // 여기서 즉시 0으로 내리지 않으면 상태줄 CTX가 다음 턴까지 압축 전 값으로 남는다.
+    // 낙관·에코 양쪽에서 쓰지만 같은 값이라 멱등(consumeOptimistic은 메시지 플래그만 해제).
+    // ctxFromCalls는 건드리지 않는다: true로 강제하면 호출별 usage를 못 받는 세션
+    // (result-only)이 이후 실제 턴에서도 폴백을 못 써 영구히 0에 고착된다.
+    next = { ...next, usage: { ...next.usage, contextTokens: 0, ctxDisplayable: true } };
   } else {
     const matches = (m) => m.kind === 'command' && m.name === name && (m.args || '') === (args || '');
     // 에코가 낙관 칩을 확정
@@ -207,27 +213,42 @@ function startCompaction(session, trigger) {
 // 여러 완료 신호가 겹쳐도(경계 이벤트 + stdout) 카드는 하나만 유지·보강한다.
 function finishCompaction(session, meta) {
   const fields = compactionMetaFields(meta);
-  const runIdx = findRunningCompaction(session.messages);
+  // 압축 후 컨텍스트 크기는 경계 메타(postTokens)가 권위 — 카드뿐 아니라 상태줄 CTX에도
+  // 즉시 반영한다(/compact는 모델 호출이 없어 assistant/result가 CTX를 갱신하지 않는다).
+  // **아래 모든 분기가 이 base를 써야 한다** — 특히 메타 보강만 하고 조기 return하는
+  // recentDuplicate 경로("stdout 먼저 → boundary 나중" 순서에서 숫자가 여기로 온다).
+  // ctxFromCalls=true: 직후 이어지는 result의 턴 합산이 postTokens를 덮는 것을 막는다.
+  // 0은 유효한 값(전부 압축됨)이라 받아들이고, 음수·비유한은 usage에 반영하지 않는다
+  // (카드 표시는 compactionMetaFields가 정한 대로 그대로 둔다).
+  const base =
+    Number.isFinite(fields.postTokens) && fields.postTokens >= 0
+      ? {
+          ...session,
+          ctxFromCalls: true,
+          usage: { ...session.usage, contextTokens: fields.postTokens, ctxDisplayable: true },
+        }
+      : session;
+  const runIdx = findRunningCompaction(base.messages);
   if (runIdx >= 0) {
-    const messages = session.messages.slice();
+    const messages = base.messages.slice();
     messages[runIdx] = { ...messages[runIdx], state: 'done', ...fields };
-    return { ...session, messages };
+    return { ...base, messages };
   }
   // 진행 카드가 없다. 방금(최근 몇 메시지 이내) 완료 처리한 카드에 대한 중복 신호
   // (compact_boundary + "Compacted"가 잇달아 옴)면 메타만 보강/무시한다. 그렇지 않고
   // 오래전 완료 카드만 있거나 아예 없으면 새 완료 카드를 만든다(예: 자동 압축).
-  const lastIdx = findLastIndex(session.messages, (m) => m.kind === 'compaction');
+  const lastIdx = findLastIndex(base.messages, (m) => m.kind === 'compaction');
   const recentDuplicate =
     lastIdx >= 0 &&
-    session.messages[lastIdx].state === 'done' &&
-    lastIdx >= session.messages.length - 3;
+    base.messages[lastIdx].state === 'done' &&
+    lastIdx >= base.messages.length - 3;
   if (recentDuplicate) {
-    if (Object.keys(fields).length === 0) return session; // 추가 정보 없는 중복 신호
-    const messages = session.messages.slice();
+    if (Object.keys(fields).length === 0) return base; // 추가 정보 없는 중복 신호
+    const messages = base.messages.slice();
     messages[lastIdx] = { ...messages[lastIdx], ...fields };
-    return { ...session, messages };
+    return { ...base, messages };
   }
-  return append(session, { kind: 'compaction', state: 'done', ...fields });
+  return append(base, { kind: 'compaction', state: 'done', ...fields });
 }
 
 // ----- stream_event -----
@@ -490,7 +511,7 @@ function reduceAssistant(session, payload) {
       next = {
         ...next,
         ctxFromCalls: true,
-        usage: { ...next.usage, contextTokens: ctx },
+        usage: { ...next.usage, contextTokens: ctx, ctxDisplayable: true },
       };
     }
   }
@@ -730,6 +751,17 @@ function reduceResult(session, payload) {
   }
 
   const usage = payload.usage || {};
+  // 컨텍스트 크기는 reduceAssistant가 호출별 usage로 추적한다(그쪽 주석 참조 —
+  // result.usage는 턴 합산이라 인플레). 여기서는 호출별 usage를 한 번도 못 본
+  // 세션(fake-cli 등 usage 없는 assistant)의 폴백으로만 쓴다 — 단일 호출 턴은
+  // 합산==마지막 호출이라 그 경우엔 정확하다.
+  const ctxTokens = session.ctxFromCalls
+    ? next.usage.contextTokens
+    : (usage.input_tokens || 0) +
+        (usage.cache_read_input_tokens || 0) +
+        (usage.cache_creation_input_tokens || 0) ||
+      next.usage.contextTokens ||
+      0;
   next = {
     ...next,
     streaming: { msgId: null, blocks: {} },
@@ -743,17 +775,10 @@ function reduceResult(session, payload) {
           : next.usage.cost,
       inTok: (next.usage.inTok || 0) + (usage.input_tokens || 0),
       outTok: (next.usage.outTok || 0) + (usage.output_tokens || 0),
-      // 컨텍스트 크기는 reduceAssistant가 호출별 usage로 추적한다(그쪽 주석 참조 —
-      // result.usage는 턴 합산이라 인플레). 여기서는 호출별 usage를 한 번도 못 본
-      // 세션(fake-cli 등 usage 없는 assistant)의 폴백으로만 쓴다 — 단일 호출 턴은
-      // 합산==마지막 호출이라 그 경우엔 정확하다.
-      contextTokens: session.ctxFromCalls
-        ? next.usage.contextTokens
-        : (usage.input_tokens || 0) +
-            (usage.cache_read_input_tokens || 0) +
-            (usage.cache_creation_input_tokens || 0) ||
-          next.usage.contextTokens ||
-          0,
+      contextTokens: ctxTokens,
+      // 이미 표시 중이면(예: /clear 직후의 의도된 0) 토큰 0인 result가 링을 도로 숨기지
+      // 않도록 유지한다. 처음으로 0이 아닌 값을 얻은 result는 여기서 표시를 연다.
+      ctxDisplayable: next.usage.ctxDisplayable || ctxTokens > 0,
     },
     lastResult: {
       subtype: payload.subtype ?? null,

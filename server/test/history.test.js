@@ -19,6 +19,7 @@ async function makeRoot() {
     J({ type: 'system', subtype: 'status', status: 'thinking' }),
     J({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '응' } } }),
     J({ type: 'assistant', message: { id: 'm1', content: [{ type: 'text', text: '응답' }] } }),
+    J({ type: 'system', subtype: 'compact_boundary', compactMetadata: { trigger: 'manual', preTokens: 117013, postTokens: 3171 } }),
     J({ type: 'result', subtype: 'success', result: '응답', session_id: 'aaaa-1111' }),
   ].join('\n') + '\n';
   const s2 = [
@@ -68,14 +69,42 @@ test('listSessions returns metadata sorted by mtime desc with 80-char titles', a
   assert.ok(sessions[0].mtime >= sessions[1].mtime);
 });
 
-test('loadTranscript keeps assistant/user/result and only first system/init', async () => {
+test('loadTranscript keeps assistant/user/result, first system/init, and compact_boundary', async () => {
   const { root } = await makeRoot();
   const { messages } = await loadTranscript(root, 'C--fake-project', 'aaaa-1111');
   assert.deepEqual(
     messages.map((m) => m.type),
-    ['user', 'system', 'assistant', 'result'],
+    ['user', 'system', 'assistant', 'system', 'result'],
   );
   assert.equal(messages[1].subtype, 'init');
+  // system/status·stream_event는 계속 버린다 — 통과 대상은 압축 경계뿐
+  assert.equal(messages[3].subtype, 'compact_boundary');
+  assert.equal(messages[3].compactMetadata.postTokens, 3171, '재개 CTX의 출처');
+});
+
+test('loadTranscript: compact_boundary가 init보다 앞서도 진짜 첫 init이 살아남는다', async () => {
+  // 경계를 sawInit 래치에 태우면 그 뒤의 init이 "두 번째 init"으로 오인돼 버려진다.
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cc-history-b-'));
+  const dir = path.join(root, 'C--proj');
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(
+    path.join(dir, 'dddd-4444.jsonl'),
+    [
+      J({ type: 'system', subtype: 'compact_boundary', compactMetadata: { postTokens: 10 } }),
+      J({ type: 'system', subtype: 'init', session_id: 'dddd-4444', cwd: 'C:\\p', tools: [] }),
+      J({ type: 'system', subtype: 'compact_boundary', compactMetadata: { postTokens: 20 } }),
+      J({ type: 'system', subtype: 'init', session_id: 'dddd-4444-dup' }),
+      J({ type: 'result', subtype: 'success', result: 'ok', session_id: 'dddd-4444' }),
+    ].join('\n') + '\n',
+    'utf8',
+  );
+  const { messages } = await loadTranscript(root, 'C--proj', 'dddd-4444');
+  assert.deepEqual(
+    messages.map((m) => `${m.type}/${m.subtype}`),
+    ['system/compact_boundary', 'system/init', 'system/compact_boundary', 'result/success'],
+    '경계는 여러 개 다 통과, init은 첫 것만 (뒤의 중복 init은 계속 폐기)',
+  );
+  assert.equal(messages[1].session_id, 'dddd-4444', '살아남은 init이 진짜 첫 init');
 });
 
 test('listRecentSessions aggregates across projects, mtime desc, with cwd/title', async () => {

@@ -8,7 +8,7 @@ import { useStore, useActiveSession } from '../lib/store.jsx';
 import { searchFiles } from '../lib/api.js';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
 import { openSubagents } from '../lib/subagents.js';
-import { fmtTok, fmtReset, shortPath, contextWindowFor } from '../lib/format.js';
+import { fmtTok, fmtReset, shortPath, contextWindowFor, hasDisplayableCtx } from '../lib/format.js';
 import { MODES, MODE_LABEL, MODE_CLASS } from '../lib/permission-modes.js';
 import { familyOf, buildModelOptions } from '../lib/model-catalog.js';
 import { EFFORT_LEVELS, DEFAULT_EFFORT, effortLabel, isUiEffort } from '../lib/effort.js';
@@ -273,6 +273,7 @@ export default function Composer() {
   // 재개 직후) 카탈로그 휴리스틱으로 판별([1m]→1M, 별칭은 카탈로그 해석)
   const ctxWindow = session?.contextWindow ?? contextWindowFor(session?.model, models);
   const ctxPct = (ctxTokens / ctxWindow) * 100;
+  const showCtx = hasDisplayableCtx(session?.usage);
   // 실행 중인 서브에이전트(Task/Agent 도구) 목록 — 패널 표시 + 마스코트 juggle 판정(개수)
   const subagentList = useMemo(() => openSubagents(session?.messages), [session?.messages]);
 
@@ -830,11 +831,13 @@ export default function Composer() {
 
       {/* 상태줄 — 컨텍스트·5h/7d 사용량·연결 */}
       <div className="composer-meta">
-        {ctxTokens > 0 && (
+        {/* 표시 여부는 값이 아니라 플래그로 — /clear 직후의 0은 "보여줄 값이 없음"이
+            아니라 "비웠음"이라 링이 사라지면 안 된다(format.js hasDisplayableCtx 주석 참조) */}
+        {showCtx && (
           <RingStat
             label="CTX"
             pct={ctxPct}
-            tip={`현재 세션 컨텍스트(마지막 API 호출 기준, 턴 중 실시간 갱신): ${ctxTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} tok (${Math.round(ctxPct)}%)`}
+            tip={`현재 세션 컨텍스트(마지막 API 호출·압축/초기화 기준, 턴 중 실시간 갱신): ${ctxTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} tok (${Math.round(ctxPct)}%)`}
           />
         )}
         {quota?.fiveHour ? (

@@ -30,7 +30,12 @@ export function createSessionState(partial = {}) {
     messages: [],
     streaming: {},
     pendingPermissions: [],
-    usage: { cost: 0, inTok: 0, outTok: 0, contextTokens: 0 },
+    // ctxDisplayable: contextTokens가 "보여줄 만한 값"인가 — 값이 아니라 플래그로
+    // 판정해야 /clear 직후의 0을 "아직 아무 값도 없음"과 구별할 수 있다(0 > 0은 거짓이라
+    // 값만 보면 링이 사라진다). 측정값(assistant/result)뿐 아니라 /clear의 의도된 0,
+    // /compact의 postTokens에서도 true가 된다. usage 안에 두는 이유: 재개·effort 재시작이
+    // preloadUsage로 usage 객체를 통째로 이월하므로 별도 배선 없이 따라온다.
+    usage: { cost: 0, inTok: 0, outTok: 0, contextTokens: 0, ctxDisplayable: false },
     // contextTokens가 assistant 이벤트의 호출별 usage에서 왔는지 — true면 result의
     // 턴 합산 usage로 덮어쓰지 않는다(합산은 호출 수만큼 인플레 — reduce-cli-event 참조).
     ctxFromCalls: false,

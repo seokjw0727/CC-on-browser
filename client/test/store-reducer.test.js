@@ -169,6 +169,27 @@ test('started(재개 프리로드): 메시지·sessionId·usage가 started 커�
   assert.equal(s.activeKey, 'r1');
 });
 
+test('usage.ctxDisplayable: 새 세션은 false, preloadUsage는 통째로 이월된다', () => {
+  // CTX 링 표시 판정을 값(contextTokens>0)이 아니라 플래그로 옮겼으므로, 기본값과
+  // 재개 이월이 둘 다 맞아야 한다. 플래그를 usage 안에 둔 이유가 이 이월이다.
+  assert.equal(createSessionState({ key: 'a' }).usage.ctxDisplayable, false, '새 세션은 표시 안 함');
+
+  // 플래그를 가진 프리로드 — 그대로 따라온다
+  let s = registerStart(createInitialState(), 'cl_d', {
+    preloadUsage: { cost: 0, inTok: 0, outTok: 0, contextTokens: 0, ctxDisplayable: true },
+  });
+  s = reducer(s, serverMsg({ type: 'started', startId: 'cl_d', key: 'd1' }));
+  assert.equal(s.sessions.get('d1').usage.ctxDisplayable, true, '0 토큰이어도 표시 플래그 이월');
+
+  // 필드가 없는 구 형상 프리로드 — usage 객체를 통째로 대체하므로 undefined가 된다
+  // (hasDisplayableCtx가 이 경우만 옛 규칙으로 폴백한다 — format.test.js 참조)
+  let s2 = registerStart(createInitialState(), 'cl_l', {
+    preloadUsage: { cost: 0, inTok: 0, outTok: 0, contextTokens: 4321 },
+  });
+  s2 = reducer(s2, serverMsg({ type: 'started', startId: 'cl_l', key: 'l1' }));
+  assert.equal(s2.sessions.get('l1').usage.ctxDisplayable, undefined, '구 형상엔 필드가 없다');
+});
+
 test('started: spawnPermissionMode 계보 시딩 — 지정 모드는 그대로, 미지정은 default', () => {
   // 지정 모드 시딩 (신뢰모드 스폰 → 계보에 남아 UI 신뢰모드 노출 자격이 된다)
   let s = createInitialState();

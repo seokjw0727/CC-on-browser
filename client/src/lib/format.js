@@ -52,6 +52,14 @@ export function contextWindowFor(model, models = []) {
   return has1m(s) ? CONTEXT_WINDOW_1M : CONTEXT_WINDOW;
 }
 
+// CTX 링을 그릴지 — 값이 아니라 플래그로 판정한다. /clear 직후의 contextTokens는 0인데,
+// 옛 규칙(contextTokens > 0)으로는 "아직 아무 턴도 없음"과 구별되지 않아 링이 통째로
+// 사라진다. usage.ctxDisplayable이 있으면 그 값이 권위이고(명시적 false는 폴백하지 않는다),
+// 필드 자체가 없는 구 usage(재개 프리로드에 남은 옛 형상)에서만 옛 규칙으로 폴백한다.
+export function hasDisplayableCtx(usage) {
+  return usage?.ctxDisplayable ?? (usage?.contextTokens ?? 0) > 0;
+}
+
 // 쿼터 리셋 시각 표기 — 당일이면 시각만, 하루를 넘기면 날짜까지.
 // Composer 상태줄 툴팁·사이드바 통계 섹션이 같은 표기를 쓴다.
 export function fmtReset(ms) {

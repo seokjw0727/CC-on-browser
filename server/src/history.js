@@ -219,6 +219,12 @@ export async function loadTranscript(projectsRoot, dirName, sessionId) {
     } else if (obj.type === 'system' && obj.subtype === 'init' && !sawInit) {
       sawInit = true;
       messages.push(obj);
+    } else if (obj.type === 'system' && obj.subtype === 'compact_boundary') {
+      // 압축 경계는 재개에 필요하다 — preTokens/postTokens가 압축 완료 카드와 상태줄
+      // CTX의 유일한 출처라서, 버리면 압축 직후 끝난 세션을 재개했을 때 CTX가 압축 전
+      // 값으로 복원된다. sawInit 래치는 건드리지 않는다: 경계가 init보다 앞서 오는
+      // 트랜스크립트에서 진짜 첫 init이 눌리면 안 된다.
+      messages.push(obj);
     }
   }
   return { messages };

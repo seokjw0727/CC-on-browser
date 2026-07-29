@@ -271,6 +271,10 @@ test('/compact: status:compacting → 진행 카드, compact_boundary → 완료
   assert.equal(cards[0].state, 'done');
   assert.equal(cards[0].preTokens, 117013);
   assert.equal(cards[0].postTokens, 3171);
+  // 카드와 상태줄이 같은 숫자를 말해야 한다 — 완료 카드로 전환하는 running 분기도
+  // usage를 함께 갱신한다(usage 계보 전반은 reduce-usage.test.js 담당).
+  assert.equal(s.usage.contextTokens, 3171, '카드의 postTokens = 상태줄 CTX');
+  assert.equal(s.usage.ctxDisplayable, true);
 });
 
 test('/compact: compact_boundary 뒤 "Compacted" 출력은 중복 카드를 만들지 않는다', () => {

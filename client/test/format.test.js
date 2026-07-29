@@ -5,7 +5,14 @@
 // ('claude-opus-4-8'). 판별은 정확 일치 → base(접미사 제거) 일치 → 문자열 순.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { contextWindowFor, fmtAgo, fmtBytes, CONTEXT_WINDOW, CONTEXT_WINDOW_1M } from '../src/lib/format.js';
+import {
+  contextWindowFor,
+  fmtAgo,
+  fmtBytes,
+  hasDisplayableCtx,
+  CONTEXT_WINDOW,
+  CONTEXT_WINDOW_1M,
+} from '../src/lib/format.js';
 import { reduceCliEvent } from '../src/lib/reduce-cli-event.js';
 import { createSessionState, reducer, createInitialState } from '../src/lib/store-reducer.js';
 
@@ -292,4 +299,19 @@ test('통합: 명시 모델로 시작하면 spawnModel 계보가 남는다', () 
   sess = st.sessions.get('k2');
   assert.equal(sess.model, 'claude-opus-4-8[1m]');
   assert.equal(sess.spawnModel, 'opus[1m]');
+});
+
+test('hasDisplayableCtx: 플래그가 권위, 필드가 없는 구 usage만 옛 규칙으로 폴백', () => {
+  // /clear가 쓰는 "의도된 0" — 값만 보면 0>0=false라 링이 사라지므로 플래그가 필요하다
+  assert.equal(hasDisplayableCtx({ contextTokens: 0, ctxDisplayable: true }), true);
+  // 명시적 false는 폴백하지 않는다 — 값이 있어도 표시 안 함
+  assert.equal(hasDisplayableCtx({ contextTokens: 5000, ctxDisplayable: false }), false);
+  // 새 세션 기본값
+  assert.equal(hasDisplayableCtx({ contextTokens: 0, ctxDisplayable: false }), false);
+  // 필드가 없는 구 형상(재개 프리로드에 남은 옛 usage)만 contextTokens>0로 폴백
+  assert.equal(hasDisplayableCtx({ contextTokens: 4321 }), true);
+  assert.equal(hasDisplayableCtx({ contextTokens: 0 }), false);
+  // 방어: usage 자체가 없을 때
+  assert.equal(hasDisplayableCtx(undefined), false);
+  assert.equal(hasDisplayableCtx({}), false);
 });

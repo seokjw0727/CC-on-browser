@@ -8,6 +8,39 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-07-29
+
+> `/clear`·`/compact` 직후 상태줄 CTX가 다음 턴까지 옛 값으로 남던 문제 수정.
+> (Stale CTX after `/clear` and `/compact`.)
+
+### Fixed
+- **The CTX status-line value now updates immediately after `/clear` and `/compact`.**
+  Both are local CLI commands that make no model call, so no authoritative
+  per-call `assistant` usage arrives to refresh the context size, and any `result`
+  that follows is absent, empty, or a turn aggregate unusable as a context
+  measurement. The status line therefore kept showing the pre-command number until
+  the next real turn (e.g. still reading 117k right after a compaction down to
+  3,171). `/clear` now resets it to 0 and
+  `/compact` adopts the `postTokens` the CLI already reports on its
+  `compact_boundary` event, so the number matches the compaction card. Automatic
+  compaction goes through the same event and is covered too. Other commands are
+  deliberately untouched: the CLI gives no authoritative context-token signal for
+  them, so nothing is guessed.
+
+### Changed
+- **The CTX ring stays visible at 0%** instead of disappearing. Display is now
+  decided by a flag (`usage.ctxDisplayable`) rather than by `contextTokens > 0`,
+  which could not tell "context was cleared" apart from "no turn has run yet".
+  A freshly started session with no turns still shows no ring. The ring's tooltip
+  now reads "마지막 API 호출·압축/초기화 기준" — the old wording claimed the value
+  always came from the last API call, which stopped being true.
+- **Resumed sessions now show compaction cards in their history.** The server's
+  transcript reader used to discard every `system` event except the first `init`,
+  which threw away the `compact_boundary` lines. They are now passed through, so
+  resuming a session that ended right after a compaction restores the correct CTX
+  — and, as a side effect, the compaction completion cards that were previously
+  missing from resumed history are rendered.
+
 ## [1.7.0] - 2026-07-28
 
 > 긴 대화 성능·메모리 개선 — 메시지 창(윈도잉) · 렌더 메모이제이션 · 대량 유입 시 하단 고정 수정.
@@ -196,7 +229,8 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
-[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.7.1...HEAD
+[1.7.1]: https://github.com/seokjw0727/CC-on-browser/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.4.0...v1.5.0
