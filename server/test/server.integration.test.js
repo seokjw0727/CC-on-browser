@@ -920,7 +920,11 @@ function fakeRemoteControl() {
     off: (_evt, fn) => listeners.delete(fn),
     start: async (cwd, opts) => {
       calls.push({ op: 'start', cwd, opts });
-      const st = { cwd, name: opts?.name ?? 'x', state: 'starting', environmentId: null,
+      // 실제 관리자처럼 canonical 경로를 상태의 cwd로 쓴다. 서버의 keysForCwd는
+      // 세션 cwd를 realpath해 이 값과 비교하므로, 정규화하지 않으면 tmpdir이
+      // 심볼릭 링크인 플랫폼(macOS: /var → /private/var)에서만 keys가 빈다.
+      const canonical = await fs.realpath(cwd);
+      const st = { cwd: canonical, name: opts?.name ?? 'x', state: 'starting', environmentId: null,
         url: null, capacity: null, error: null, startedAt: 1 };
       states = [st];
       for (const fn of listeners) fn(states);
@@ -969,7 +973,8 @@ test('원격 제어: 연결 직후 스냅샷, key→cwd 해석, 미지의 key �
     c.send({ type: 'remoteControl', action: 'start', key: started.key, name: 'my rc' });
     const after = await c.next((m) => m.type === 'remoteControl' && m.states.length === 1);
     assert.equal(rc.calls[0].op, 'start');
-    assert.equal(rc.calls[0].cwd, tmpRoot, '클라이언트가 보낸 경로가 아니라 세션의 cwd');
+    assert.equal(await fs.realpath(rc.calls[0].cwd), await fs.realpath(tmpRoot),
+      '클라이언트가 보낸 경로가 아니라 세션의 cwd');
     assert.equal(rc.calls[0].opts.name, 'my rc');
     // 그 cwd를 쓰는 라이브 세션 key가 붙어 온다
     assert.deepEqual(after.states[0].keys, [started.key]);
@@ -977,7 +982,7 @@ test('원격 제어: 연결 직후 스냅샷, key→cwd 해석, 미지의 key �
     // 4) 관리자가 스스로 상태를 바꾸면 전 소켓에 방송된다
     const c2 = await TestClient.connect(url);
     await c2.next((m) => m.type === 'remoteControl');
-    rc.setStates([{ cwd: tmpRoot, name: 'my rc', state: 'ready', environmentId: 'env_x',
+    rc.setStates([{ cwd: await fs.realpath(tmpRoot), name: 'my rc', state: 'ready', environmentId: 'env_x',
       url: 'https://claude.ai/code?environment=env_x', capacity: { used: 0, max: 32 },
       error: null, startedAt: 1 }]);
     const bc = await c2.next((m) => m.type === 'remoteControl' && m.states[0]?.state === 'ready');
@@ -987,7 +992,7 @@ test('원격 제어: 연결 직후 스냅샷, key→cwd 해석, 미지의 key �
     c.send({ type: 'remoteControl', action: 'stop', key: started.key });
     await c.next((m) => m.type === 'remoteControl' && m.states[0]?.state === 'stopped');
     assert.equal(rc.calls.at(-1).op, 'stop');
-    assert.equal(rc.calls.at(-1).cwd, tmpRoot);
+    assert.equal(await fs.realpath(rc.calls.at(-1).cwd), await fs.realpath(tmpRoot));
 
     // 6) 알 수 없는 action
     c.send({ type: 'remoteControl', action: 'bogus', key: started.key });
@@ -1031,7 +1036,7 @@ test('SessionHub.cwdOf: 라이브 세션만 cwd를 내주고 종료·미지의 k
     // 라이브 → 원격 제어가 붙는다
     c.send({ type: 'remoteControl', action: 'start', key: started.key });
     await c.next((m) => m.type === 'remoteControl' && m.states.length === 1);
-    assert.equal(rc.calls.at(-1).cwd, tmpRoot);
+    assert.equal(await fs.realpath(rc.calls.at(-1).cwd), await fs.realpath(tmpRoot));
 
     // 세션 종료 후에는 같은 key로 더 이상 켤 수 없다(리플레이용으로 남아 있어도)
     c.send({ type: 'stop', key: started.key });
@@ -1093,7 +1098,7 @@ test('원격 제어 start 결과는 요청 소켓뿐 아니라 모든 소켓에 
     const seen = await b.next(
       (m) => m.type === 'remoteControl' && m.states[0]?.keys?.includes(started.key),
     );
-    assert.equal(seen.states[0].cwd, tmpRoot);
+    assert.equal(seen.states[0].cwd, await fs.realpath(tmpRoot));
   } finally {
     await h.close();
   }
@@ -1154,7 +1159,7 @@ test('원격 제어: 세션이 먼저 끝나도 알려 준 cwd로는 끌 수 있
     await c.next((m) => m.type === 'exit' && m.key === s.key);
 
     // 세션이 없으니 key로는 못 찾는다 — 서버가 이미 알려 준 cwd는 받아들여야 한다
-    c.send({ type: 'remoteControl', action: 'stop', cwd: tmpRoot });
+    c.send({ type: 'remoteControl', action: 'stop', cwd: await fs.realpath(tmpRoot) });
     await c.next((m) => m.type === 'remoteControl' && m.states[0]?.state === 'stopped');
     assert.equal(rc.calls.at(-1).op, 'stop');
 
