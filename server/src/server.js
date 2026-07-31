@@ -5,7 +5,6 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
-import fsSync from 'node:fs';
 import { spawn } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 import { SessionHub } from './session-hub.js';
@@ -13,7 +12,7 @@ import { listProjects, listSessions, loadTranscript, listRecentSessions, deleteS
 import { listDirs, pickDirectory, searchFiles } from './fs-api.js';
 import { aggregateDailyUsage, aggregateUsage, MAX_DAILY_DAYS } from './usage.js';
 import { fetchQuota } from './quota.js';
-import { createRemoteControl } from './remote-control.js';
+import { canonicalCwdSync, createRemoteControl } from './remote-control.js';
 
 const VERSION_TIMEOUT_MS = 3_000;
 // close()가 원격 제어 자식 정리를 기다리는 상한. remote-control.js의 stop 유예
@@ -162,7 +161,9 @@ export async function startServer({
   const foldCase = (p) => (platform === 'win32' ? String(p).toLowerCase() : String(p));
   const canonicalOf = (p) => {
     try {
-      return foldCase(fsSync.realpathSync(p));
+      // remote-control.js와 **같은 함수**를 쓴다 — 다른 realpath 구현을 쓰면
+      // win32의 8.3 단축명에서 문자열이 갈려 매칭이 통째로 실패한다.
+      return foldCase(canonicalCwdSync(p));
     } catch {
       return null; // 지워졌거나 접근 불가 — 매칭에서 조용히 빠진다
     }

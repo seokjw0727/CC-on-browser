@@ -18,8 +18,20 @@
 // 같고 대신 "정리 중 재시작", "closeAll과 경합하는 start" 같은 인터리빙이 원천 소멸한다.
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
-import fsp from 'node:fs/promises';
+import fs from 'node:fs';
 import path from 'node:path';
+
+/**
+ * cwd 정규화의 **단일 출처**. 이 관리자와 server.js의 keysForCwd가 반드시 같은
+ * 함수를 써야 한다 — 서로 다른 realpath 구현을 쓰면 같은 디렉터리인데도 문자열이
+ * 갈라진다. win32에서 실제로 갈렸다: fs.realpathSync는 8.3 단축명을 그대로 두는데
+ * promises 쪽은 펴 버려, 원격 제어를 켜도 세션이 매칭되지 않아 pill이 꺼진 채로
+ * 남았다(CI에서 재현). .native는 OS에 맡겨 단축명·심볼릭 링크·대소문자를 한 번에
+ * 정규화한다.
+ */
+export function canonicalCwdSync(p) {
+  return fs.realpathSync.native(p);
+}
 
 /** stop()에서 트리 종료 후 close를 기다리는 시간. 넘으면 강제 단계로 승급. */
 export const STOP_GRACE_MS = 5_000;
@@ -214,7 +226,7 @@ export function createRemoteControl({
   spawnFn = spawn,
   platform = process.platform,
   killTree = defaultKillTree,
-  resolveCwd = (p) => fsp.realpath(p),
+  resolveCwd = async (p) => canonicalCwdSync(p),
   stopGraceMs = STOP_GRACE_MS,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
