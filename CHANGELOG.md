@@ -8,6 +8,22 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-08-01
+
+> Windows에서 원격 제어를 켜도 pill이 꺼진 채로 남던 문제 수정.
+> (Fixes the Remote Control pill staying off on Windows.)
+
+### Fixed
+- **Remote Control could look like it never turned on, on Windows.** The manager
+  canonicalised the target directory with one `realpath` implementation and the
+  server matched sessions against it with another; the two disagree on 8.3 short
+  names (`C:\Users\RUNNER~1\…`) and some symlinked paths, so no session
+  ever matched the running control and the pill stayed off even though
+  `claude remote-control` was actually up. Both sides now go through a single
+  `canonicalCwdSync` (`fs.realpathSync.native`), which resolves short names,
+  symlinks and casing in one step; matching additionally folds case on Windows.
+  Found by the Windows CI runner, whose temp directory uses a short name.
+
 ## [1.8.0] - 2026-08-01
 
 > Claude Code 원격 제어 연동(claude.ai·모바일 앱에서 이 레포 조종), 입력창 아래
