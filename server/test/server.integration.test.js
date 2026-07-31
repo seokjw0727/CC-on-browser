@@ -1171,3 +1171,30 @@ test('원격 제어: 세션이 먼저 끝나도 알려 준 cwd로는 끌 수 있
     await h.close();
   }
 });
+
+test('원격 제어: cwd 대소문자가 달라도 keys가 붙는다 (win32 realpath 편차 방어)', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const rc = fakeRemoteControl();
+  const h = await startServer({
+    port: 0, token: TOKEN, cliPath: process.execPath, cliArgsPrefix: [fakeCliPath],
+    projectsRoot, staticDir, remoteControl: rc, platform: 'win32',
+  });
+  const url = `ws://127.0.0.1:${h.port}/ws?token=${TOKEN}`;
+  try {
+    const c = await TestClient.connect(url);
+    await c.next((m) => m.type === 'remoteControl');
+    c.send({ type: 'start', startId: 'case1', cwd: tmpRoot });
+    const s = await c.next((m) => m.type === 'started' && m.startId === 'case1');
+    // 관리자가 대문자로 정규화한 경로를 돌려주는 상황을 흉내낸다
+    rc.setStates([{
+      cwd: (await fs.realpath(tmpRoot)).toUpperCase(),
+      name: 'x', state: 'ready', environmentId: null, url: null,
+      capacity: null, error: null, startedAt: 1,
+    }]);
+    const seen = await c.next((m) => m.type === 'remoteControl' && m.states[0]?.state === 'ready');
+    assert.deepEqual(seen.states[0].keys, [s.key],
+      'win32에서는 대소문자 차이로 세션을 놓치면 안 된다');
+  } finally {
+    await h.close();
+  }
+});

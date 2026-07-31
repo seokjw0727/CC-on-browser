@@ -156,17 +156,24 @@ export async function startServer({
   // 시작된 세션을 놓치고, 별칭이 다른 곳을 가리키게 바뀌면 엉뚱한 상태에 key를 붙이며,
   // 정리되지 않고 계속 자란다(codex 지적). realpathSync는 세션 수가 한 자릿수이고
   // 방송이 드물어(상태 전이·새 연결) 비용이 문제되지 않는다.
+  // win32는 파일시스템이 대소문자를 구분하지 않고, realpath가 드라이브 문자·구성요소
+  // 대소문자를 입력에 따라 다르게 돌려주는 경우가 있다(CI에서 실제로 keys가 비었다).
+  // realpath로 심볼릭 링크·8.3 단축명을 편 뒤, win32에서만 대소문자를 접어 비교한다.
+  const foldCase = (p) => (platform === 'win32' ? String(p).toLowerCase() : String(p));
   const canonicalOf = (p) => {
     try {
-      return fsSync.realpathSync(p);
+      return foldCase(fsSync.realpathSync(p));
     } catch {
       return null; // 지워졌거나 접근 불가 — 매칭에서 조용히 빠진다
     }
   };
-  const keysForCwd = (canonical) => hub
-    .liveSessionCwds()
-    .filter((s) => s.cwd && canonicalOf(s.cwd) === canonical)
-    .map((s) => s.key);
+  const keysForCwd = (canonical) => {
+    const want = foldCase(canonical);
+    return hub
+      .liveSessionCwds()
+      .filter((s) => s.cwd && canonicalOf(s.cwd) === want)
+      .map((s) => s.key);
+  };
 
   // 이 원격 제어에 해당하는 "세션이 쓴 원본 cwd 철자"들. 세션이 먼저 끝나면 keys가
   // 비는데, 그때도 클라이언트가 자기 것으로 알아보고 끌 수 있어야 한다. 클라이언트가
