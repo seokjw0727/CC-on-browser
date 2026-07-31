@@ -180,9 +180,13 @@ export async function startServer({
   // 비는데, 그때도 클라이언트가 자기 것으로 알아보고 끌 수 있어야 한다. 클라이언트가
   // 스스로 심링크·대소문자를 판정할 수 없으므로 서버가 realpath로 묶어서 내려준다
   // (raw session.cwd 문자열 비교는 그 경우에 실패한다 — codex 지적).
-  const cwdsForCwd = (canonical) => [
-    ...new Set(hub.allSessionCwds().filter((p) => canonicalOf(p) === canonical)),
-  ];
+  const cwdsForCwd = (canonical) => {
+    // keysForCwd와 **같은 정규화**를 써야 한다. canonicalOf는 win32에서 대소문자를
+    // 접어 돌려주는데 canonical(관리자의 cwd)은 원래 표기 그대로라, 접지 않고 비교하면
+    // win32에서 이 목록이 항상 비고 "세션이 먼저 끝난 원격 제어를 끄는" 경로가 죽는다.
+    const want = foldCase(canonical);
+    return [...new Set(hub.allSessionCwds().filter((p) => canonicalOf(p) === want))];
+  };
 
   const remoteControlMessage = () => ({
     type: 'remoteControl',

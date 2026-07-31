@@ -1198,3 +1198,27 @@ test('원격 제어: cwd 대소문자가 달라도 keys가 붙는다 (win32 real
     await h.close();
   }
 });
+
+test('원격 제어: win32에서도 cwds가 채워진다 (세션 종료 후 끄기 경로)', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const rc = fakeRemoteControl();
+  const h = await startServer({
+    port: 0, token: TOKEN, cliPath: process.execPath, cliArgsPrefix: [fakeCliPath],
+    projectsRoot, staticDir, remoteControl: rc, platform: 'win32',
+  });
+  const url = `ws://127.0.0.1:${h.port}/ws?token=${TOKEN}`;
+  try {
+    const c = await TestClient.connect(url);
+    await c.next((m) => m.type === 'remoteControl');
+    c.send({ type: 'start', startId: 'cwds1', cwd: tmpRoot });
+    const s = await c.next((m) => m.type === 'started' && m.startId === 'cwds1');
+    c.send({ type: 'remoteControl', action: 'start', key: s.key });
+    const seen = await c.next((m) => m.type === 'remoteControl' && m.states.length === 1);
+    // cwds가 비면 세션 종료 후 클라이언트가 끌 방법이 사라진다.
+    // 대소문자를 접지 않고 비교하면 win32에서 항상 비었다.
+    assert.ok(seen.states[0].cwds.length > 0, 'cwds가 비면 안 된다');
+    assert.ok(seen.states[0].keys.includes(s.key));
+  } finally {
+    await h.close();
+  }
+});

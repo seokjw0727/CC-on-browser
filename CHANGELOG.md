@@ -8,9 +8,9 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
-## [1.8.1] - 2026-08-01
+## [1.8.2] - 2026-08-01
 
-> Windows에서 원격 제어를 켜도 pill이 꺼진 채로 남던 문제 수정.
+> Windows에서 원격 제어를 켜도 pill이 꺼진 채로 남던 문제 수정(1.8.1의 누락분 포함).
 > (Fixes the Remote Control pill staying off on Windows.)
 
 ### Fixed
@@ -23,6 +23,8 @@ Full bilingual (EN/KO) release notes live on the
   `canonicalCwdSync` (`fs.realpathSync.native`), which resolves short names,
   symlinks and casing in one step; matching additionally folds case on Windows.
   Found by the Windows CI runner, whose temp directory uses a short name.
+  The same mismatch also emptied the advertised `cwds` list, which is what lets
+  the browser stop a remote control after its session has already exited.
 
 ## [1.8.0] - 2026-08-01
 
