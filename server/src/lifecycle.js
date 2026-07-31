@@ -39,6 +39,13 @@ export const LATE_SLOP_MS = 30_000;
  */
 export function createLifecycle({
   hasLiveSessions,
+  // "브라우저가 하나도 없어도 데몬을 붙잡아 둬야 하는 일"이 있는가 (원격 제어).
+  // 기본은 없음 — 기존 계약과 테스트는 그대로다.
+  //
+  // 주의: bye(의도적 탭 닫힘) 경로만 고쳐서는 부족하다. enterSilent()/armSilentDeadline()도
+  // 세션 유무만 보고 30분 뒤 종료하므로, "클라이언트 0"을 재검사하는 **모든** 지점에서
+  // 이걸 함께 봐야 한다. 그래서 아래 keepAlive() 하나로 묶어 전 지점이 같은 질문을 한다.
+  hasPinnedWork = () => false,
   shutdown,
   idleExitGraceMs = IDLE_EXIT_GRACE_MS,
   firstConnectGraceMs = FIRST_CONNECT_GRACE_MS,
@@ -92,16 +99,19 @@ export function createLifecycle({
     timer?.unref?.();
   };
 
-  // silent zero: 세션이 있으면 체인 폴링으로 종료를 관측하고, 없으면 긴 유예.
+  // 클라이언트가 0일 때 "그래도 살려 둘 이유"의 단일 판정.
+  const keepAlive = () => hasLiveSessions() || hasPinnedWork();
+
+  // silent zero: 살려 둘 이유가 있으면 체인 폴링으로 소멸을 관측하고, 없으면 긴 유예.
   const enterSilent = () => {
-    if (hasLiveSessions()) armSessionPoll();
+    if (keepAlive()) armSessionPoll();
     else armSilentDeadline();
   };
 
   const armSessionPoll = () => {
     arm(sessionRecheckMs, () => {
       if (count > 0) return; // 방어 — 재접속 시 timer는 이미 해제된다
-      enterSilent(); // 세션이 모두 끝났으면 "지금"부터 30분 규칙으로 전환
+      enterSilent(); // 세션·고정 작업이 모두 끝났으면 "지금"부터 30분 규칙으로 전환
     });
   };
 
@@ -112,8 +122,8 @@ export function createLifecycle({
         enterSilent(); // 절전 관통 — 지금 시각 기준으로 유예 재앵커
         return;
       }
-      if (hasLiveSessions()) {
-        enterSilent(); // 유예 중 세션이 생김(레이스 방어) — 세션 보호 우선
+      if (keepAlive()) {
+        enterSilent(); // 유예 중 세션/고정 작업이 생김(레이스 방어) — 보호 우선
         return;
       }
       fireShutdown();
@@ -125,6 +135,12 @@ export function createLifecycle({
       if (count > 0) return;
       if (lateBy >= lateSlopMs) {
         armFirstConnect(); // 기동 직후 절전 — 복귀 후 브라우저에 다시 기회를 준다
+        return;
+      }
+      // 여기도 예외가 아니다 — "클라이언트 0을 재검사하는 모든 지점"이라는 계약대로
+      // 붙잡아 둘 일이 있으면 종료하지 않는다(codex 지적).
+      if (keepAlive()) {
+        enterSilent();
         return;
       }
       fireShutdown();
@@ -152,10 +168,16 @@ export function createLifecycle({
       // count 0 도달 — zeroMode를 이 시점에 확정한다.
       if (now() - lastByeCloseAt <= byeRecentMs) {
         // 의도적 닫힘: 기존 계약대로 짧은 유예 후 종료.
+        // 단 고정 작업(원격 제어)이 있으면 종료하지 않는다 — 폰에서 계속 쓰라고 켠
+        // 기능인데 탭을 닫았다고 데몬이 죽으면 그 기능이 성립하지 않는다.
         arm(idleExitGraceMs, (lateBy) => {
           if (count > 0) return;
           if (lateBy >= lateSlopMs) {
             enterSilent(); // 유예 중 절전 관통 — 생존 쪽으로 폴백
+            return;
+          }
+          if (hasPinnedWork()) {
+            enterSilent(); // 원격 제어 생존 — 폴링으로 소멸을 관측한다
             return;
           }
           fireShutdown();

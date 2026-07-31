@@ -110,6 +110,17 @@ export function fmtAgo(ms, now = Date.now()) {
   }
 }
 
+// 메시지 꼬리표 시각 — 24시간제 HH:MM. 유효하지 않으면 null(호출측 미표시).
+// 로케일 포매터(toLocaleTimeString)를 쓰지 않는다: hour12:false를 줘도 로케일에 따라
+// 자정을 '24:00'으로 쓰는 경우가 있어 표기가 흔들린다(codex 지적). 로컬 시간대 기준.
+export function fmtClock(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return null;
+  const p2 = (n) => String(n).padStart(2, '0');
+  return `${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+
 // 경로 꼬리 2단 축약 — 세션 이름 표기 관례 (레포 pill·사이드바·접힘 배지 공통)
 export function shortPath(p) {
   if (!p) return '';

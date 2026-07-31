@@ -33,6 +33,7 @@ export function getToken() {
 
 const StoreContext = createContext(null);
 let startCounter = 0;
+let jumpCounter = 0;
 
 // 종료된 세션이 '종료' 배지로 남아 있다가 사이드바 목록에서 사라지기까지의
 // 유예(사용자 의도: 닫기 → 3초 후 제거). 기준 시점은 CLI exit 확인 시점이며,
@@ -146,6 +147,24 @@ export function StoreProvider({ children }) {
       },
       /** Stop a session's CLI process (client->server contract 'stop'). Server replies with exit. */
       stopSession: (key) => (wsRef.current ? wsRef.current.send({ type: 'stop', key }) : false),
+      /**
+       * 원격 제어 켜기/끄기. 대상 디렉터리는 **보내지 않는다** — 세션 key만 넘기고
+       * 서버가 자기 장부에서 cwd를 되찾는다(WS로 온 임의 경로를 신뢰하지 않기 위해).
+       * 응답은 remoteControl 스냅샷 방송으로 온다.
+       */
+      setRemoteControl: (key, action, { name, cwd } = {}) => (wsRef.current
+        ? wsRef.current.send({
+          type: 'remoteControl',
+          action,
+          key,
+          ...(name ? { name } : {}),
+          // cwd는 '끄기'에서만, 그것도 서버가 우리에게 알려 준 항목의 cwd를 되돌려
+          // 보낼 때만 실린다(세션이 먼저 끝난 원격 제어를 끄는 경로).
+          ...(cwd ? { cwd } : {}),
+        })
+        : false),
+      /** 대화에서 특정 메시지로 이동 — 실행 중 도크 항목 클릭. */
+      jumpTo: (key, uid) => dispatch({ type: 'jump-to', key, uid, nonce: ++jumpCounter }),
       /** 일시 토스트 알림 — 설정 변경 확인·오류 표시용(자동 소멸). */
       notify: (text, kind = 'info') => dispatch({ type: 'add-toast', text, kind }),
       /** 디버그 raw 이벤트 표시 토글 — localStorage 동기화 + 상태 반영(리렌더 유발). */

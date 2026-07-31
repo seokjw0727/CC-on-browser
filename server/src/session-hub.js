@@ -41,6 +41,9 @@ export class SessionHub extends EventEmitter {
     const entry = {
       key,
       session,
+      // 이 세션이 spawn된 작업 디렉터리 — ClaudeSession이 #cwd를 private으로 감추므로
+      // 여기 한 벌 보관한다. cwdOf(key)(원격 제어의 대상 디렉터리 해석)의 유일한 출처.
+      cwd: cwd ?? null,
       // 재개 원본 id — 초기화 중 session.sessionId가 아직 null인 창에서도
       // isSessionIdLive가 이 파일을 라이브로 취급해 삭제(409 방어)를 막는다.
       resumeSessionId: resumeSessionId || null,
@@ -111,6 +114,43 @@ export class SessionHub extends EventEmitter {
       if (!entry.exited) return true;
     }
     return false;
+  }
+
+  /**
+   * 라이브(비-exited) 세션의 작업 디렉터리. 없거나 이미 종료된 키면 null.
+   *
+   * 원격 제어(remote-control.js)의 대상 디렉터리를 정하는 유일한 경로다 — 클라이언트가
+   * 보낸 cwd 문자열을 신뢰하지 않고 서버가 자기 세션 장부에서 되찾기 위한 접근자.
+   * 종료된 엔트리는 리플레이용으로 잠시 남아 있으므로 명시적으로 제외한다(그 디렉터리에
+   * 대해 새 원격 제어를 여는 근거가 될 수 없다).
+   */
+  cwdOf(key) {
+    const entry = this.#sessions.get(key);
+    if (!entry || entry.exited) return null;
+    return entry.cwd || null;
+  }
+
+  /** 라이브 세션의 [key, cwd] 목록 — 원격 제어 상태를 세션에 이어 붙일 때 쓴다. */
+  liveSessionCwds() {
+    const out = [];
+    for (const entry of this.#sessions.values()) {
+      if (!entry.exited) out.push({ key: entry.key, cwd: entry.cwd || null });
+    }
+    return out;
+  }
+
+  /**
+   * 종료된(리플레이용으로 남은) 세션까지 포함한 cwd 문자열 목록.
+   * 세션이 먼저 끝난 원격 제어를 클라이언트가 자기 것으로 알아보게 하는 용도 —
+   * 심볼릭 링크·대소문자 차이를 클라이언트가 판정하지 못하므로, 서버가 realpath로
+   * 묶어 준 "이 원격 제어에 해당하는 원본 철자들"을 내려보내기 위한 재료다.
+   */
+  allSessionCwds() {
+    const out = [];
+    for (const entry of this.#sessions.values()) {
+      if (entry.cwd) out.push(entry.cwd);
+    }
+    return out;
   }
 
   /**

@@ -1,12 +1,29 @@
 // message 아이템 하나를 kind별로 렌더.
 // assistant-text는 delta 덩어리를 그대로 그리지 않고 rAF 페이서(lib/stream-pace)로
 // 매 프레임 조금씩 드러내 타자기처럼 부드럽게 출력한다(reduced-motion이면 즉시 전체).
-import { memo, useEffect, useMemo, useState } from 'react';
+import { cloneElement, memo, useEffect, useMemo, useState } from 'react';
 import { render } from '../lib/markdown.js';
-import { fmtTok } from '../lib/format.js';
+import { fmtTok, fmtClock } from '../lib/format.js';
 import { nextShown } from '../lib/stream-pace.js';
 import ToolCard from './ToolCard.jsx';
 import ThinkingBlock from './ThinkingBlock.jsx';
+
+// 메시지 꼬리표 시각. item.at이 없으면(옛 프리로드 등) 아무것도 렌더하지 않는다.
+// dateTime에는 ISO 전체를, title에는 로케일 전체 시각을 실어 hover로 날짜까지 볼 수 있게 한다.
+function Stamp({ at, pending = false }) {
+  const label = fmtClock(at);
+  if (!label) return null;
+  // 스트리밍 중에는 시각을 감추되 **자리는 차지한다**. 끝난 뒤에 꼬리표가 새로
+  // 생기면 그만큼 높이가 늘어, 이미 하단에 고정해 둔 스크롤이 그 높이만큼 밀려
+  // "맨 아래"가 아니게 된다(윈도잉 e2e가 이걸 잡았다).
+  if (pending) return <time className="msg-time" aria-hidden="true">{' '}</time>;
+  const d = new Date(at);
+  return (
+    <time className="msg-time" dateTime={d.toISOString()} title={d.toLocaleString()}>
+      {label}
+    </time>
+  );
+}
 
 function rawSummary(payload) {
   if (!payload || typeof payload !== 'object') return '이벤트';
@@ -39,7 +56,7 @@ const prefersReducedMotion = () =>
 const HEAVY_LEN = 8000;
 const HEAVY_TICK_MS = 48;
 
-function AssistantText({ item, enter, isNew }) {
+function AssistantText({ item, enter, isNew, id }) {
   const full = item.text || '';
   // 라이브로 갓 등장한 블록(isNew)만 0부터 드러낸다 — 과거 대화 프리로드/세션 전환은
   // 즉시 전체. item.streaming 기준은 안 된다: delta~result가 한 번에 몰려오면
@@ -84,9 +101,11 @@ function AssistantText({ item, enter, isNew }) {
   );
 
   return (
-    <div className={`msg msg-assistant${enter}`}>
+    <div className={`msg msg-assistant${enter}`} id={id}>
       <div className="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
       {(item.streaming || catching) && <span className="stream-cursor" />}
+      {/* 시각은 스트리밍이 끝난 뒤에 드러내되 자리는 처음부터 잡아 둔다(Stamp 주석 참조). */}
+      <Stamp at={item.at} pending={!!item.streaming || catching} />
     </div>
   );
 }
@@ -157,13 +176,24 @@ function CompactionSummary({ item }) {
   );
 }
 
-function Message({ item, isNew, debug = false }) {
+// 점프 대상 id 주입 — 실행 중 도크가 이 id로 스크롤한다.
+// 래퍼 <div>를 씌우지 않고 각 kind가 만든 최상위 요소에 id만 얹는다.
+// display:contents 래퍼로 감쌌더니 레이아웃 박스가 사라져 ChatView의 읽기 위치
+// 앵커(offsetTop 기반)가 통째로 깨졌다 — DOM 모양은 예전 그대로여야 한다.
+function Message(props) {
+  const body = MessageBody(props);
+  if (body == null) return null;
+  return cloneElement(body, { id: `msg-${props.item.uid}` });
+}
+
+function MessageBody({ item, isNew, debug = false }) {
   const enter = isNew ? ' msg-enter' : '';
   switch (item.kind) {
     case 'user-text':
       return (
         <div className={`msg msg-user${enter}`}>
           <pre className="user-text">{item.text}</pre>
+          <Stamp at={item.at} />
         </div>
       );
 

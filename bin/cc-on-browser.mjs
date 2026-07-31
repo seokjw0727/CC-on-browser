@@ -18,6 +18,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../server/src/server.js';
 import { createLifecycle } from '../server/src/lifecycle.js';
+import {
+  readInstanceFile,
+  writeInstanceFile,
+  clearInstanceFile,
+} from '../server/src/instance-file.js';
 
 const selfPath = fileURLToPath(import.meta.url);
 const pkgRoot = path.resolve(path.dirname(selfPath), '..');
@@ -29,12 +34,18 @@ Local-only web UI for the claude CLI. Binds to 127.0.0.1 only.
 By default the server runs in the background (no console window), opens your
 browser, and shuts down automatically once every tab is closed.
 
+If a background server is already running on the port, re-running this command
+just opens a new browser tab into it instead of failing.
+
 Usage: cc-on-browser [options]
 
 Options:
   -p, --port <n>   Port to listen on (default: $PORT or 8787)
       --no-open    Do not open a browser or auto-exit; run a plain
                    foreground server until Ctrl+C
+      --shortcut   (Windows) Create a "Claude Code on Browser" shortcut on the
+                   Desktop and in the Start Menu that launches with no console
+                   window at all, then exit
   -v, --version    Print the version and exit
   -h, --help       Show this help and exit
 
@@ -52,6 +63,7 @@ const fail = (msg) => {
 let port = Number(process.env.PORT) || 8787;
 let noOpen = false;
 let daemonWorker = false;
+let shortcut = false;
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i += 1) {
   const arg = args[i];
@@ -60,6 +72,8 @@ for (let i = 0; i < args.length; i += 1) {
     i += 1;
   } else if (arg === '--no-open') {
     noOpen = true;
+  } else if (arg === '--shortcut') {
+    shortcut = true;
   } else if (arg === '--daemon-worker') {
     // 내부 전용(도움말 비노출): 부모가 백그라운드 데몬 재실행에만 붙인다.
     daemonWorker = true;
@@ -73,6 +87,21 @@ for (let i = 0; i < args.length; i += 1) {
     fail(`Unknown option: ${arg}\n\n${HELP}`);
   }
 }
+
+// --shortcut은 --help/--version과 같은 자리에서 처리·종료한다: 아래의 CLI 경로 검사·
+// 클라이언트 번들 확인·포트 검사·claude 프로브는 "서버를 띄울 때" 필요한 사전 점검이라,
+// 바로가기 생성이 그런 무관한 사정으로 실패하면 안 된다(codex 지적).
+if (shortcut) {
+  const { runShortcutCommand } = await import('./shortcut.mjs');
+  process.exit(await runShortcutCommand({
+    pkgRoot,
+    version: pkg.version,
+    // CC_ON_BROWSER_TEST_PLATFORM: bin.test.js 전용 — Windows에서도 비-Windows 경로를
+    // 밟아, 이 분기가 사전 점검들보다 앞에 있음을 실제 바로가기를 만들지 않고 검증한다.
+    platform: process.env.CC_ON_BROWSER_TEST_PLATFORM || process.platform,
+  }));
+}
+
 if (!Number.isInteger(port) || port < 0 || port > 65535) {
   fail('Invalid --port value: expected an integer between 0 and 65535.');
 }
@@ -102,44 +131,142 @@ const isDaemon = daemonWorker;
 
 // 포트 선점 검사 — 데몬이 EADDRINUSE로 조용히 죽는 대신 부모가 여기서 보고한다.
 // (검사~데몬 bind 사이의 레이스는 감수: 로컬 단일 사용자 도구다.)
-const assertPortFree = (p) => new Promise((resolve) => {
+// 'free' | 'busy'를 돌려주고 즉시 fail하지 않는다: busy가 "우리 데몬이 아직 살아
+// 있음"일 수 있고, 그때는 오류가 아니라 브라우저 탭만 새로 여는 게 맞다.
+// EACCES 등 재사용과 무관한 오류만 여기서 바로 보고한다.
+const probePort = (p) => new Promise((resolve) => {
   const probe = net.createServer();
   probe.once('error', (err) => {
     if (err?.code === 'EADDRINUSE') {
-      fail(`Port ${p} is already in use. Pick another one with --port <n>.`);
+      resolve('busy');
+      return;
     }
     if (err?.code === 'EACCES') {
       fail(`No permission to bind port ${p}. Try a port above 1024.`);
     }
     fail(String(err?.message ?? err));
   });
-  probe.listen(p, '127.0.0.1', () => probe.close(resolve));
+  probe.listen(p, '127.0.0.1', () => probe.close(() => resolve('free')));
 });
+
+const portBusyMessage = (p) => `Port ${p} is already in use. Pick another one with --port <n>.`;
+
+// 우리가 아는 bootstrap 응답은 수백 바이트다 — 이보다 크면 우리 서버가 아니다.
+// (200을 준 뒤 본문을 끝없이 흘리는 서버로부터 메모리를 보호한다.)
+const MAX_BOOTSTRAP_BODY = 64 * 1024;
+
+// 인증 REST 한 번 — 주어진 토큰으로 200을 주고, 스스로 보고하는 포트까지 일치하면
+// "그 토큰을 아는 우리 서버"가 확실하다. 포트까지 보는 이유: stale 신원 파일 뒤에
+// 우연히 다른 HTTP 서비스가 같은 포트를 잡고 200을 줄 수도 있다(codex 지적).
+//
+// 타임아웃은 req.setTimeout이 아니라 **절대 타이머**로 건다: setTimeout은 "무응답
+// 구간" 타이머라, 200을 준 뒤 본문을 조금씩 흘리는 서버에는 영원히 걸려 있을 수 있고
+// 그러면 아래의 전체 deadline이 무의미해진다(codex 지적).
+const identifyServer = (p, authToken, timeoutMs) => new Promise((resolve) => {
+  let done = false;
+  let req = null;
+  const finish = (v) => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    try { req?.destroy(); } catch { /* 이미 정리됨 */ }
+    resolve(v);
+  };
+  const timer = setTimeout(() => finish(false), timeoutMs);
+  try {
+    req = http.get(
+      { host: '127.0.0.1', port: p, path: '/api/bootstrap', headers: { 'x-auth-token': authToken } },
+      (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          finish(false);
+          return;
+        }
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => {
+          body += c;
+          if (body.length > MAX_BOOTSTRAP_BODY) finish(false);
+        });
+        res.on('end', () => {
+          try {
+            finish(JSON.parse(body)?.port === p);
+          } catch {
+            finish(false);
+          }
+        });
+        res.on('error', () => finish(false));
+      },
+    );
+  } catch {
+    // 기록된 토큰에 헤더로 못 쓰는 문자(개행 등)가 있으면 http.get이 동기 throw한다 —
+    // 손상된 기록으로 취급하고 조용히 실패한다(그러지 않으면 unhandled rejection으로
+    // 스택 트레이스를 뿜는다 — codex 지적).
+    finish(false);
+    return;
+  }
+  req.on('error', () => finish(false));
+});
+
+// unref하지 않는다: 이 타이머만 남은 순간 이벤트 루프가 비면 대기 중인 top-level
+// await가 그대로 버려지고 Node가 exit 13으로 끝난다(실측). 폴링 루프는 모두 짧은
+// deadline으로 묶여 있어 ref된 타이머가 프로세스를 붙잡아 두는 시간도 그만큼이다.
+const delay = (ms) => new Promise((r) => { setTimeout(r, ms); });
 
 // 데몬이 실제로 떠서 '우리 토큰'에 응답할 때까지 짧게 폴링 — 데몬 stdio가
 // ignore라 기동 실패(레이스 EADDRINUSE 등)가 조용히 묻히는 것을 부모가 대신
-// 감지한다. 단순 TCP 확인은 assertPortFree~데몬 bind 사이 레이스에 끼어든
-// 제3의 프로세스도 통과시키므로, 인증 REST(/api/bootstrap)로 신원까지 본다:
-// 200이면 방금 발급한 토큰을 아는 우리 데몬이 확실하다.
-const waitForDaemon = (p, authToken, timeoutMs) => new Promise((resolve) => {
+// 감지한다. 단순 TCP 확인은 포트 검사~데몬 bind 사이 레이스에 끼어든 제3의
+// 프로세스도 통과시키므로, 인증 REST(/api/bootstrap)로 신원까지 본다.
+const waitForDaemon = async (p, authToken, timeoutMs) => {
   const deadline = Date.now() + timeoutMs;
-  const retry = () => {
-    if (Date.now() >= deadline) resolve(false);
-    else setTimeout(attempt, 100);
-  };
-  const attempt = () => {
-    const req = http.get(
-      { host: '127.0.0.1', port: p, path: '/api/bootstrap', headers: { 'x-auth-token': authToken } },
-      (res) => {
-        res.resume(); // 본문을 소비해 소켓을 해제
-        if (res.statusCode === 200) resolve(true);
-        else retry();
-      },
-    );
-    req.on('error', retry);
-  };
-  attempt();
-});
+  for (;;) {
+    if (await identifyServer(p, authToken, 2_000)) return true;
+    if (Date.now() >= deadline) return false;
+    await delay(100);
+  }
+};
+
+// 포트를 쥔 게 "우리 데몬"인지 판정. 신원 파일이 없거나 인증이 안 되면 곧바로
+// 실패로 단정하지 않고 짧은 deadline 안에서 재시도한다 — 확정을 미뤄야 하는
+// 과도 구간이 실재한다(codex 지적):
+//   · 다른 launcher의 포트 프로브가 순간적으로 포트를 쥐고 있는 경우
+//   · 승자 데몬이 bind는 했지만 아직 신원 파일을 발행하지 않은 경우
+//   · 종료 중인 데몬이 파일은 지웠지만 listener는 아직 놓지 않은 경우
+// 포트가 비는 순간 즉시 포기한다(우리가 새로 띄우면 되므로) — 그 경우는 'free'로
+// 구분해 돌려준다. 'busy'로 뭉개면 종료 중인 데몬이 포트를 놓는 순간 재실행이
+// 오류로 죽는다(codex 지적).
+// CC_ON_BROWSER_TEST_REUSE_MS: bin.test.js 전용 — 대기를 줄여 테스트를 빠르게.
+const REUSE_DEADLINE_MS = Number(process.env.CC_ON_BROWSER_TEST_REUSE_MS) || 3_000;
+
+/** @returns {Promise<{status:'reuse', record: object}|{status:'free'}|{status:'busy'}>} */
+const findReusableDaemon = async (p, deadlineMs = REUSE_DEADLINE_MS) => {
+  const deadline = Date.now() + deadlineMs;
+  for (;;) {
+    const rec = readInstanceFile(p);
+    // 한 번의 시도에 전체 deadline의 '남은 예산'만 준다 — 개별 타임아웃이 전체
+    // deadline을 넘겨 버리지 않게(codex 지적). 최소 250ms는 확보한다.
+    const budget = Math.max(250, deadline - Date.now());
+    if (rec && (await identifyServer(p, rec.token, budget))) return { status: 'reuse', record: rec };
+    if ((await probePort(p)) === 'free') return { status: 'free' };
+    if (Date.now() >= deadline) return { status: 'busy' };
+    await delay(100);
+  }
+};
+
+const appUrl = (p, authToken) => `http://127.0.0.1:${p}/#token=${authToken}`;
+
+// 실행 중 데몬을 재사용했을 때의 한 줄. 버전은 **기록된 데몬의 것**을 쓴다 —
+// 이 런처의 pkg.version을 쓰면 구버전 데몬을 재사용할 때 거짓말이 된다(codex 지적).
+const alreadyRunningLine = (rec) =>
+  `Already running${rec.version ? ` (v${rec.version})` : ''} on port ${rec.port}`
+  + ' — opened a new browser tab.';
+
+/** 살아있는 데몬으로 탭만 열고 성공 종료. */
+const reuseDaemon = (rec) => {
+  openBrowser(appUrl(rec.port, rec.token));
+  console.log(alreadyRunningLine(rec));
+  process.exit(0);
+};
 
 const openBrowser = (url) => {
   // 토큰이 hex라 URL에 셸 특수문자가 없다 — 그대로 넘겨도 안전.
@@ -193,7 +320,16 @@ const warnClaudeMissing = () => {
 if (!noOpen && !isDaemon) {
   // 부모: 토큰을 만들어 데몬에 물려주고, URL을 출력한 뒤 곧바로 빠진다.
   const token = crypto.randomBytes(16).toString('hex');
-  if (port !== 0) await assertPortFree(port);
+  if (port !== 0 && (await probePort(port)) === 'busy') {
+    // 포트가 이미 점유됨. 예전에는 여기서 곧바로 죽었다 — 브라우저를 닫은 뒤에도
+    // 데몬이 잠시(또는 세션이 살아있으면 한참) 포트를 쥐고 있으므로, 탐색기·바로가기
+    // 실행에서는 창만 깜빡이고 아무 일도 없는 것처럼 보였다. 우리 데몬이면 재사용한다.
+    const found = await findReusableDaemon(port);
+    if (found.status === 'reuse') reuseDaemon(found.record);
+    if (found.status === 'busy') fail(portBusyMessage(port));
+    // 'free' — 판정 중에 포트가 비었다(직전 데몬이 종료를 마쳤다 등). 오류가 아니라
+    // 아래 정상 기동 경로로 그대로 떨어진다.
+  }
   // CLI 프로브는 데몬 기동 대기와 병행 — 브라우저 열림을 지연시키지 않는다.
   // 포트 검사 통과 후에만 시작해, 조기 실패 경로에서는 실제 CLI를 호출하지 않는다.
   const cliProbe = probeClaudeVersion();
@@ -213,6 +349,11 @@ if (!noOpen && !isDaemon) {
     // 포트를 몰라 스킵.)
     const listening = await waitForDaemon(port, token, 5_000);
     if (!listening) {
+      // 동시 실행 레이스: 두 부모가 모두 포트 검사를 통과했다면 bind는 한쪽만
+      // 성공한다. 우리 토큰에 응답이 없다면 승자의 신원 파일을 다시 읽어 그쪽을
+      // 재사용한다(우리 데몬은 EADDRINUSE로 이미 죽었다 — codex 지적).
+      const winner = await findReusableDaemon(port);
+      if (winner.status === 'reuse') reuseDaemon(winner.record);
       fail(`The background server did not come up on port ${port}.\n`
         + 'Re-run with --no-open to see the underlying error.');
     }
@@ -232,12 +373,21 @@ if (!noOpen && !isDaemon) {
 let handle;
 let lifecycle = null;
 let closingDown = false;
+// 이 데몬이 발행한 신원 파일 — 종료 시 "내 것만" 지우기 위한 좌표.
+let published = null;
 
 const shutdown = () => {
   if (closingDown) return;
   closingDown = true;
   // close()가 WS 종료 콜백을 재발화시켜도 무시되도록 lifecycle부터 정리한다.
   lifecycle?.dispose();
+  // 신원 파일은 **listener를 놓기 전에** 동기로 지운다. 순서를 뒤집으면 그 사이
+  // 후임 데몬이 같은 포트에 bind·발행할 수 있고, 우리가 그 파일을 지워 버린다
+  // (instance-file.js의 TOCTOU 주석 참조 — codex 지적).
+  if (published) {
+    clearInstanceFile(published);
+    published = null;
+  }
   const finish = () => process.exit(0);
   if (handle) handle.close().then(finish, finish);
   else finish();
@@ -270,14 +420,35 @@ try {
   throw err;
 }
 
+// Ctrl+C·종료 시그널은 두 실행 모드 모두에 건다. --no-open에도 필요하다 —
+// 이제 종료 경로가 원격 제어 자식 정리를 책임지므로, 여기가 비면 Ctrl+C가 그 정리를
+// 통째로 건너뛰고 자식이 고아로 남는다(codex 지적).
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+
 if (!noOpen) {
   // 데몬: 브라우저를 열고, 수명은 lifecycle 상태기계에 건다 — 최초 접속 90초 대기,
   // 의도적 탭 닫힘(bye)이면 10초 뒤 종료(기존 계약), 연결 유실(절전·리드 닫힘)이면
   // 살아있는 CLI 세션이 있는 한 무기한 재접속 대기(없으면 30분 유예).
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-  lifecycle = createLifecycle({ hasLiveSessions: handle.hasLiveSessions, shutdown });
-  openBrowser(`http://127.0.0.1:${handle.port}/#token=${handle.token}`);
+  // 신원 파일 발행 — listen이 끝난 뒤에만 한다(먼저 쓰면 아직 응답하지 않는 포트를
+  // 가리켜, 재실행이 그 토큰으로 인증을 시도하다 헛돈다). --port 0(랜덤)은 파일 키가
+  // 성립하지 않아 발행·재사용 모두 비활성이다(instance-file.js 참조).
+  if (port !== 0) {
+    const record = {
+      port: handle.port,
+      token: handle.token,
+      pid: process.pid,
+      version: pkg.version,
+    };
+    if (writeInstanceFile(record)) published = record;
+  }
+  lifecycle = createLifecycle({
+    hasLiveSessions: handle.hasLiveSessions,
+    // 원격 제어가 살아 있으면 브라우저를 닫아도 데몬을 내리지 않는다.
+    hasPinnedWork: handle.hasLiveRemoteControls,
+    shutdown,
+  });
+  openBrowser(appUrl(handle.port, handle.token));
 } else {
   console.log(`Claude Code on Browser v${pkg.version} — http://127.0.0.1:${handle.port}/#token=${handle.token}`);
   console.log('Local-only server (127.0.0.1). Keep this URL private — the token grants access.');

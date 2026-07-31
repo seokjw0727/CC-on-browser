@@ -32,7 +32,7 @@ in the background** with no console window. Once every tab is closed the server 
 itself about 10 seconds later — nothing to shut down manually.
 
 ```
-Claude Code on Browser v1.7.1 — http://127.0.0.1:8787/#token=<random>
+Claude Code on Browser v1.8.0 — http://127.0.0.1:8787/#token=<random>
 Opening your browser... The server runs in the background (127.0.0.1 only)
 and stops automatically once every tab is closed. (--no-open for a foreground server)
 claude CLI: 2.1.215 (Claude Code)
@@ -43,7 +43,34 @@ Common options:
 ```sh
 cc-on-browser --port 9000    # pick a port (-p)
 cc-on-browser --no-open      # plain foreground console server (Ctrl+C to stop)
+cc-on-browser --shortcut     # (Windows) create a console-free launch shortcut
 cc-on-browser --help         # all options
+```
+
+### Launching without a console window (Windows)
+
+Running `cc-on-browser` from Win+R or by double-clicking flashes a command prompt
+for 1–3 seconds. That console is created by npm's generated `cc-on-browser.cmd`
+before Node even starts, so the app cannot hide it. Run this **once**:
+
+```sh
+cc-on-browser --shortcut
+```
+
+You get a **"Claude Code on Browser"** shortcut on your Desktop and in the Start
+Menu; launching from there shows **only your browser** — no console at all
+(internally `wscript.exe` starts the server with a hidden window). Re-run
+`--shortcut` if you reinstall Node and its path changes.
+
+### Re-running while it is already up
+
+The server outlives the browser for a while (about 10 seconds after you
+deliberately close every tab; longer if the connection was merely lost to sleep).
+Re-running `cc-on-browser` during that window no longer fails — it **opens a new
+tab into the running server**, and your live CLI sessions are still there.
+
+```
+Already running (v1.8.0) on port 8787 — opened a new browser tab.
 ```
 
 > Once the package is published to the npm registry, `npm install -g cc-on-browser`
@@ -88,6 +115,19 @@ cc-on-browser --help         # all options
   CLI, reacting to session state (idle blinking with cursor-tracking eyes, thinking
   bubble, tool-scan scuttle, subagent juggling, permission hop, turn cheers, zzz after
   60s idle — respects `prefers-reduced-motion`).
+- **Remote Control** — the `📱 원격 제어` pill above the input starts
+  `claude remote-control` for the open repository, so you can drive it from
+  claude.ai/code and the Claude mobile app. The popover holds the connect link, a
+  copy button and a stop button. **While it is on, closing the browser does not
+  shut the app down** (that is the whole point) — turn it off when you are done.
+  Read [SECURITY.md](SECURITY.md) for what it exposes.
+- **Running-work dock** — background shells, background agents and in-flight tools
+  are listed *below* the input; click one to jump to its card in the transcript.
+  The list comes from the CLI's own running-task snapshot, so it shows exactly
+  what is actually running.
+- **Message timestamps** — user messages and assistant answers carry a small 24h
+  `HH:MM`. Resumed conversations show when things actually happened; hover for the
+  full date.
 - **Sleep survival** — if the connection drops from laptop-lid close or suspend, the
   server keeps live CLI sessions and reattaches automatically on wake.
 
@@ -130,7 +170,8 @@ cc-on-browser --help         # all options
 | --- | --- |
 | `WARNING: claude CLI not found` | CLI not installed or not on PATH. [Install it](https://claude.com/claude-code), check `claude` runs in a terminal, or set `CLAUDE_WEB_CLI_PATH` to its absolute path. |
 | Sessions fail to start | CLI not logged in — run `claude`, then `/login`. |
-| `Port 8787 is already in use` | Another instance/program owns it — pick another port: `cc-on-browser --port 9000`. |
+| A console window flashes on launch | That window comes from npm's `.cmd` shim. Use the shortcut created by `cc-on-browser --shortcut` and no console appears ([see above](#launching-without-a-console-window-windows)). |
+| `Port 8787 is already in use` | Another program owns that port, or one of our own instances is there but **could not be recognized** (older version, missing or corrupt instance file). When it is recognized you get a new tab instead of an error — otherwise pick another port: `cc-on-browser --port 9000`. |
 | 401 / blank page | You opened a URL without the token — use the full printed `#token=` URL. |
 | Browser does not open | Run with `--no-open` and open the printed URL yourself; the `BROWSER` env var selects which browser to launch. |
 | Server stops (or doesn't) unexpectedly | All tabs closed = auto-stop after ~10s (by design). Connection loss (suspend) waits as long as a session is alive (30-min grace when none). |

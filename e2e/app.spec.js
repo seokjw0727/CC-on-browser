@@ -205,7 +205,9 @@ test('지난 세션 재개 — 모달에서 고른 모델·권한 모드가 실�
 // 창에 들어온 아이템 수 — 창 200개는 assistant 메시지뿐 아니라 사용자 발화·
 // 턴 사용량 아이템도 함께 센다(리듀서가 만드는 message 아이템 단위가 창의 단위다).
 const winItems = (page) => page.locator('.msg-list > *:not(.load-earlier)');
-const bulkMsgs = (page) => page.locator('.msg-list .msg-assistant');
+// 본문만 본다 — 메시지 div에는 시각 꼬리표(.msg-time)도 함께 들어 있어
+// 전체 텍스트를 단언하면 시각까지 딸려 온다.
+const bulkMsgs = (page) => page.locator('.msg-list .msg-assistant .markdown-body');
 
 // prompt에 'raw'가 들어가면 fake CLI가 미지 이벤트를 하나 더 흘린다(디버그 토글 관측용).
 // 그 아이템은 디버그가 꺼져 있으면 렌더되지 않으므로 보이는 개수가 하나 줄어든다.
@@ -239,11 +241,11 @@ test('윈도잉 — "더 보기"는 한 단계만 열고 읽던 위치를 유지
   // 버튼이 보이는 위치까지 올린다(사용자가 버튼을 보고 누르는 상황).
   await page.evaluate(() => { document.querySelector('.chat-scroll').scrollTop = 0; });
   // 타자기 출력이 끝나야 높이가 확정된다 — 진행 중에 재면 위치가 계속 움직인다.
-  await expect(page.locator('.msg-list .msg-assistant').first()).toHaveText('bulk-301');
+  await expect(bulkMsgs(page).first()).toHaveText('bulk-301');
   await expect(page.getByText('bulk-305', { exact: true })).toHaveText('bulk-305');
   const anchorTop = () =>
     page.evaluate(() => {
-      const el = [...document.querySelectorAll('.msg-list .msg-assistant')]
+      const el = [...document.querySelectorAll('.msg-list .msg-assistant .markdown-body')]
         .find((e) => e.innerText.trim() === 'bulk-305');
       return el ? Math.round(el.getBoundingClientRect().top) : null;
     });
@@ -364,6 +366,48 @@ test('세션 전환 — 되돌아온 세션의 기존 메시지는 등장 애니
   expect(await page.evaluate(() => window.__maxEnter)).toBe(0);
 });
 
+// 입력창 위 배지 정리(2026-07-30 요청) — 울트라코드·권한 상승 배지는 사라지고
+// 목표만 'GOAL' 한 단어로 남는다. 단언이 무의미해지지 않도록 신뢰모드와 울트라코드를
+// **실제로 활성화한 뒤** 배지 부재를 확인한다(codex 지적).
+test('컴포저 배지 — 울트라코드·신뢰모드 배지 없음, 목표는 GOAL + hover/포커스 툴팁', async ({ page }) => {
+  await startSession(page, servers.echo.url, { permissionMode: 'bypassPermissions' });
+  await expect(page.getByLabel('권한 모드')).toHaveValue('bypassPermissions');
+
+  // 노력 수준을 울트라코드로 — 같은 대화로 세션이 재시작된다.
+  await page.locator('.model-menu-btn').nth(1).click();
+  await page.getByRole('menuitemradio', { name: /울트라코드/ }).click();
+  await expect(page.getByLabel('메시지 입력')).toBeEnabled();
+  await expect(page.locator('.model-menu-btn').nth(1)).toContainText('울트라코드');
+  // 재시작이 권한 모드 계보를 이월한다 — 신뢰모드가 여전히 활성이어야 단언이 유효하다.
+  await expect(page.getByLabel('권한 모드')).toHaveValue('bypassPermissions');
+
+  // 목표 설정 — 인자가 붙으면 `/` 드롭다운이 닫히므로 Enter가 그대로 전송된다.
+  const input = page.getByLabel('메시지 입력');
+  await input.fill('/goal 리팩터 마무리');
+  await input.press('Enter');
+
+  const goalBadge = page.locator('.mode-badge.goal');
+  await expect(goalBadge).toHaveText('GOAL');
+  await expect(goalBadge).toHaveAttribute('data-tip', '활성 목표: 리팩터 마무리');
+  // 둘 다 활성인데도 배지는 없다 = 안내 배지가 제거됐다.
+  await expect(page.locator('.mode-badge.ultra')).toHaveCount(0);
+  await expect(page.locator('.mode-badge.perm')).toHaveCount(0);
+
+  // hover로 목표 전문이 실제로 뜬다 — data-tip 값만 보면 툴팁 배선이 끊겨도 통과한다.
+  await goalBadge.hover();
+  await expect(page.locator('#app-tooltip')).toContainText('리팩터 마무리');
+
+  // 키보드로도 읽을 수 있어야 한다. 프로그램적 focus()가 아니라 키보드 이동이어야
+  // :focus-visible이 걸려 툴팁이 뜬다. DOM 인접성에 못 박지 않도록 입력창에서
+  // 역방향 탭을 제한 횟수만큼 밟아 배지에 닿는지로 확인한다.
+  await input.focus();
+  for (let i = 0; i < 6 && !(await goalBadge.evaluate((el) => el === document.activeElement)); i++) {
+    await page.keyboard.press('Shift+Tab');
+  }
+  await expect(goalBadge).toBeFocused();
+  await expect(page.locator('#app-tooltip')).toContainText('리팩터 마무리');
+});
+
 // 파괴적 — 시딩된 히스토리를 실제로 지우므로 이 파일의 마지막에 둔다.
 // 자기 시드를 먼저 되살려 재시도(CI retries)에도 결정적으로 동작한다.
 test('지난 세션 삭제 — 확인 후 목록에서 사라진다', async ({ page }) => {
@@ -382,4 +426,104 @@ test('지난 세션 삭제 — 확인 후 목록에서 사라진다', async ({ p
 
   await expect(pastList.locator('.past-row')).toHaveCount(1);
   await expect(pastList).not.toContainText('E2E 씨앗 베타');
+});
+
+test('원격 제어 pill — 실패 경로가 사유와 함께 팝오버에 뜬다', async ({ page }) => {
+  // 가짜 CLI는 FAKE_RC 기본값(fail)으로 로그인 실패 문구를 내고 즉시 종료한다.
+  // 여기서 보는 것은 "서버가 파싱한 사유가 그대로 UI까지 도달하는가"다 —
+  // 실제 claude.ai 연결은 e2e에서 만들지 않는다.
+  await startSession(page, servers.echo.url);
+  // 팝오버 안에도 "원격 제어 끄기" 버튼이 있어 이름 정규식으로는 둘이 잡힌다 — 클래스로 특정한다.
+  const pill = page.locator('.remote-pill');
+  await expect(pill).toBeVisible();
+  await expect(pill).toContainText('원격 제어'); // 꺼진 상태
+
+  await pill.click();
+  // 자식이 실패하면 상태가 error로 내려오고 pill 문구가 바뀐다
+  await expect(pill).toContainText('원격 실패', { timeout: 15_000 });
+
+  const pop = page.getByRole('dialog', { name: '원격 제어' });
+  await expect(pop).toBeVisible();
+  await expect(pop).toContainText('logged in'); // CLI가 낸 사유 원문
+  // 사용자가 반드시 알아야 하는 문구 두 가지
+  await expect(pop).toContainText('브라우저를 닫아도 계속 동작합니다');
+
+  // Escape로 닫힌다
+  await page.keyboard.press('Escape');
+  await expect(pop).toBeHidden();
+});
+
+test('메시지 타임스탬프 — 사용자 메시지와 답변에 HH:MM이 붙는다', async ({ page }) => {
+  await startSession(page, servers.echo.url);
+  const input = page.getByLabel('메시지 입력');
+  await input.fill('시각 표시 확인');
+  await input.press('Enter');
+  await expect(page.getByText(/echo: 시각 표시 확인/).first()).toBeVisible();
+
+  // 사용자 말풍선과 어시스턴트 답변 각각에 <time>이 하나씩
+  const userTime = page.locator('.msg-user .msg-time');
+  const asstTime = page.locator('.msg-assistant .msg-time');
+  await expect(userTime.first()).toBeVisible();
+  await expect(asstTime.first()).toBeVisible();
+  await expect(userTime.first()).toHaveText(/^\d{2}:\d{2}$/);
+  await expect(asstTime.first()).toHaveText(/^\d{2}:\d{2}$/);
+  // 접근성: 기계가 읽을 ISO도 함께 실린다
+  await expect(asstTime.first()).toHaveAttribute('datetime', /^\d{4}-\d{2}-\d{2}T/);
+
+  // 시각은 사용자·어시스턴트 메시지에만 — 총 개수가 그 메시지 수와 같다
+  await expect(page.locator('.msg-time')).toHaveCount(
+    await page.locator('.msg-user, .msg-assistant').count(),
+  );
+});
+
+test('메시지 타임스탬프 — 사용자·어시스턴트 메시지에만 정확히 하나씩 붙는다', async ({ page }) => {
+  // echo 시나리오만으로는 "제외"가 공허하게 통과한다(codex 지적) — 다른 종류의 아이템이
+  // 함께 있는 권한 시나리오에서, 시각의 총 개수가 사용자+어시스턴트 메시지 수와
+  // 정확히 같은지를 본다. 이 불변식은 어떤 아이템 종류가 더 생겨도 유지돼야 한다.
+  await startSession(page, servers.permission.url);
+  const input = page.getByLabel('메시지 입력');
+  await input.fill('write something');
+  await input.press('Enter');
+  const permDialog = page.getByRole('dialog', { name: '도구 사용 권한 요청' });
+  await expect(permDialog).toBeVisible();
+  await permDialog.getByRole('button', { name: '허용' }).click();
+  await expect(permDialog).toBeHidden();
+  await expect(page.locator('.msg-user').first()).toBeVisible();
+
+  // 사용자/어시스턴트 외의 아이템(턴 사용량 등)이 실제로 함께 있는 상태여야 의미가 있다
+  const stamped = await page.locator('.msg-user, .msg-assistant').count();
+  const others = await page.locator('.msg-list > *:not(.load-earlier)').count() - stamped;
+  expect(others).toBeGreaterThan(0);
+
+  await expect(page.locator('.msg-time')).toHaveCount(stamped);
+  await expect(page.locator('.msg-user .msg-time')).toHaveCount(
+    await page.locator('.msg-user').count(),
+  );
+});
+
+test('실행 중 도크 — 입력창 아래에 뜨고, 클릭하면 대화 속 카드로 이동한다', async ({ page }) => {
+  await startSession(page, servers.bgtask.url);
+  const input = page.getByLabel('메시지 입력');
+  await input.fill('백그라운드로 돌려줘');
+  await input.press('Enter');
+
+  const dock = page.locator('.running-dock');
+  await expect(dock).toBeVisible();
+  await expect(dock.locator('.dock-count')).toContainText('실행 중 1개');
+  await expect(dock.locator('.dock-label')).toHaveText('sleep 40');
+  await expect(dock.locator('.dock-detail')).toHaveText('백그라운드 셸');
+
+  // 위치 — 입력창(textarea) **아래**에 있어야 한다
+  const inputBox = await input.boundingBox();
+  const dockBox = await dock.boundingBox();
+  expect(dockBox.y).toBeGreaterThan(inputBox.y);
+
+  // 클릭 → 해당 도구 카드로 이동 + 잠깐 강조
+  await dock.locator('.dock-item').click();
+  const flashed = page.locator('.msg-jump-flash');
+  await expect(flashed).toHaveCount(1);
+  await expect(flashed.locator('.tool-card')).toBeVisible();
+  // 대상이 화면 안에 들어와 있다
+  const cardBox = await flashed.boundingBox();
+  expect(cardBox.y).toBeGreaterThan(0);
 });

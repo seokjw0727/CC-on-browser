@@ -37,11 +37,16 @@ class TestClient {
 
   static async connect(url, opts) {
     const ws = new WebSocket(url, opts);
+    // 핸들러를 open **이전에** 붙인다. 서버가 연결 직후 곧바로 보내는 메시지
+    // (원격 제어 스냅샷)는 open 이벤트와 같은 틱에 도착할 수 있어, open을 먼저
+    // 기다렸다가 붙이면 그 첫 메시지를 놓친다. 실제 브라우저 클라이언트도
+    // onmessage를 연결 전에 등록하므로 이 순서가 현실과 맞다.
+    const client = new TestClient(ws);
     await new Promise((resolve, reject) => {
       ws.once('open', resolve);
       ws.once('error', reject);
     });
-    return new TestClient(ws);
+    return client;
   }
 
   send(obj) {
@@ -895,4 +900,269 @@ test('static serving + SPA fallback (no auth required)', async () => {
   const fallback = await fetch(`${base}/some/spa/route`);
   assert.equal(fallback.status, 200);
   assert.match(await fallback.text(), /ccob-test/);
+});
+
+// ----- 원격 제어 WS 계약 -----
+// 관리자는 가짜로 주입한다(실제 claude remote-control을 띄우지 않는다).
+// 여기서 보는 것은 "서버가 key를 cwd로 바꿔 넘기는가 / 스냅샷을 언제 보내는가 /
+// close가 자식 정리를 먼저 하는가" 세 가지다.
+function fakeRemoteControl() {
+  const calls = [];
+  let states = [];
+  const listeners = new Set();
+  return {
+    calls,
+    setStates(next) {
+      states = next;
+      for (const fn of listeners) fn(states);
+    },
+    on: (_evt, fn) => listeners.add(fn),
+    off: (_evt, fn) => listeners.delete(fn),
+    start: async (cwd, opts) => {
+      calls.push({ op: 'start', cwd, opts });
+      const st = { cwd, name: opts?.name ?? 'x', state: 'starting', environmentId: null,
+        url: null, capacity: null, error: null, startedAt: 1 };
+      states = [st];
+      for (const fn of listeners) fn(states);
+      return st;
+    },
+    stop: async (cwd) => {
+      calls.push({ op: 'stop', cwd });
+      states = states.map((s) => ({ ...s, state: 'stopped' }));
+      for (const fn of listeners) fn(states);
+      return states[0] ?? null;
+    },
+    snapshot: () => states,
+    hasLive: () => states.some((s) => s.state === 'starting' || s.state === 'ready'),
+    closeAll: async () => { calls.push({ op: 'closeAll' }); states = []; },
+  };
+}
+
+test('원격 제어: 연결 직후 스냅샷, key→cwd 해석, 미지의 key 거부, 상태 방송', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const rc = fakeRemoteControl();
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    remoteControl: rc,
+  });
+  const url = `ws://127.0.0.1:${h.port}/ws?token=${TOKEN}`;
+  try {
+    const c = await TestClient.connect(url);
+    // 1) 연결 직후 스냅샷 — 비어 있어도 보낸다("아무것도 안 켜짐"도 복구할 사실)
+    const snap = await c.next((m) => m.type === 'remoteControl');
+    assert.deepEqual(snap.states, []);
+
+    // 2) 라이브 세션이 아닌 key는 거부 — WS가 준 임의 경로를 쓰지 않는다는 규율
+    c.send({ type: 'remoteControl', action: 'start', key: 's_nope' });
+    const err = await c.next((m) => m.type === 'error');
+    assert.match(err.message, /실행 중인 세션/);
+    assert.equal(rc.calls.length, 0, '세션이 없으면 관리자를 부르지 않는다');
+
+    // 3) 라이브 세션의 key → 그 세션의 cwd로 start
+    c.send({ type: 'start', startId: 'rc_1', cwd: tmpRoot });
+    const started = await c.next((m) => m.type === 'started' && m.startId === 'rc_1');
+    c.send({ type: 'remoteControl', action: 'start', key: started.key, name: 'my rc' });
+    const after = await c.next((m) => m.type === 'remoteControl' && m.states.length === 1);
+    assert.equal(rc.calls[0].op, 'start');
+    assert.equal(rc.calls[0].cwd, tmpRoot, '클라이언트가 보낸 경로가 아니라 세션의 cwd');
+    assert.equal(rc.calls[0].opts.name, 'my rc');
+    // 그 cwd를 쓰는 라이브 세션 key가 붙어 온다
+    assert.deepEqual(after.states[0].keys, [started.key]);
+
+    // 4) 관리자가 스스로 상태를 바꾸면 전 소켓에 방송된다
+    const c2 = await TestClient.connect(url);
+    await c2.next((m) => m.type === 'remoteControl');
+    rc.setStates([{ cwd: tmpRoot, name: 'my rc', state: 'ready', environmentId: 'env_x',
+      url: 'https://claude.ai/code?environment=env_x', capacity: { used: 0, max: 32 },
+      error: null, startedAt: 1 }]);
+    const bc = await c2.next((m) => m.type === 'remoteControl' && m.states[0]?.state === 'ready');
+    assert.equal(bc.states[0].environmentId, 'env_x');
+
+    // 5) stop도 같은 해석 경로
+    c.send({ type: 'remoteControl', action: 'stop', key: started.key });
+    await c.next((m) => m.type === 'remoteControl' && m.states[0]?.state === 'stopped');
+    assert.equal(rc.calls.at(-1).op, 'stop');
+    assert.equal(rc.calls.at(-1).cwd, tmpRoot);
+
+    // 6) 알 수 없는 action
+    c.send({ type: 'remoteControl', action: 'bogus', key: started.key });
+    const err2 = await c.next((m) => m.type === 'error' && /unknown remoteControl/.test(m.message));
+    assert.ok(err2);
+  } finally {
+    await h.close();
+  }
+  // 7) close()는 원격 제어 자식 정리를 먼저 한다 — 순서가 뒤집히면 고아가 남는다
+  assert.equal(rc.calls.at(-1).op, 'closeAll');
+});
+
+test('원격 제어: hasLiveRemoteControls가 수명 정책 창구로 노출된다', async () => {
+  const rc = fakeRemoteControl();
+  const h = await startServer({
+    port: 0, token: TOKEN, cliPath: process.execPath, cliArgsPrefix: [fakeCliPath],
+    projectsRoot, staticDir, remoteControl: rc,
+  });
+  try {
+    assert.equal(h.hasLiveRemoteControls(), false);
+    rc.setStates([{ cwd: 'C:/x', name: 'n', state: 'ready', environmentId: null, url: null,
+      capacity: null, error: null, startedAt: 1 }]);
+    assert.equal(h.hasLiveRemoteControls(), true);
+  } finally {
+    await h.close();
+  }
+});
+
+test('SessionHub.cwdOf: 라이브 세션만 cwd를 내주고 종료·미지의 key는 null', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const rc = fakeRemoteControl();
+  const h = await startServer({
+    port: 0, token: TOKEN, cliPath: process.execPath, cliArgsPrefix: [fakeCliPath],
+    projectsRoot, staticDir, remoteControl: rc,
+  });
+  const url = `ws://127.0.0.1:${h.port}/ws?token=${TOKEN}`;
+  try {
+    const c = await TestClient.connect(url);
+    c.send({ type: 'start', startId: 'cw_1', cwd: tmpRoot });
+    const started = await c.next((m) => m.type === 'started' && m.startId === 'cw_1');
+    // 라이브 → 원격 제어가 붙는다
+    c.send({ type: 'remoteControl', action: 'start', key: started.key });
+    await c.next((m) => m.type === 'remoteControl' && m.states.length === 1);
+    assert.equal(rc.calls.at(-1).cwd, tmpRoot);
+
+    // 세션 종료 후에는 같은 key로 더 이상 켤 수 없다(리플레이용으로 남아 있어도)
+    c.send({ type: 'stop', key: started.key });
+    await c.next((m) => m.type === 'exit' && m.key === started.key);
+    const before = rc.calls.length;
+    c.send({ type: 'remoteControl', action: 'start', key: started.key });
+    const err = await c.next((m) => m.type === 'error');
+    assert.match(err.message, /실행 중인 세션/);
+    assert.equal(rc.calls.length, before, '종료된 세션의 cwd로는 관리자를 부르지 않는다');
+  } finally {
+    await h.close();
+  }
+});
+
+test('원격 제어 정리가 걸려도 close는 상한 안에 리스너를 놓는다', async () => {
+  const rc = fakeRemoteControl();
+  rc.closeAll = () => new Promise(() => {}); // 영원히 안 끝나는 정리
+  const h = await startServer({
+    port: 0, token: TOKEN, cliPath: process.execPath, cliArgsPrefix: [fakeCliPath],
+    projectsRoot, staticDir, remoteControl: rc, closeRemoteGraceMs: 150,
+  });
+  assert.equal(h.server.listening, true);
+  await h.close();
+  // 상한이 없으면 포트를 쥔 채 시그널에도 응답하지 않는 데몬이 된다 — 그쪽이 더 나쁘다
+  assert.equal(h.server.listening, false, '정리가 걸려도 포트는 놓아야 한다');
+});
+
+test('원격 제어 정리가 실패해도 종료는 진행된다', async () => {
+  const rc = fakeRemoteControl();
+  rc.closeAll = async () => { throw new Error('boom'); };
+  const h = await startServer({
+    port: 0, token: TOKEN, cliPath: process.execPath, cliArgsPrefix: [fakeCliPath],
+    projectsRoot, staticDir, remoteControl: rc, closeRemoteGraceMs: 150,
+  });
+  await h.close();
+  assert.equal(h.server.listening, false);
+});
+
+test('원격 제어 start 결과는 요청 소켓뿐 아니라 모든 소켓에 방송된다', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const rc = fakeRemoteControl();
+  const h = await startServer({
+    port: 0, token: TOKEN, cliPath: process.execPath, cliArgsPrefix: [fakeCliPath],
+    projectsRoot, staticDir, remoteControl: rc,
+  });
+  const url = `ws://127.0.0.1:${h.port}/ws?token=${TOKEN}`;
+  try {
+    const a = await TestClient.connect(url);
+    await a.next((m) => m.type === 'remoteControl');
+    a.send({ type: 'start', startId: 'bc_1', cwd: tmpRoot });
+    const started = await a.next((m) => m.type === 'started' && m.startId === 'bc_1');
+
+    // 두 번째 탭은 세션이 생긴 뒤에 붙는다
+    const b = await TestClient.connect(url);
+    await b.next((m) => m.type === 'remoteControl');
+
+    a.send({ type: 'remoteControl', action: 'start', key: started.key });
+    // 다른 탭도 key가 채워진 최신 상태를 받아야 한다 — 요청 소켓에만 보내면 갇힌다
+    const seen = await b.next(
+      (m) => m.type === 'remoteControl' && m.states[0]?.keys?.includes(started.key),
+    );
+    assert.equal(seen.states[0].cwd, tmpRoot);
+  } finally {
+    await h.close();
+  }
+});
+
+test('원격 제어: 세션 start/exit가 keys 스냅샷을 갱신한다', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const rc = fakeRemoteControl();
+  const h = await startServer({
+    port: 0, token: TOKEN, cliPath: process.execPath, cliArgsPrefix: [fakeCliPath],
+    projectsRoot, staticDir, remoteControl: rc,
+  });
+  const url = `ws://127.0.0.1:${h.port}/ws?token=${TOKEN}`;
+  try {
+    const c = await TestClient.connect(url);
+    await c.next((m) => m.type === 'remoteControl');
+    c.send({ type: 'start', startId: 'k1', cwd: tmpRoot });
+    const a = await c.next((m) => m.type === 'started' && m.startId === 'k1');
+    c.send({ type: 'remoteControl', action: 'start', key: a.key });
+    await c.next((m) => m.type === 'remoteControl' && m.states[0]?.keys?.includes(a.key));
+
+    // 같은 디렉터리에 두 번째 세션 — 새 세션에도 keys가 붙어야 한다
+    c.send({ type: 'start', startId: 'k2', cwd: tmpRoot });
+    const b = await c.next((m) => m.type === 'started' && m.startId === 'k2');
+    const both = await c.next(
+      (m) => m.type === 'remoteControl' && m.states[0]?.keys?.includes(b.key),
+    );
+    assert.ok(both.states[0].keys.includes(a.key), '기존 세션도 그대로 유지');
+
+    // 세션이 끝나면 그 key는 빠져야 한다 — 안 그러면 종료된 탭의 pill이 켜진 채 남는다
+    c.send({ type: 'stop', key: b.key });
+    const after = await c.next(
+      (m) => m.type === 'remoteControl' && !m.states[0]?.keys?.includes(b.key),
+    );
+    assert.ok(after.states[0].keys.includes(a.key));
+  } finally {
+    await h.close();
+  }
+});
+
+test('원격 제어: 세션이 먼저 끝나도 알려 준 cwd로는 끌 수 있다', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const rc = fakeRemoteControl();
+  const h = await startServer({
+    port: 0, token: TOKEN, cliPath: process.execPath, cliArgsPrefix: [fakeCliPath],
+    projectsRoot, staticDir, remoteControl: rc,
+  });
+  const url = `ws://127.0.0.1:${h.port}/ws?token=${TOKEN}`;
+  try {
+    const c = await TestClient.connect(url);
+    await c.next((m) => m.type === 'remoteControl');
+    c.send({ type: 'start', startId: 'x1', cwd: tmpRoot });
+    const s = await c.next((m) => m.type === 'started' && m.startId === 'x1');
+    c.send({ type: 'remoteControl', action: 'start', key: s.key });
+    await c.next((m) => m.type === 'remoteControl' && m.states.length === 1);
+
+    c.send({ type: 'stop', key: s.key });
+    await c.next((m) => m.type === 'exit' && m.key === s.key);
+
+    // 세션이 없으니 key로는 못 찾는다 — 서버가 이미 알려 준 cwd는 받아들여야 한다
+    c.send({ type: 'remoteControl', action: 'stop', cwd: tmpRoot });
+    await c.next((m) => m.type === 'remoteControl' && m.states[0]?.state === 'stopped');
+    assert.equal(rc.calls.at(-1).op, 'stop');
+
+    // 우리가 알려 준 적 없는 경로는 거부한다 — 임의 경로를 여는 권한이 아니다
+    c.send({ type: 'remoteControl', action: 'stop', cwd: 'C:/somewhere/else' });
+    const err = await c.next((m) => m.type === 'error');
+    assert.match(err.message, /찾지 못했습니다/);
+  } finally {
+    await h.close();
+  }
 });

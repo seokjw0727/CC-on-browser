@@ -91,6 +91,9 @@ export function openSubagents(messages) {
         : null;
     return {
       key: `sub-${m.uid ?? `${m.msgId}:${m.blockIndex}`}`,
+      // 원본 메시지 uid — 도크에서 대화 속 카드로 점프할 때의 대상.
+      // key는 'sub-' 접두사가 붙어 DOM id와 맞지 않으므로 별도로 낸다.
+      uid: m.uid ?? null,
       toolUseId,
       name: m.name || 'Task',
       description,

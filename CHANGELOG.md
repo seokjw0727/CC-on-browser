@@ -8,6 +8,87 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-08-01
+
+> Claude Code 원격 제어 연동(claude.ai·모바일 앱에서 이 레포 조종), 입력창 아래
+> "실행 중" 도크, 메시지 시각 표시. 그리고 `/clear` 후 모델 선택이 풀리던 문제 수정,
+> 재실행 시 실행 중인 서버 재사용, Windows 무콘솔 실행 바로가기, 입력창 배지 정리.
+> (Remote Control from claude.ai and the mobile app; a running-work dock under the
+> composer; message timestamps. Plus: model stays selected after `/clear`; relaunch
+> reuses a live server; a console-free Windows launcher; slimmer composer badges.)
+
+### Fixed
+- **The model picker no longer clears itself after `/clear`.** Measured against
+  the real CLI v2.1.220: right after `/clear` the CLI emits a correct
+  `system/init` and then a dummy `assistant` message whose `message.model` is the
+  literal sentinel `<synthetic>` with the body `(no content)`. The client was
+  harvesting that sentinel as the session's model, so `familyOf()` found no
+  family — the pill fell back to "모델" with nothing checked in the menu, and the
+  measured context window was reset along with it. The sentinel is now excluded
+  from model harvesting (exact match only — no model-name allowlist that could
+  reject future models), and that `(no content)` placeholder no longer renders as
+  an empty assistant bubble. A `<synthetic>` message that carries real text (for
+  example a login prompt) is still shown.
+
+### Added
+- **Remote Control: drive this repo from claude.ai/code or the Claude mobile app.**
+  A `📱 원격 제어` pill next to the repo pill starts `claude remote-control` for the
+  session's directory and shows the resulting `claude.ai/code?environment=…` link,
+  a copy button and a stop button. Measured against the real CLI v2.1.220: the
+  `--remote-control` flag is silently ignored in `-p`/stream-json mode, and
+  `claude daemon remote-control` is unavailable on Windows, so the server manages
+  the process directly — one child per canonical directory, tree-terminated on
+  stop. The browser only ever sends a session key; the server resolves the
+  directory from its own session ledger, so no client-supplied path can open a
+  remote control. **While Remote Control is on, closing the browser no longer
+  shuts the app down** — that is the point of the feature — so remember to turn it
+  off; the popover says so. See SECURITY.md for what the feature exposes.
+- **A "실행 중" dock under the composer shows running shells and subagents.**
+  Background shells, background agents and in-flight foreground `Bash`/`Task`
+  calls are listed under the input; clicking one scrolls the transcript to that
+  card and highlights it briefly. The running list comes from the CLI's own
+  `background_tasks_changed` snapshot rather than guesswork over tool-result text,
+  so items appear and disappear exactly when the CLI says they do, and a resumed
+  conversation never shows ghosts of tools that stopped long ago.
+- **Messages carry a small `HH:MM` timestamp.** User messages and assistant
+  answers only — tool cards and thinking blocks stay uncluttered. The time comes
+  from the CLI event itself, so a resumed conversation shows when things actually
+  happened rather than when it was reopened; hovering shows the full date.
+- **Re-running `cc-on-browser` while a server is already up now just opens a new
+  tab.** The background daemon outlives the browser for a while (about 10 seconds
+  after every tab is deliberately closed, longer when the connection was merely
+  lost to sleep, longer still while CLI sessions are alive), and re-running during
+  that window used to die with `Port 8787 is already in use` — from a shortcut or
+  Win+R that looked like nothing happened at all. The daemon now records its port,
+  token, pid and version in `~/.cc-on-browser/instance-<port>.json`; a relaunch
+  authenticates against the running server with that token (and checks the port it
+  reports back) and, when it is ours, opens a browser tab and exits 0 with
+  `Already running (v…) on port … — opened a new browser tab.` Live CLI sessions
+  survive. A foreign program on the port still produces the original error. No
+  unauthenticated HTTP endpoint was added; see SECURITY.md for the trust boundary
+  of the token file.
+- **`cc-on-browser --shortcut` (Windows): launch with no console window at all.**
+  Running the command from Win+R or Explorer flashes a command prompt for 1–3
+  seconds, because npm's generated `cc-on-browser.cmd` creates that console before
+  Node can run — nothing in the app can hide it. The new flag creates a
+  "Claude Code on Browser" shortcut on the Desktop and in the Start Menu that goes
+  through `wscript.exe` (a GUI-subsystem host, so no console exists) and starts the
+  server with a hidden window: only the browser appears. Partial success is
+  reported per location, and the command runs before every server-related preflight
+  so unrelated setup problems cannot block it.
+
+### Changed
+- **The running-subagent panel moved below the input and became the work dock.**
+  It used to sit above the input and only appear while a turn was in flight, which
+  hid exactly the long-running background work it should have shown. Items are now
+  clickable.
+- **The composer no longer shows the `⚡ 울트라코드` and `🔓 권한 상승` badges.**
+  The effort picker and the permission-mode select already show that state, so the
+  badges were duplicate signage. The options themselves are untouched.
+- **The active-goal badge is now just `GOAL`.** The full goal text moved into the
+  tooltip (hover, and keyboard focus for anyone without a mouse) instead of taking
+  up a line above the input.
+
 ## [1.7.1] - 2026-07-29
 
 > `/clear`·`/compact` 직후 상태줄 CTX가 다음 턴까지 옛 값으로 남던 문제 수정.

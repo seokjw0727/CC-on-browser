@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import { spawn } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 import { SessionHub } from './session-hub.js';
@@ -12,8 +13,12 @@ import { listProjects, listSessions, loadTranscript, listRecentSessions, deleteS
 import { listDirs, pickDirectory, searchFiles } from './fs-api.js';
 import { aggregateDailyUsage, aggregateUsage, MAX_DAILY_DAYS } from './usage.js';
 import { fetchQuota } from './quota.js';
+import { createRemoteControl } from './remote-control.js';
 
 const VERSION_TIMEOUT_MS = 3_000;
+// close()가 원격 제어 자식 정리를 기다리는 상한. remote-control.js의 stop 유예
+// (기본 5초 × 2단계)보다 넉넉하되, 사용자가 체감할 만큼 길지는 않게.
+const CLOSE_REMOTE_GRACE_MS = 12_000;
 const USAGE_CACHE_MS = 30_000;
 const QUOTA_CACHE_MS = 60_000;
 // 일별 집계(돌아보기 잔디)는 최대 1년치 스캔이라 5h/7d보다 캐시를 길게 둔다
@@ -54,11 +59,14 @@ export async function startServer({
   byeMarkTtlMs = BYE_MARK_TTL_MS, // 테스트 주입용
   directoryPicker, // 테스트 주입용 — 기본은 fs-api.js의 네이티브 폴더 선택 대화상자
   platform = process.platform, // 테스트 주입용 — E2E가 비-Windows UI(cwd 직접 입력 폴백)를 강제
+  remoteControl, // 테스트 주입용 — 기본은 remote-control.js의 실제 자식 프로세스 관리자
+  closeRemoteGraceMs = CLOSE_REMOTE_GRACE_MS, // 테스트 주입용 — 정리 대기 상한
 } = {}) {
   if (!token) throw new TypeError('token is required');
   if (!cliPath) throw new TypeError('cliPath is required');
 
   const hub = new SessionHub({ cliPath, cliArgsPrefix, exitedRetentionMs });
+  const rc = remoteControl ?? createRemoteControl({ cliPath, cliArgsPrefix });
   /** @type {Set<import('ws').WebSocket>} */
   const sockets = new Set();
   /** @type {WeakMap<import('ws').WebSocket, {at: number, seq: number}>} ws -> bye 수신 시각·연결 세대 */
@@ -124,12 +132,60 @@ export async function startServer({
     return versionPromise;
   };
 
-  hub.on('broadcast', (msg) => {
+  const broadcast = (msg) => {
     const data = JSON.stringify(msg);
     for (const ws of sockets) {
       if (ws.readyState === ws.OPEN) ws.send(data);
     }
+  };
+
+  hub.on('broadcast', (msg) => {
+    broadcast(msg);
+    // 세션이 끝나면 각 원격 제어에 붙은 keys가 달라진다. 원격 프로세스 변화에만
+    // 방송을 걸어 두면, 종료된 세션의 pill이 다음 원격 이벤트까지 켜진 채로 남는다
+    // (codex 지적). 켜진 원격 제어가 있을 때만 덧붙여 잡음을 만들지 않는다.
+    if (msg?.type === 'exit' && rc.snapshot().length > 0) broadcast(remoteControlMessage());
   });
+
+  // 원격 제어 상태 메시지. 관리자는 canonical cwd만 알고 세션 key는 모르므로, 지금 그
+  // 디렉터리를 쓰는 라이브 세션 key들을 여기서 붙여 준다 — 클라이언트가 cwd 문자열을
+  // 스스로 정규화하지 않고도(realpath는 서버만 할 수 있다) 자기 상태를 찾게 하기 위해.
+  //
+  // 동일성 판정은 **문자열이 아니라 파일시스템**으로 한다. 시작 요청에 쓰인 철자를
+  // 기억해 두는 별칭 장부 방식은, 다른 철자(심링크·junction·대소문자·끝 구분자)로
+  // 시작된 세션을 놓치고, 별칭이 다른 곳을 가리키게 바뀌면 엉뚱한 상태에 key를 붙이며,
+  // 정리되지 않고 계속 자란다(codex 지적). realpathSync는 세션 수가 한 자릿수이고
+  // 방송이 드물어(상태 전이·새 연결) 비용이 문제되지 않는다.
+  const canonicalOf = (p) => {
+    try {
+      return fsSync.realpathSync(p);
+    } catch {
+      return null; // 지워졌거나 접근 불가 — 매칭에서 조용히 빠진다
+    }
+  };
+  const keysForCwd = (canonical) => hub
+    .liveSessionCwds()
+    .filter((s) => s.cwd && canonicalOf(s.cwd) === canonical)
+    .map((s) => s.key);
+
+  // 이 원격 제어에 해당하는 "세션이 쓴 원본 cwd 철자"들. 세션이 먼저 끝나면 keys가
+  // 비는데, 그때도 클라이언트가 자기 것으로 알아보고 끌 수 있어야 한다. 클라이언트가
+  // 스스로 심링크·대소문자를 판정할 수 없으므로 서버가 realpath로 묶어서 내려준다
+  // (raw session.cwd 문자열 비교는 그 경우에 실패한다 — codex 지적).
+  const cwdsForCwd = (canonical) => [
+    ...new Set(hub.allSessionCwds().filter((p) => canonicalOf(p) === canonical)),
+  ];
+
+  const remoteControlMessage = () => ({
+    type: 'remoteControl',
+    states: rc.snapshot().map((s) => ({
+      ...s,
+      keys: keysForCwd(s.cwd),
+      cwds: cwdsForCwd(s.cwd),
+    })),
+  });
+
+  rc.on('change', () => broadcast(remoteControlMessage()));
 
   const sendTo = (ws, obj) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
@@ -179,6 +235,9 @@ export async function startServer({
               resumeSessionId: msg.resumeSessionId,
             });
             sendTo(ws, { type: 'started', startId, key: newKey, initInfo });
+            // 이미 원격 제어가 켜진 디렉터리에 새 세션이 열리면 그 세션에도 keys가
+            // 붙어야 한다 — 안 그러면 새 탭의 pill만 꺼진 것처럼 보인다(codex 지적).
+            if (rc.snapshot().length > 0) broadcast(remoteControlMessage());
           } catch (err) {
             sendError(ws, { startId, message: err?.message ?? err });
           }
@@ -235,6 +294,42 @@ export async function startServer({
         case 'stop':
           hub.stop(key);
           return;
+        case 'remoteControl': {
+          // 클라이언트는 세션 key만 보낸다 — 대상 디렉터리는 서버가 자기 장부에서 되찾는다.
+          // WS로 온 임의 경로 문자열을 장기 원격 제어 대상으로 삼지 않기 위한 규율.
+          const cwd = key ? hub.cwdOf(key) : null;
+          if (msg.action === 'stop') {
+            // 끄기는 예외를 하나 둔다: 세션이 먼저 끝났는데 원격 제어만 살아 있는 경우
+            // key로는 대상을 찾을 수 없어, UI에서 끌 방법이 사라진다(codex 지적).
+            // 이때는 **우리가 이미 클라이언트에 알려 준** 항목의 cwd만 받아들인다 —
+            // 임의 경로를 여는 권한이 아니라, 이미 도는 것 중에서 고르는 것뿐이다.
+            const known = rc.snapshot().some((s) => s.cwd === msg.cwd);
+            const target = cwd ?? (known ? msg.cwd : null);
+            if (!target) {
+              sendError(ws, { key, message: '중지할 원격 제어를 찾지 못했습니다' });
+              return;
+            }
+            await rc.stop(target);
+            broadcast(remoteControlMessage());
+            return;
+          }
+          if (!cwd) {
+            sendError(ws, { key, message: '원격 제어는 실행 중인 세션에서만 켤 수 있습니다' });
+            return;
+          }
+          if (msg.action === 'start') {
+            await rc.start(cwd, { name: msg.name });
+          } else {
+            sendError(ws, { key, message: `unknown remoteControl action: ${msg.action}` });
+            return;
+          }
+          // 관리자의 'change'는 start()가 반환되기 **전에** 나가므로, 그 시점 스냅샷은
+          // 이 요청으로 새로 라이브가 된 세션을 아직 반영하지 못할 수 있다. 요청 소켓에만
+          // 보내면 다른 탭은 그 낡은 상태에 갇힌다(codex 지적) — 전 소켓에 다시 방송한다.
+          // 멱등 start(이미 ready)라 change가 아예 없는 경우도 이 방송이 덮어 준다.
+          broadcast(remoteControlMessage());
+          return;
+        }
         default:
           sendError(ws, { key, message: `unknown message type: ${msg.type}` });
       }
@@ -516,6 +611,10 @@ export async function startServer({
       sockets.add(ws);
       openSeq += 1;
       onClientCountChange?.(sockets.size);
+      // 재접속 복구 — 원격 제어 상태는 세션별 링버퍼(attachReplay)에 없고
+      // /api/bootstrap도 store로 흐르지 않으므로, 연결 직후 이 소켓에만 스냅샷을 준다.
+      // 상태가 비어 있어도 보낸다: "아무것도 안 켜져 있음"도 복구해야 할 사실이다.
+      sendTo(ws, remoteControlMessage());
       ws.on('close', () => {
         sockets.delete(ws);
         const mark = byeMarks.get(ws);
@@ -540,16 +639,49 @@ export async function startServer({
   });
   boundPort = server.address().port;
 
-  const close = () => new Promise((resolve) => {
-    hub.stopAll();
-    for (const ws of sockets) {
-      try { ws.terminate(); } catch { /* noop */ }
-    }
-    sockets.clear();
-    wss.close();
-    server.close(() => resolve());
-    server.closeAllConnections?.();
-  });
+  // 멱등 종료. 원격 제어 자식을 **먼저** 확실히 정리한 뒤에 리스너를 놓는다 —
+  // 순서가 바뀌면 데몬이 먼저 사라지고 자식이 고아로 남는다.
+  //
+  // 다만 그 대기에는 반드시 상한이 있어야 한다. 상한이 없으면 정리가 걸릴 때
+  // "포트를 쥔 채 신원 파일도 없고 시그널에도 응답하지 않는" 데몬이 되어 사용자가
+  // 손쓸 방법이 사라진다(codex 지적). 자식 하나를 놓치는 것보다 그쪽이 더 나쁘다 —
+  // 상한을 넘기면 사유를 남기고 리스너를 놓는다.
+  let closing = null;
+  const close = () => {
+    if (closing) return closing;
+    closing = (async () => {
+      try {
+        await Promise.race([
+          rc.closeAll(),
+          new Promise((resolve) => {
+            const t = setTimeout(() => resolve('timeout'), closeRemoteGraceMs);
+            t.unref?.();
+          }).then((r) => {
+            if (r === 'timeout') {
+              console.error(
+                '[cc-on-browser] 원격 제어 정리가 제한 시간을 넘겨 그대로 종료합니다 —'
+                + ' `claude remote-control` 프로세스가 남았는지 확인해 주세요.',
+              );
+            }
+          }),
+        ]);
+      } catch (err) {
+        // 정리 실패를 삼키지 않는다 — 실패는 곧 "자식이 남았을 수 있다"는 뜻이다.
+        console.error(`[cc-on-browser] 원격 제어 정리 실패: ${err?.message ?? err}`);
+      }
+      hub.stopAll();
+      for (const ws of sockets) {
+        try { ws.terminate(); } catch { /* noop */ }
+      }
+      sockets.clear();
+      wss.close();
+      await new Promise((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections?.();
+      });
+    })();
+    return closing;
+  };
 
   return {
     server,
@@ -559,5 +691,7 @@ export async function startServer({
     getClaudeVersion,
     // 바인딩 래퍼로 노출 — private field 접근이 있는 메서드 참조를 그대로 넘기지 않는다.
     hasLiveSessions: () => hub.hasLiveSessions(),
+    // 데몬 수명 정책이 "브라우저가 없어도 붙잡아 둘 일이 있는가"를 묻는 창구.
+    hasLiveRemoteControls: () => rc.hasLive(),
   };
 }

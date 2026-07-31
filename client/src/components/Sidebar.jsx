@@ -985,6 +985,10 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
         // 재개 직후 피커 라벨·CTX 분모가 맞고, init의 실제값이 곧 덮어쓴다.
         preloadModel: pre.model,
         preloadMessages: pre.messages,
+        // 디스크에서 되살린 과거 대화임을 표시 — 실행 중 도크가 이 메시지들의
+        // '결과 없는 도구'를 유령으로 세지 않게 한다. effort 재시작처럼 라이브
+        // 대화를 이월하는 경로에는 붙이지 않는다(그건 실제로 돌고 있는 작업이다).
+        preloadIsHistory: true,
         preloadSessionId: pre.sessionId,
         preloadUsage: pre.usage,
         // 트랜스크립트에 호출별 usage가 있었다면 그 사실도 이월 — 시딩 직후의

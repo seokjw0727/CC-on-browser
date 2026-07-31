@@ -13,7 +13,8 @@ import { MODES, MODE_LABEL, MODE_CLASS } from '../lib/permission-modes.js';
 import { familyOf, buildModelOptions } from '../lib/model-catalog.js';
 import { EFFORT_LEVELS, DEFAULT_EFFORT, effortLabel, isUiEffort } from '../lib/effort.js';
 import ActiveModes from './ActiveModes.jsx';
-import SubagentPanel from './SubagentPanel.jsx';
+import RunningWork from './RunningWork.jsx';
+import RemotePill from './RemotePill.jsx';
 import Clawd from './Clawd.jsx';
 import './interact.css';
 
@@ -245,7 +246,7 @@ function EffortPicker({ session, options, disabled, onSelect }) {
 }
 
 export default function Composer() {
-  const { state, dispatch, send, startSession, stopSession, notify } = useStore();
+  const { state, dispatch, send, startSession, stopSession, notify, jumpTo } = useStore();
   const session = useActiveSession();
   const [text, setText] = useState('');
   const [caret, setCaret] = useState(0);
@@ -665,12 +666,7 @@ export default function Composer() {
           </div>
         )}
 
-        {/* 실행 중 서브에이전트 세션 모니터 — CLI Agents/Ultracode 표시의 브라우저판 */}
-        {session && (
-          <SubagentPanel list={subagentList} status={session.status} conn={state.conn} />
-        )}
-
-        {/* 구동 중인 기능 배지 — ⚡울트라코드 · 🎯목표 · 🔓권한 상승 (활성 시에만) */}
+        {/* 활성 목표 배지 — 'GOAL' 한 단어, 목표 전문은 툴팁 (목표가 있을 때만) */}
         {session && <ActiveModes session={session} />}
 
         {/* 인터럽트된 턴 복구 바 — 재시도 / 수정 후 재전송 */}
@@ -750,6 +746,9 @@ export default function Composer() {
               </select>
             </span>
           )}
+
+          {/* 원격 제어 — claude.ai·모바일 앱에서 이 레포를 조종 (켜짐일 때만 눈에 띈다) */}
+          <RemotePill session={session} />
         </div>
 
         {/* 입력 */}
@@ -827,6 +826,16 @@ export default function Composer() {
             </button>
           )}
         </div>
+
+        {/* 실행 중 작업 도크 — 입력창 **아래**. 지금 돌고 있는 셸·서브에이전트를
+            모아 보여 주고, 누르면 대화 속 해당 카드로 이동한다. */}
+        {session && (
+          <RunningWork
+            session={session}
+            conn={state.conn}
+            onJump={(uid) => jumpTo(session.key, uid)}
+          />
+        )}
       </div>
 
       {/* 상태줄 — 컨텍스트·5h/7d 사용량·연결 */}

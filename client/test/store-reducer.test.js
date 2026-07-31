@@ -257,3 +257,54 @@ test('토스트는 최대 5개 유지(오래된 것부터 절단), remove-toast�
   s = reducer(s, { type: 'remove-toast', id: s.toasts[0].id });
   assert.deepEqual(s.toasts.map((t) => t.text), ['t4', 't5', 't6', 't7']);
 });
+
+// ----- 원격 제어 스냅샷 -----
+// 서버가 늘 전체를 보내므로 리듀서는 병합하지 않고 통째로 갈아 끼운다.
+// 조회는 cwd 문자열이 아니라 keys(세션 key)로 한다 — 동일성 판정은 서버(realpath)만 할 수 있다.
+
+const rcState = (over = {}) => ({
+  cwd: '/repo', keys: ['s_1'], name: 'repo', state: 'ready',
+  environmentId: 'env_a', url: 'https://claude.ai/code?environment=env_a',
+  capacity: { used: 0, max: 32 }, error: null, startedAt: 1, ...over,
+});
+
+test('remoteControl 메시지는 스냅샷을 통째로 교체한다', () => {
+  let s = createInitialState();
+  assert.deepEqual(s.remoteControls, []);
+  s = reducer(s, serverMsg({ type: 'remoteControl', states: [rcState()] }));
+  assert.equal(s.remoteControls.length, 1);
+  assert.equal(s.remoteControls[0].environmentId, 'env_a');
+  // 빈 배열도 사실이다 — 병합했다면 옛 항목이 남아 유령이 된다
+  s = reducer(s, serverMsg({ type: 'remoteControl', states: [] }));
+  assert.deepEqual(s.remoteControls, []);
+});
+
+test('remoteControl states가 배열이 아니면 빈 배열로 방어한다', () => {
+  let s = createInitialState();
+  s = reducer(s, serverMsg({ type: 'remoteControl', states: null }));
+  assert.deepEqual(s.remoteControls, []);
+});
+
+test('remoteControlFor는 세션 key로 찾고, 없으면 null', async () => {
+  const { remoteControlFor } = await import('../src/lib/store-reducer.js');
+  let s = createInitialState();
+  s = reducer(s, serverMsg({
+    type: 'remoteControl',
+    states: [rcState({ keys: ['s_2', 's_3'] })],
+  }));
+  assert.equal(remoteControlFor(s, 's_2').cwd, '/repo');
+  assert.equal(remoteControlFor(s, 's_3').cwd, '/repo');
+  assert.equal(remoteControlFor(s, 's_9'), null);
+  assert.equal(remoteControlFor(s, null), null);
+});
+
+test('한 cwd를 여러 세션이 공유하면 모두 같은 원격 제어를 본다', async () => {
+  const { remoteControlFor } = await import('../src/lib/store-reducer.js');
+  let s = createInitialState();
+  s = reducer(s, serverMsg({
+    type: 'remoteControl',
+    states: [rcState({ keys: ['s_1', 's_2'] }), rcState({ cwd: '/other', keys: ['s_9'] })],
+  }));
+  assert.equal(remoteControlFor(s, 's_1'), remoteControlFor(s, 's_2'));
+  assert.equal(remoteControlFor(s, 's_9').cwd, '/other');
+});

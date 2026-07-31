@@ -17,6 +17,19 @@ on your machine. That makes the security boundary explicit:
 - **The server binds to `127.0.0.1` only.** Never expose it remotely (port
   forwarding, reverse proxies, tunnels). Anyone who can reach the port and
   knows the token can drive a CLI with access to your filesystem and shell.
+- **Remote Control is opt-in, and it is the one feature that reaches outside
+  this machine.** Turning it on runs `claude remote-control` for that repository
+  directory, which connects *outbound* to Anthropic's backend and makes the
+  directory available to claude.ai/code and the Claude mobile app **signed in to
+  your own Claude account**. Anyone with access to that account can then create
+  sessions in that directory and run tools there. This does not open any inbound
+  port — the app's own HTTP server stays bound to `127.0.0.1`. The browser never
+  supplies the target path: it sends only a session key and the server resolves
+  the directory from its own session ledger, so a compromised page cannot point
+  Remote Control at an arbitrary directory. Turning it off terminates the process
+  tree. **While it is on, the daemon deliberately keeps running after you close
+  the browser** (otherwise the feature would be pointless), so a forgotten Remote
+  Control leaves a background process alive until you stop it or reboot.
 - **A random per-launch token** guards every REST API call (`x-auth-token`
   header) and WebSocket connection (`?token=`); static assets (HTML/JS/CSS) are
   served without it. The token is delivered once in the URL fragment
@@ -36,6 +49,22 @@ on your machine. That makes the security boundary explicit:
   stored. No model calls are made outside your own sessions.
 - The daemon scrubs the auth token from its process environment after startup
   so spawned CLI sessions and their child shells do not inherit it.
+- **Instance file (since v1.8.0)** — a background daemon records its port, auth
+  token, pid and version in `~/.cc-on-browser/instance-<port>.json` so that
+  re-running `cc-on-browser` can recognize its own daemon and just open a new
+  browser tab instead of failing with "port already in use". The directory is
+  created `0700` and the file `0600`; on Windows Node's mode bits do not set
+  confidentiality ACLs, so the effective protection is the inherited ACL of your
+  user profile — the same trust boundary as the CLI's own `~/.claude`
+  credentials. The token is never stored outside your profile and never sent to
+  any external host. On a clean shutdown the daemon removes the record before it
+  releases the port, and only if the record still carries its own token (plus its
+  pid, when the record has one) — so it never deletes a successor daemon's
+  record. A daemon killed outright can leave a stale record behind; that is
+  harmless because a relaunch only trusts a record whose token authenticates
+  against a live server on that same port. Deliberately *not* implemented: an
+  unauthenticated "open a browser" HTTP endpoint, which would be reachable by
+  any local process or web page.
 
 ## Hardening tips
 
@@ -75,6 +104,17 @@ CC-on-browser는 로컬에 설치된 Claude Code CLI를 자식 프로세스로 �
 - **서버는 `127.0.0.1`에만 바인드됩니다.** 포트포워딩·리버스 프록시·터널 등
   원격 노출을 절대 하지 마세요. 포트에 접근하고 토큰을 아는 사람은 당신의
   파일시스템과 셸에 접근할 수 있는 CLI를 조종할 수 있습니다.
+- **원격 제어는 선택 기능이며, 이 앱에서 유일하게 이 컴퓨터 밖으로 나가는
+  기능입니다.** 켜면 해당 레포 디렉터리에 대해 `claude remote-control`이 실행되어
+  Anthropic 백엔드로 **나가는 방향** 연결을 맺고, **당신의 Claude 계정으로 로그인한**
+  claude.ai/code와 Claude 모바일 앱이 그 디렉터리에서 세션을 만들고 도구를 실행할 수
+  있게 됩니다. 그 계정에 접근할 수 있는 사람은 누구나 같은 일을 할 수 있습니다.
+  들어오는 포트를 여는 것은 아니며 앱의 HTTP 서버는 `127.0.0.1` 전용 그대로입니다.
+  대상 경로는 브라우저가 정하지 않습니다 — 세션 key만 보내고 서버가 자기 세션
+  장부에서 디렉터리를 되찾으므로, 침해된 페이지가 임의 디렉터리를 원격 제어에
+  물릴 수 없습니다. 끄면 프로세스 트리를 종료합니다. **켜져 있는 동안에는 브라우저를
+  닫아도 데몬이 의도적으로 살아 있습니다**(그러지 않으면 기능이 성립하지 않습니다).
+  따라서 끄는 것을 잊으면 중지하거나 재부팅할 때까지 백그라운드 프로세스가 남습니다.
 - **기동마다 생성되는 랜덤 토큰**이 REST API(`x-auth-token` 헤더)와
   WebSocket(`?token=`) 접근을 보호합니다(정적 HTML/JS/CSS는 무인증 제공).
   토큰은 URL fragment(`#token=…`)로 1회 전달되며, 이 URL을 공유하지 마세요.
@@ -89,6 +129,20 @@ CC-on-browser는 로컬에 설치된 Claude Code CLI를 자식 프로세스로 �
   유일합니다.
 - 데몬은 기동 직후 인증 토큰을 자신의 env에서 제거해, 스폰된 CLI 세션과 그
   자식 셸로 토큰이 상속되지 않게 합니다.
+- **인스턴스 파일 (v1.8.0부터)** — 백그라운드 데몬은 자신의 포트·인증 토큰·pid·
+  버전을 `~/.cc-on-browser/instance-<port>.json`에 기록합니다. `cc-on-browser`를
+  다시 실행할 때 "포트 사용 중" 오류로 죽는 대신 **자기 데몬임을 확인하고 브라우저
+  탭만 새로 열기** 위한 용도입니다. 디렉터리는 `0700`, 파일은 `0600`으로 만들지만
+  **Windows에서는 Node의 mode 비트가 기밀성 ACL을 설정하지 않으므로** 실질 보호는
+  사용자 프로필의 상속 ACL에 의존합니다 — CLI 자신의 `~/.claude` 자격증명과 같은
+  신뢰 경계입니다. 토큰이 프로필 밖에 저장되거나 외부 호스트로 전송되는 일은
+  없습니다. 정상 종료 시 데몬은 **포트를 놓기 전에** 파일을 지우며, 기록의 토큰이
+  자기 것일 때만(그리고 기록에 pid가 있으면 pid까지 맞을 때만) 지웁니다 — 후임
+  데몬의 기록을 지우지 않기 위함입니다. 강제 종료된 데몬은 기록을 남길 수 있지만,
+  재실행은 **같은 포트에서 살아 있는 서버가 그 토큰으로 인증되는 경우에만** 그
+  기록을 신뢰하므로 무해합니다.
+  **의도적으로 만들지 않은 것**: 인증 없는 "브라우저 열기" HTTP endpoint — 로컬
+  프로세스나 웹페이지가 임의로 두드릴 수 있는 표면이 되기 때문입니다.
 
 ### 취약점 제보
 

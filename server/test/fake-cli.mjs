@@ -15,6 +15,42 @@
 // 지연 중 interrupt가 오면 대기 턴을 취소하고 is_error result로 닫는다(실 CLI 미러).
 import { createJsonlParser } from '../src/jsonl.js';
 
+// `claude remote-control` 분기 — stream-json 루프에 **들어가기 전에** 처리해야 한다.
+// 이 인자로 불렸는데 아래 루프로 내려가면 오지 않을 stdin을 무한정 기다려, 원격 제어
+// 실패 경로 e2e가 통과 대신 멈춰 버린다.
+// 출력은 실 CLI(v2.1.220) 캡처를 그대로 미러한다 — ANSI 재그리기 포함.
+// FAKE_RC=fail 이면 로그인 실패 문구를 내고 즉시 종료(실패 경로용, 기본값).
+// FAKE_RC=ok   이면 Ready + URL을 내고 살아 있는다.
+if (process.argv.includes('remote-control')) {
+  const ESC = String.fromCharCode(27); // 소스에 리터럴 제어문자를 두지 않는다
+  const nameIdx = process.argv.indexOf('--name');
+  const name = nameIdx >= 0 ? process.argv[nameIdx + 1] : 'fake';
+  const mode = process.env.FAKE_RC || 'fail';
+  if (mode === 'ok') {
+    const env = process.env.FAKE_RC_ENV || 'env_fake123';
+    process.stdout.write(
+      'Remote Control v2.1.220\nSpawn mode: same-dir\n'
+      + `Environment ID: ${env}\n`
+      + `${ESC}[1A${ESC}[J·|· Connecting · ${name} · master\n`
+      + `${ESC}[1A${ESC}[J·✔· Ready · ${name} · master\n`
+      + '    Capacity: 0/32 · New sessions will be created in the current directory\n'
+      + `Code anywhere with the Claude mobile app or https://claude.ai/code?environment=${env}\n`,
+    );
+    // 죽이기 전까지 살아 있어야 한다. 미해결 top-level await만으로는 부족하다 —
+    // Node가 "버려진 await"를 감지해 exit 13으로 종료한다(codex 지적, 실측 확인).
+    // 이벤트 루프를 붙잡는 실제 핸들이 필요하다.
+    setInterval(() => {}, 1 << 30);
+  } else {
+    // 쓰기가 flush된 뒤에 종료한다 — process.exit()를 바로 부르면 파이프에 실린
+    // 실패 문구가 잘려 나가고, 서버는 사유 없는 "예기치 않은 종료"만 보게 된다.
+    process.stdout.write('Error: You must be logged in to use Remote Control.\n', () => {
+      process.exit(1);
+    });
+  }
+  // 아래 stream-json 루프로 절대 내려가지 않는다(내려가면 오지 않을 stdin을 기다린다).
+  await new Promise(() => {});
+}
+
 const scenario = process.env.FAKE_SCENARIO || 'echo';
 const SESSION_ID = 'fake-session-1';
 // 실 CLI v2.1.205 initialize 응답 미러(2026-07-08 E2E 캡처, 2026-07-11 실 캡처로 재확인 —
@@ -136,7 +172,12 @@ function handle(msg) {
           subtype: 'success',
           request_id: requestId,
           response: {
-            commands: [{ name: 'help', description: 'Show help' }],
+            // goal: 컴포저의 낙관 렌더는 여기 광고된 커맨드만 슬래시 커맨드로 인식한다
+            // (Composer.submit의 `known` 판정) — E2E가 GOAL 배지를 띄우려면 필요하다.
+            commands: [
+              { name: 'help', description: 'Show help' },
+              { name: 'goal', description: 'Set the session goal' },
+            ],
             models: MODELS,
             account: { email: 'fake@example.com', subscriptionType: 'pro' },
             output_style: 'default',
@@ -332,6 +373,63 @@ function handle(msg) {
       });
       return;
     }
+    if (scenario === 'bgtask') {
+      // 백그라운드 작업 재현 — 실 CLI v2.1.220 실측 이벤트 그대로.
+      // 도크의 유일한 출처가 이 스냅샷이므로, 형식이 어긋나면 도크가 통째로 빈다.
+      const toolUseId = `toolu_bg_${turn}`;
+      const taskId = `b${turn}xyz`;
+      out({
+        type: 'assistant',
+        message: {
+          id: `msg_bg_${turn}`,
+          role: 'assistant',
+          model: assistantModel,
+          content: [{
+            type: 'tool_use',
+            id: toolUseId,
+            name: 'Bash',
+            input: { command: 'sleep 40', run_in_background: true },
+          }],
+        },
+        session_id: SESSION_ID,
+      });
+      out({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: toolUseId,
+            content: `Command running in background with ID: ${taskId}. …`,
+            is_error: false,
+          }],
+        },
+        session_id: SESSION_ID,
+      });
+      out({
+        type: 'system', subtype: 'task_started', task_id: taskId, tool_use_id: toolUseId,
+        description: 'sleep 40', task_type: 'local_bash', session_id: SESSION_ID,
+      });
+      out({
+        type: 'system',
+        subtype: 'background_tasks_changed',
+        tasks: [{ task_id: taskId, task_type: 'local_bash', description: 'sleep 40' }],
+        session_id: SESSION_ID,
+      });
+      out({
+        type: 'assistant',
+        message: {
+          id: `msg_bg_txt_${turn}`,
+          role: 'assistant',
+          model: assistantModel,
+          content: [{ type: 'text', text: '백그라운드로 돌렸습니다.' }],
+        },
+        session_id: SESSION_ID,
+      });
+      out({ type: 'result', subtype: 'success', result: '백그라운드로 돌렸습니다.', session_id: SESSION_ID });
+      return;
+    }
+
     if (scenario === 'subagent') {
       // Task 도구 실행 재현 — tool_use 확정 후 일정 시간 결과 미도착(서브에이전트
       // 실행 중) 상태를 유지한다. 마스코트 juggle 무드 관찰용.

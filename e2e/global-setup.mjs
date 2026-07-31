@@ -130,7 +130,7 @@ export default async function globalSetup() {
   seedProjects();
   const started = [];
   try {
-    for (const scenario of ['echo', 'permission', 'bulk']) {
+    for (const scenario of ['echo', 'permission', 'bulk', 'bgtask']) {
       started.push(await startFakeServer(scenario));
     }
     // 상태 기록 실패도 같은 정리 범위 — 서버만 남고 파일이 없는 상태를 만들지 않는다.

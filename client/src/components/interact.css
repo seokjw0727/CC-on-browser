@@ -543,7 +543,7 @@ select.mode-trust:focus {
   color: color-mix(in srgb, #b06bff 55%, var(--text));
 }
 
-/* ----- 구동 중인 기능 배지 (ActiveModes) ----- */
+/* ----- 구동 중인 기능 배지 (ActiveModes) — 현재 GOAL 하나뿐 ----- */
 .active-modes {
   display: flex;
   flex-wrap: wrap;
@@ -565,37 +565,25 @@ select.mode-trust:focus {
   background: var(--surface-2);
   color: var(--text);
 }
-.mode-badge.ultra {
-  border-color: color-mix(in srgb, #b06bff 55%, transparent);
-  background: color-mix(in srgb, #b06bff 14%, transparent);
-  color: color-mix(in srgb, #b06bff 50%, var(--text));
-}
+/* GOAL 배지: 화면 텍스트는 한 단어뿐이고 목표 전문은 툴팁이 맡는다 — 짧은 대문자
+   라벨이라 letter-spacing으로 읽기를 돕고, 툴팁을 키보드로도 열 수 있게
+   tabIndex를 받으므로 포커스 링을 명시한다(기본 outline은 pill 모서리를 벗어난다). */
 .mode-badge.goal {
   border-color: var(--accent-line);
   background: var(--accent-soft);
   color: var(--accent);
+  letter-spacing: 0.06em;
+  cursor: default;
 }
-.mode-badge.goal .mode-badge-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 240px;
-}
-.mode-badge.perm {
-  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
-  background: var(--danger-soft);
-  /* 작은 볼드 라벨은 var(--danger) on danger-soft가 다크에서 AA 미달(≈4:1) —
-     텍스트는 --text로 대비를 확보하고 danger는 테두리·아이콘에만 남긴다(토스트 패턴). */
-  color: var(--text);
-}
-.mode-badge.perm .badge-ico {
-  color: var(--danger);
+.mode-badge.goal:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
-/* ----- 실행 중 서브에이전트 세션 패널 (SubagentPanel) -----
+/* ----- 실행 중 작업 도크 (RunningWork) -----
    ActiveModes 배지 행과 분리된 동적 작업 모니터. 항목은 1줄 고정(말줄임)이라
-   .sub-list max-height = 항목 22px x 3이 항상 성립하고 초과분은 스크롤. */
-.subagent-panel {
+   .dock-list max-height = 항목 22px x 3이 항상 성립하고 초과분은 스크롤. */
+.running-dock {
   margin: 0 2px 6px;
   padding: 6px 10px;
   border-radius: 10px;
@@ -603,7 +591,7 @@ select.mode-trust:focus {
   background: var(--accent-soft);
   font-size: 12px;
 }
-.subagent-panel .sub-head {
+.running-dock .dock-head {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -611,7 +599,7 @@ select.mode-trust:focus {
   font-weight: 600;
   color: var(--text);
 }
-.subagent-panel .sub-stale-note {
+.running-dock .dock-stale-note {
   margin-left: auto;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -619,24 +607,24 @@ select.mode-trust:focus {
   font-weight: 400;
   color: var(--text-dim);
 }
-.subagent-panel .sub-list {
+.running-dock .dock-list {
   list-style: none;
   margin: 4px 0 0;
   padding: 0;
   max-height: 66px;
   overflow-y: auto;
 }
-.subagent-panel .sub-item {
+.running-dock .dock-item {
   display: flex;
   align-items: center;
   gap: 6px;
   height: 22px;
   min-width: 0;
 }
-.subagent-panel .sub-item.nested {
+.running-dock .dock-item.nested {
   padding-left: 14px; /* 중첩(depth 1) 들여쓰기 — 좁은 화면에서도 폭 잠식 최소 */
 }
-.subagent-panel .sub-type {
+.running-dock .dock-detail {
   flex: none;
   padding: 1px 7px;
   border-radius: 999px;
@@ -646,14 +634,14 @@ select.mode-trust:focus {
   font-size: 10.5px;
   font-weight: 600;
 }
-.subagent-panel .sub-label {
+.running-dock .dock-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
   flex: 0 1 auto;
 }
-.subagent-panel .sub-activity {
+.running-dock .dock-activity {
   margin-left: auto;
   flex: 0 0 auto;
   max-width: 45%;
@@ -1715,4 +1703,143 @@ select.mode-trust:focus {
 }
 @keyframes tip-in {
   from { opacity: 0; transform: translateY(2px); }
+}
+
+/* ----- 원격 제어 pill + 팝오버 (RemotePill) -----
+   꺼져 있을 때는 다른 pill과 같은 무게로 조용히 있고, 켜지면 색으로 존재를 알린다.
+   "브라우저를 닫아도 계속 돈다"는 성질 때문에 켜진 상태가 눈에 띄어야 한다. */
+.remote-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.remote-pill {
+  cursor: pointer;
+  max-width: 190px;
+}
+.remote-pill.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.remote-pill.on.error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.remote-pill.on.starting,
+.remote-pill.on.stopping {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.remote-pop {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  width: min(360px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 22%);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.rp-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+.rp-title {
+  font-weight: 600;
+}
+.rp-cap {
+  margin-left: auto;
+  font-size: 0.75rem;
+}
+.rp-error {
+  margin-bottom: 8px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  word-break: break-word;
+}
+.rp-link {
+  display: inline-block;
+  font-weight: 600;
+  color: var(--accent);
+}
+.rp-url {
+  margin-top: 3px;
+  font-size: 0.72rem;
+  word-break: break-all;
+}
+.rp-wait {
+  font-size: 0.78rem;
+}
+.rp-note {
+  margin: 10px 0 0;
+  padding-top: 9px;
+  border-top: 1px solid var(--border-muted, var(--border));
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.rp-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+/* ----- 실행 중 작업 도크 (RunningWork) — 입력창 아래 -----
+   옛 .subagent-panel 규칙을 이름만 바꿔 승계했고, 항목이 button이 된 만큼만 덧댄다. */
+.running-dock {
+  margin-top: 8px;
+}
+.dock-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.dock-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.dock-item:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.dock-item:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+.dock-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.dock-ico {
+  flex: none;
+  font-size: 0.8rem;
+}
+.dock-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dock-detail {
+  flex: none;
+  font-size: 0.72rem;
+  color: var(--text-faint);
 }

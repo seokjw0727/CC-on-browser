@@ -503,3 +503,184 @@ test('스트리밍 thinking_delta로 쌓인 본문은 빈 확정 블록에 덮�
   assert.ok(think);
   assert.equal(think.thinking, '깊이 생각한 내용', '누적 본문이 보존된다');
 });
+
+// ----- /clear 직후 모델 유지 (실 CLI v2.1.220 실측, 2026-07-30) -----
+// /clear는 정상 모델을 담은 system/init을 먼저 보내고, 곧바로 model='<synthetic>'인
+// 더미 assistant("(no content)")를 보낸다. 그 센티널을 모델로 수확하면 피커가
+// 미선택으로 풀리고 contextWindow까지 리셋된다 — 실브라우저에서 pill이 '<synthetic>'이
+// 되고 메뉴 전 항목 aria-checked=false가 되는 회귀를 이 테스트가 잡는다.
+test('/clear 직후의 <synthetic> assistant는 모델·컨텍스트 창을 오염시키지 않는다', () => {
+  let s = createSessionState({ key: 'k', model: 'opus[1m]', spawnModel: 'opus[1m]' });
+  // 첫 result가 보고한 창 크기가 이미 있는 상태를 재현
+  s = { ...s, contextWindow: 1_000_000 };
+
+  s = reduceCliEvent(s, {
+    type: 'system',
+    subtype: 'init',
+    session_id: 'new-fork-id',
+    model: 'claude-opus-5[1m]',
+  });
+  assert.equal(s.sessionId, 'new-fork-id');
+  assert.equal(s.model, 'claude-opus-5[1m]', 'init이 보고한 정상 모델을 채택');
+
+  s = reduceCliEvent(s, {
+    type: 'assistant',
+    message: {
+      id: 'msg_synth',
+      role: 'assistant',
+      model: '<synthetic>',
+      content: [{ type: 'text', text: '(no content)' }],
+    },
+  });
+  assert.equal(s.model, 'claude-opus-5[1m]', '<synthetic>은 수확하지 않는다');
+  assert.equal(s.contextWindow, 1_000_000, '창 크기도 리셋되지 않는다');
+  assert.equal(
+    s.messages.filter((m) => m.kind === 'assistant-text').length,
+    0,
+    "'(no content)' 더미는 빈 말풍선으로 렌더되지 않는다",
+  );
+
+  // 실측 result(모델 미호출이라 usage 전부 0, modelUsage {})까지 이어 붙인다 —
+  // reduceResult의 modelUsage 선택 경로가 창 크기를 되돌리지 않는지 함께 본다.
+  s = reduceCliEvent(s, {
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    num_turns: 0,
+    duration_ms: 671,
+    total_cost_usd: 0,
+    usage: {
+      input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+      output_tokens: 0,
+    },
+    modelUsage: {},
+    session_id: 'new-fork-id',
+  });
+  assert.equal(s.model, 'claude-opus-5[1m]', 'result 이후에도 모델 유지');
+  assert.equal(s.contextWindow, 1_000_000, 'result 이후에도 창 크기 유지');
+  assert.equal(s.status, 'idle', '턴이 닫힌다');
+});
+
+test('모델이 아직 없는 세션도 <synthetic>으로는 채워지지 않는다', () => {
+  let s = createSessionState({ key: 'k' });
+  assert.equal(s.model, null);
+  s = reduceCliEvent(s, {
+    type: 'assistant',
+    message: { id: 'm1', role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: '(no content)' }] },
+  });
+  assert.equal(s.model, null, '센티널로 첫 모델을 채우지 않는다');
+});
+
+// 억제는 '<synthetic>+(no content)' 조합에 한정 — 센티널이 실제 안내 문구를 담고
+// 오면(로그인 요구 등) 그건 사용자가 봐야 하므로 렌더된다.
+test('<synthetic>이라도 실제 본문이 있으면 렌더된다 (모델만 수확 배제)', () => {
+  let s = createSessionState({ key: 'k', model: 'claude-opus-5[1m]' });
+  s = reduceCliEvent(s, {
+    type: 'assistant',
+    message: {
+      id: 'm1',
+      role: 'assistant',
+      model: '<synthetic>',
+      content: [{ type: 'text', text: 'Please run /login to authenticate.' }],
+    },
+  });
+  const texts = s.messages.filter((m) => m.kind === 'assistant-text');
+  assert.equal(texts.length, 1);
+  assert.match(texts[0].text, /\/login/);
+  assert.equal(s.model, 'claude-opus-5[1m]', '본문이 있어도 센티널 모델은 수확하지 않는다');
+});
+
+test('진짜 모델 전환은 여전히 반영되고 창 크기를 리셋한다', () => {
+  let s = createSessionState({ key: 'k', model: 'claude-opus-5[1m]' });
+  s = { ...s, contextWindow: 1_000_000 };
+  s = reduceCliEvent(s, {
+    type: 'assistant',
+    message: { id: 'm1', role: 'assistant', model: 'claude-sonnet-5', content: [{ type: 'text', text: 'hi' }] },
+  });
+  assert.equal(s.model, 'claude-sonnet-5');
+  assert.equal(s.contextWindow, null, '이전 모델의 창 크기는 무효');
+});
+
+// ----- 메시지 시각(at) 스탬프 -----
+// 핵심은 스트리밍 확정 경로다: content_block_start에는 timestamp가 없고, 실제 시각을
+// 실은 assistant 확정 이벤트는 append가 아니라 기존 항목 갱신으로 들어온다.
+// append 한 곳만 고치면 스트리밍 답변은 영원히 "수신 시작 시각"으로 남는다.
+
+const FIXED_NOW = Date.UTC(2026, 6, 30, 1, 2, 3);
+const ISO = (ms) => new Date(ms).toISOString();
+
+test('at — 스트리밍 답변은 확정 assistant의 실제 timestamp로 갱신된다', () => {
+  const realAt = Date.UTC(2026, 6, 30, 5, 30, 0);
+  let s = createSessionState();
+  s = reduceCliEvent(s, {
+    type: 'stream_event',
+    event: { type: 'message_start', message: { id: 'm1' } },
+  }, FIXED_NOW);
+  s = reduceCliEvent(s, {
+    type: 'stream_event',
+    event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+  }, FIXED_NOW);
+  const started = s.messages.at(-1);
+  assert.equal(started.at, FIXED_NOW, 'timestamp가 없는 이벤트는 주입 시계로 잠정 표기');
+
+  s = reduceCliEvent(s, {
+    type: 'stream_event',
+    event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '안녕' } },
+  }, FIXED_NOW);
+
+  s = reduceCliEvent(s, {
+    type: 'assistant',
+    timestamp: ISO(realAt),
+    message: { id: 'm1', model: 'claude-opus-4-8', content: [{ type: 'text', text: '안녕' }] },
+  }, FIXED_NOW);
+
+  const texts = s.messages.filter((m) => m.kind === 'assistant-text');
+  assert.equal(texts.length, 1, '확정은 새 항목이 아니라 기존 항목 갱신이어야 한다');
+  assert.equal(texts[0].at, realAt, '잠정 시각이 실제 시각으로 덮여야 한다');
+  assert.equal(texts[0].text, '안녕');
+});
+
+test('at — 재개(프리로드) 경로는 stream_event 없이 assistant만 와도 시각이 산다', () => {
+  // loadTranscript는 stream_event를 제외하므로 confirmBlock의 append 분기를 탄다.
+  const realAt = Date.UTC(2026, 6, 29, 22, 15, 0);
+  let s = createSessionState();
+  s = reduceCliEvent(s, {
+    type: 'assistant',
+    timestamp: ISO(realAt),
+    message: { id: 'm9', model: 'claude-opus-4-8', content: [{ type: 'text', text: '과거 답변' }] },
+  }, FIXED_NOW);
+  const text = s.messages.find((m) => m.kind === 'assistant-text');
+  assert.equal(text.at, realAt);
+});
+
+test('at — timestamp가 없는 이벤트는 주입 시계를 쓴다 (Date.now 비의존)', () => {
+  let s = createSessionState();
+  s = reduceCliEvent(s, {
+    type: 'assistant',
+    message: { id: 'm2', model: 'claude-opus-4-8', content: [{ type: 'text', text: 'x' }] },
+  }, FIXED_NOW);
+  assert.equal(s.messages.find((m) => m.kind === 'assistant-text').at, FIXED_NOW);
+});
+
+test('at — 사용자 메시지에도 찍힌다', () => {
+  let s = createSessionState();
+  s = reduceCliEvent(s, {
+    type: 'user',
+    message: { role: 'user', content: '사용자 질문' },
+  }, FIXED_NOW);
+  const u = s.messages.find((m) => m.kind === 'user-text');
+  assert.ok(u, 'user-text 항목이 있어야 한다');
+  assert.equal(u.at, FIXED_NOW);
+});
+
+test('at — 깨진 timestamp는 주입 시계로 폴백한다', () => {
+  let s = createSessionState();
+  s = reduceCliEvent(s, {
+    type: 'assistant',
+    timestamp: 'not-a-date',
+    message: { id: 'm3', model: 'claude-opus-4-8', content: [{ type: 'text', text: 'y' }] },
+  }, FIXED_NOW);
+  assert.equal(s.messages.find((m) => m.kind === 'assistant-text').at, FIXED_NOW);
+});

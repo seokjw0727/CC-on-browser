@@ -41,7 +41,7 @@ function Greeting() {
 }
 
 export default function ChatView() {
-  const { state } = useStore();
+  const { state, dispatch } = useStore();
   const session = useActiveSession();
   const scrollRef = useRef(null);
   const pinnedRef = useRef(true);
@@ -272,6 +272,72 @@ export default function ChatView() {
     focusDoneRef.current = next === 0;
     setExpand(next);
   };
+
+  // ----- 실행 중 도크 → 대화 속 카드 점프 -----
+  // 2단계로 나눈다. 대상이 현재 메시지 창 밖이면 setExpand()로 먼저 펼쳐야 하는데,
+  // 같은 틱에는 아직 그 DOM이 없어 scrollIntoView가 실패한다. 그래서 확장만 걸고
+  // 다음 커밋에서 스크롤·강조·요청 소거를 한다.
+  const jump = state.jump;
+  const jumpPendingRef = useRef(null);
+  const flashElRef = useRef(null);
+  const flashTimerRef = useRef(null);
+  const clearFlash = () => {
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = null;
+    flashElRef.current?.classList.remove('msg-jump-flash');
+    flashElRef.current = null;
+  };
+  useEffect(() => clearFlash, []); // 언마운트 시에만 정리
+
+  useEffect(() => {
+    if (!jump || !session || jump.key !== session.key) return;
+    const idx = allMsgs.findIndex((m) => m.uid === jump.uid);
+    if (idx < 0) {
+      // 대상이 사라졌다(예: /clear) — 요청만 지운다.
+      dispatch({ type: 'jump-done', nonce: jump.nonce });
+      return;
+    }
+    if (idx < winStart) {
+      // 창 밖 — 이번 커밋에서는 펼치기만 하고, 다음 커밋의 이 effect가 스크롤한다.
+      pinnedRef.current = false;
+      setPinned(false);
+      anchorRef.current = null; // 확장 앵커 보정과 경합하지 않게(우리는 대상으로 간다)
+      setExpand(0);
+      return;
+    }
+    // 창 안 — 바로 이동한다. 다만 읽기 위치를 **얼려야** 한다: 고정만 풀면
+    // handleScroll의 전이 분기(pinned true→false)가 이미 false라 안 돌아
+    // curRead가 null로 남고, 창이 계속 꼬리를 따라간다. 서브에이전트가 메시지를
+    // 계속 뱉으면 방금 찾아간 카드가 창 밖으로 밀려난다(codex 지적).
+    pinnedRef.current = false;
+    setPinned(false);
+    setReadStart(winStartRef.current);
+    jumpPendingRef.current = jump;
+    dispatch({ type: 'jump-done', nonce: jump.nonce });
+  }, [jump, session?.key, winStart, allMsgs, dispatch]);
+
+  // 확장이 반영된 뒤(또는 애초에 창 안이었으면 바로) 실제 이동.
+  useLayoutEffect(() => {
+    const req = jumpPendingRef.current;
+    if (!req) return;
+    jumpPendingRef.current = null;
+    const el = document.getElementById(`msg-${req.uid}`);
+    if (!el) return;
+    pinnedRef.current = false;
+    setPinned(false);
+    el.scrollIntoView({ block: 'center', behavior: 'auto' });
+    if (scrollRef.current) lastScrollTopRef.current = scrollRef.current.scrollTop;
+    // 잠깐 강조 — 어디로 왔는지 눈으로 잡아 준다.
+    // 타이머를 effect의 cleanup에 매달면 안 된다: 이 effect는 의존성 배열이 없어
+    // 매 커밋마다 cleanup되므로, 강조 직후의 리렌더가 타이머만 취소해 클래스가
+    // 영구히 남는다(그리고 여러 카드에 누적된다 — codex 지적).
+    clearFlash();
+    flashElRef.current = el;
+    el.classList.remove('msg-jump-flash');
+    void el.offsetWidth; // 강제 reflow로 애니 재시작
+    el.classList.add('msg-jump-flash');
+    flashTimerRef.current = setTimeout(clearFlash, 1400);
+  });
 
   const empty = !session || session.messages.length === 0;
   const busy = session && (session.status === 'thinking' || session.status === 'tool');

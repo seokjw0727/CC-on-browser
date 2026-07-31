@@ -26,6 +26,32 @@
 //
 // session.streaming = { msgId: string|null, blocks: { [contentBlockIndex]: uid } }
 
+// CLI가 "모델을 호출하지 않고 스스로 만든" assistant 메시지에 싣는 모델 센티널.
+// 실측(2026-07-30, 실 CLI v2.1.220): /clear 직후 CLI는 정상 모델을 담은 system/init을
+// 먼저 보내고, 이어서 message.model='<synthetic>' + content '(no content)'인 더미
+// assistant를 보낸다. 이 값을 진짜 모델로 수확하면 session.model이 오염돼 모델 피커가
+// 미선택("모델")으로 풀리고 contextWindow까지 리셋된다 — 그래서 수확에서 배제한다.
+// 미래 모델 id를 잘못 거르지 않도록 화이트리스트(claude-* 등)나 패턴이 아니라 실측된
+// 이 센티널 값만 정확 비교로 막는다. 이 모듈 밖에서 참조할 곳이 없어 export하지 않는다.
+const SYNTHETIC_MODEL = '<synthetic>';
+const SYNTHETIC_PLACEHOLDER_TEXT = '(no content)';
+
+// 그 더미 assistant인가 — 모델이 센티널이고 본문이 '(no content)' 텍스트 한 덩어리인
+// 조합만. 그냥 렌더하면 초기화 구분선 바로 아래에 빈 어시스턴트 말풍선이 남는다.
+// 센티널이어도 실제 안내 문구를 담고 오는 경우(로그인 요구 등)는 보여줘야 하므로
+// 조합을 정확히 확인한다. 본선/서브에이전트 구분은 두지 않는다 — 어느 쪽이든 정보가 없다.
+function isSyntheticPlaceholder(msg) {
+  if (!msg || msg.model !== SYNTHETIC_MODEL) return false;
+  const content = msg.content;
+  if (!Array.isArray(content) || content.length !== 1) return false;
+  const only = content[0];
+  return (
+    !!only &&
+    only.type === 'text' &&
+    String(only.text ?? '').trim() === SYNTHETIC_PLACEHOLDER_TEXT
+  );
+}
+
 let uidSeq = 0;
 const nextUid = () => `m${++uidSeq}`;
 
@@ -33,10 +59,22 @@ function normStreaming(s) {
   return s && typeof s === 'object' && s.blocks ? s : { msgId: null, blocks: {} };
 }
 
-function append(session, item) {
+/**
+ * 이벤트의 표시 시각(ms). CLI가 실어 보내는 건 최상위 payload.timestamp뿐이고
+ * (payload.message.timestamp가 아니다 — usage.js:100·history.js도 같은 자리를 읽는다),
+ * assistant 이벤트에만 붙는다. 없으면 주입된 시계로 대체한다.
+ * 재개 트랜스크립트는 항목마다 timestamp가 있어 그대로 복원된다.
+ */
+function eventAt(payload, now) {
+  const t = Date.parse(payload?.timestamp ?? '');
+  return Number.isFinite(t) ? t : now;
+}
+
+/** at은 명시 인자로만 받는다 — 모듈 전역 "현재 시각"은 순수성·재진입성을 깬다. */
+function append(session, item, at) {
   return {
     ...session,
-    messages: [...session.messages, { uid: nextUid(), ...item }],
+    messages: [...session.messages, { uid: nextUid(), ...(at != null ? { at } : {}), ...item }],
   };
 }
 
@@ -278,7 +316,7 @@ function newBlockItem(block, msgId, blockIndex, parentToolUseId) {
   }
 }
 
-function reduceStreamEvent(session, payload) {
+function reduceStreamEvent(session, payload, at) {
   const ev = payload.event || {};
   const parent = payload.parent_tool_use_id ?? null;
   const streaming = normStreaming(session.streaming);
@@ -296,7 +334,7 @@ function reduceStreamEvent(session, payload) {
       const index = ev.index ?? 0;
       const item = newBlockItem(ev.content_block || {}, streaming.msgId, index, parent);
       if (!item) return session;
-      let next = append(session, item);
+      let next = append(session, item, at);
       const uid = next.messages[next.messages.length - 1].uid;
       next = {
         ...next,
@@ -322,7 +360,7 @@ function reduceStreamEvent(session, payload) {
               ? 'tool_use'
               : 'text';
         const item = newBlockItem({ type }, streaming.msgId, index, parent);
-        next = append(next, item);
+        next = append(next, item, at);
         uid = next.messages[next.messages.length - 1].uid;
         next = {
           ...next,
@@ -405,7 +443,7 @@ function itemContent(kind, fields) {
   return kind === 'assistant-text' ? (fields.text ?? '') : (fields.thinking ?? '');
 }
 
-function confirmBlock(session, block, msgId, blockIndex, parent) {
+function confirmBlock(session, block, msgId, blockIndex, parent, at) {
   const kind =
     block.type === 'text'
       ? 'assistant-text'
@@ -414,7 +452,7 @@ function confirmBlock(session, block, msgId, blockIndex, parent) {
         : block.type === 'tool_use'
           ? 'tool_use'
           : null;
-  if (!kind) return append(session, { kind: 'raw', payload: block });
+  if (!kind) return append(session, { kind: 'raw', payload: block }, at);
 
   const msgs = session.messages;
   const confirmed = confirmedFields(block);
@@ -456,7 +494,7 @@ function confirmBlock(session, block, msgId, blockIndex, parent) {
       parentToolUseId: parent,
       ...(kind === 'tool_use' ? { inputJson: '', result: null } : {}),
       ...confirmed,
-    });
+    }, at);
   }
 
   const messages = msgs.slice();
@@ -467,6 +505,9 @@ function confirmBlock(session, block, msgId, blockIndex, parent) {
     msgId: msgId ?? prev.msgId,
     streaming: false,
     confirmed: true,
+    // content_block_start 시점에 찍은 잠정 시각을 확정 assistant의 실제 시각으로 덮는다.
+    // 이 갱신이 없으면 스트리밍으로 온 답변은 영원히 "수신 시작 시각"으로 남는다.
+    ...(at != null ? { at } : {}),
   };
   // 사고 과정 본문은 스트리밍 thinking_delta로만 도착하고, 최종 assistant 블록의
   // thinking 필드는 ''(서명만 존재)로 온다(실 CLI 실측). 확정값이 비면 스트리밍으로
@@ -485,14 +526,17 @@ function confirmBlock(session, block, msgId, blockIndex, parent) {
   return { ...session, messages, streaming: { msgId: streaming.msgId, blocks } };
 }
 
-function reduceAssistant(session, payload) {
+function reduceAssistant(session, payload, at) {
   const msg = payload.message || {};
+  // /clear 직후의 더미 assistant는 통째로 무시 — 렌더할 본문도, 수확할 모델·usage도
+  // 없다(usage는 아예 없거나 0). status는 건드리지 않고 뒤따르는 result가 idle로 돌린다.
+  if (isSyntheticPlaceholder(msg)) return session;
   const msgId = msg.id ?? null;
   const content = Array.isArray(msg.content) ? msg.content : [];
   const parent = payload.parent_tool_use_id ?? null;
   let next = session;
   content.forEach((block, i) => {
-    next = confirmBlock(next, block, msgId, i, parent);
+    next = confirmBlock(next, block, msgId, i, parent, at);
   });
 
   // 컨텍스트 크기(CTX%) 추적: assistant 이벤트의 호출별 usage에서 입력+캐시가
@@ -522,8 +566,14 @@ function reduceAssistant(session, payload) {
   // 보고하고 init은 접미사를 유지('claude-opus-4-8[1m]')한다 — 그래서 **base
   // (접미사 제거)가 다를 때만 덮어쓴다**: 같은 base면 기존 값이 더 정밀([1m] 보존),
   // 다른 base면 진짜 모델 전환. 같은 base의 [1m]→비[1m] 전환만은 bare id로 구별
-  // 불가(스트림 고유 모호성 — DA #22). 서브에이전트 모델은 제외.
-  if (parent == null && !payload.isSidechain && typeof msg.model === 'string' && msg.model) {
+  // 불가(스트림 고유 모호성 — DA #22). 서브에이전트 모델과 SYNTHETIC_MODEL은 제외.
+  if (
+    parent == null &&
+    !payload.isSidechain &&
+    typeof msg.model === 'string' &&
+    msg.model &&
+    msg.model !== SYNTHETIC_MODEL
+  ) {
     const curBase = String(next.model ?? '').replace(/\[1m\]$/, '');
     if (next.model == null) {
       next = { ...next, model: msg.model };
@@ -570,7 +620,7 @@ const COMPACT_SUMMARY_RE = /^This session is being continued from a previous con
 // 직접 입력할 수 없는 형식이라 오검 위험이 없다.
 const INJECTED_NOISE_RE = /^(?:<local-command-caveat>|Stop hook feedback:)/;
 
-function reduceUser(session, payload) {
+function reduceUser(session, payload, at) {
   const msg = payload.message || {};
   const content = msg.content;
   let next = adoptSessionId(session, payload);
@@ -643,7 +693,7 @@ function reduceUser(session, payload) {
 
   if (typeof content === 'string') {
     // 인터럽트 복구(재시도/수정)를 위해 사용자가 보낸 프롬프트 원문을 기억한다.
-    return { ...append(next, { kind: 'user-text', text: content }), lastUserText: content };
+    return { ...append(next, { kind: 'user-text', text: content }, at), lastUserText: content };
   }
   if (!Array.isArray(content)) return next;
 
@@ -651,7 +701,7 @@ function reduceUser(session, payload) {
     if (item && item.type === 'tool_result') {
       next = attachToolResult(next, item, payload.tool_use_result);
     } else if (item && item.type === 'text') {
-      next = append(next, { kind: 'user-text', text: item.text ?? '' });
+      next = append(next, { kind: 'user-text', text: item.text ?? '' }, at);
       next = { ...next, lastUserText: item.text ?? '' };
     } else {
       next = append(next, { kind: 'raw', payload: item });
@@ -696,6 +746,34 @@ function reduceSystem(session, payload) {
       return finishCompaction(session, payload.compactMetadata ?? payload.compact_metadata);
     case 'thinking_tokens':
       return { ...session, thinkingTokens: payload.estimated_tokens ?? null };
+
+    // ----- 백그라운드 작업(실행 중 도크) -----
+    // CLI는 백그라운드 셸·에이전트를 1급 이벤트로 알려 준다(2026-07-30 실측, v2.1.220).
+    // background_tasks_changed는 **현재 실행 중인 것의 전체 스냅샷**이라, 도구 결과
+    // 텍스트를 정규식으로 읽어 등재/해제하는 휴리스틱이 통째로 필요 없다.
+    // 스냅샷이라 재개 세션의 유령도 원천적으로 없다(새 CLI 프로세스는 빈 배열로 시작).
+    case 'background_tasks_changed':
+      return {
+        ...session,
+        backgroundTasks: Array.isArray(payload.tasks) ? payload.tasks : [],
+      };
+
+    // task_started는 task_id ↔ tool_use_id를 이어 준다 — 도크 항목에서 대화 속 해당
+    // 도구 카드로 점프하기 위한 유일한 연결 고리다. 스냅샷에는 이 정보가 없다.
+    case 'task_started': {
+      const id = payload.task_id;
+      if (typeof id !== 'string' || !id) return session;
+      return {
+        ...session,
+        taskToolUseIds: { ...(session.taskToolUseIds ?? {}), [id]: payload.tool_use_id ?? null },
+      };
+    }
+
+    // task_updated·task_notification은 표시에 쓰지 않는다 — 무엇이 돌고 있는지는
+    // 스냅샷이 권위다. 여기서 조용히 흡수해 raw로 채팅에 새지 않게만 한다.
+    case 'task_updated':
+    case 'task_notification':
+      return session;
     case 'hook_started':
     case 'hook_response':
       return session; // 렌더 불필요(일시 상태)
@@ -852,15 +930,16 @@ export function finalizeCompactionCards(messages) {
 
 // ----- 진입점 -----
 
-export function reduceCliEvent(session, payload) {
+export function reduceCliEvent(session, payload, now = Date.now()) {
   if (!payload || typeof payload !== 'object') return session;
+  const at = eventAt(payload, now);
   switch (payload.type) {
     case 'stream_event':
-      return reduceStreamEvent(adoptSessionId(session, payload), payload);
+      return reduceStreamEvent(adoptSessionId(session, payload), payload, at);
     case 'assistant':
-      return reduceAssistant(adoptSessionId(session, payload), payload);
+      return reduceAssistant(adoptSessionId(session, payload), payload, at);
     case 'user':
-      return reduceUser(session, payload);
+      return reduceUser(session, payload, at);
     case 'system':
       return reduceSystem(session, payload);
     case 'result':

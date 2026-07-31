@@ -718,3 +718,33 @@ details.collapse > pre {
 /* ----- Task 5: 세션 전환 뷰 트랜지션 + 메시지 등장 게이팅 ----- */
 .msg-enter { animation: enter-rise var(--dur-base) var(--ease-out) both; }
 .view-enter { animation: enter-rise var(--dur-base) var(--ease-out) both; }
+
+/* ----- 메시지 시각 꼬리표 (Message.jsx의 Stamp) -----
+   존재를 거의 드러내지 않아야 한다 — 대화를 읽는 데 방해가 되면 안 된다.
+   사용자 말풍선은 오른쪽 정렬, 어시스턴트 답변은 본문 왼쪽 기준. */
+.msg-time {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.68rem;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  user-select: none;
+}
+.msg-user .msg-time {
+  text-align: right;
+}
+
+/* 도크에서 이동해 왔을 때 잠깐 강조 — 어디로 왔는지 눈으로 잡아 준다.
+   클래스는 메시지 요소 자신에 붙는다(래퍼 없음 — Message.jsx 주석 참조). */
+.msg-jump-flash {
+  animation: jump-flash 1.4s var(--ease-out) both;
+  border-radius: var(--r-lg);
+}
+@keyframes jump-flash {
+  0%, 55% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent); }
+  100% { box-shadow: 0 0 0 3px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-jump-flash { animation-duration: 0.01ms; }
+}

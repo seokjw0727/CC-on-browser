@@ -52,12 +52,14 @@ function createFakeTime() {
 
 // 테스트 공통 하네스 — 짧은 정책 수치로 시간을 압축하지 않고 실제 기본값 그대로 사용
 // (가짜 시계라 비용이 없다). shutdown 호출 횟수를 센다.
-function setup({ live = false } = {}) {
+function setup({ live = false, pinned = false } = {}) {
   const time = createFakeTime();
   let liveSessions = live;
+  let pinnedWork = pinned;
   let shutdowns = 0;
   const lc = createLifecycle({
     hasLiveSessions: () => liveSessions,
+    hasPinnedWork: () => pinnedWork,
     shutdown: () => {
       shutdowns += 1;
     },
@@ -70,6 +72,9 @@ function setup({ live = false } = {}) {
     lc,
     setLive: (v) => {
       liveSessions = v;
+    },
+    setPinned: (v) => {
+      pinnedWork = v;
     },
     shutdowns: () => shutdowns,
   };
@@ -306,5 +311,68 @@ test('shutdown은 한 번만 호출된다', () => {
   // 종료 이후 잔여 이벤트/타이머가 중복 호출을 만들지 않는다
   s.lc.onClientCountChange(0, { bye: true });
   s.time.advance(60 * 60_000);
+  assert.equal(s.shutdowns(), 1);
+});
+
+// ----- 고정 작업(원격 제어) 생존 규칙 -----
+// 원격 제어는 "브라우저를 닫고 폰에서 쓰기 위한" 기능이라, 탭을 닫았다고 데몬이
+// 내려가면 기능 자체가 성립하지 않는다. 그래서 클라이언트 0을 재검사하는 모든
+// 지점에서 hasPinnedWork()를 함께 본다.
+
+test('bye close라도 고정 작업이 있으면 종료하지 않는다', () => {
+  const s = setup({ live: false, pinned: true });
+  s.lc.onClientCountChange(1);
+  s.lc.onClientCountChange(0, { bye: true });
+  s.time.advance(10_000);
+  assert.equal(s.shutdowns(), 0, '10초 유예가 지나도 원격 제어가 살아 있으면 남는다');
+  s.time.advance(6 * 60 * 60_000);
+  assert.equal(s.shutdowns(), 0, '몇 시간이 지나도 마찬가지');
+});
+
+test('고정 작업이 끝나면 그때부터 30분 규칙으로 넘어가 종료된다', () => {
+  const s = setup({ live: false, pinned: true });
+  s.lc.onClientCountChange(1);
+  s.lc.onClientCountChange(0, { bye: true });
+  s.time.advance(10_000);
+  assert.equal(s.shutdowns(), 0);
+  s.setPinned(false); // 사용자가 원격 제어를 껐다
+  s.time.advance(60_000); // 폴링이 소멸을 관측
+  s.time.advance(30 * 60_000 - 1);
+  assert.equal(s.shutdowns(), 0);
+  s.time.advance(1);
+  assert.equal(s.shutdowns(), 1);
+});
+
+test('연결 유실 + 세션 없음이어도 고정 작업이 있으면 30분에 죽지 않는다', () => {
+  const s = setup({ live: false, pinned: true });
+  s.lc.onClientCountChange(1);
+  s.lc.onClientCountChange(0, {}); // bye 없음 = 연결 유실
+  s.time.advance(30 * 60_000 + 1);
+  assert.equal(s.shutdowns(), 0, 'silent 경로도 고정 작업을 봐야 한다');
+});
+
+test('hasPinnedWork 기본값은 없음 — 기존 계약 그대로', () => {
+  const time = createFakeTime();
+  let shutdowns = 0;
+  const lc = createLifecycle({
+    hasLiveSessions: () => false,
+    shutdown: () => { shutdowns += 1; },
+    now: time.now,
+    setTimeoutFn: time.setTimeoutFn,
+    clearTimeoutFn: time.clearTimeoutFn,
+  });
+  lc.onClientCountChange(1);
+  lc.onClientCountChange(0, { bye: true });
+  time.advance(10_000);
+  assert.equal(shutdowns, 1);
+});
+
+test('최초 접속 대기 중이라도 고정 작업이 있으면 종료하지 않는다', () => {
+  const s = setup({ live: false, pinned: true });
+  s.time.advance(90_000); // 브라우저가 한 번도 붙지 않은 채 유예 만료
+  assert.equal(s.shutdowns(), 0, '"클라이언트 0 재검사 전 지점" 계약에는 여기도 포함된다');
+  s.setPinned(false);
+  s.time.advance(60_000); // 폴링이 소멸 관측
+  s.time.advance(30 * 60_000);
   assert.equal(s.shutdowns(), 1);
 });

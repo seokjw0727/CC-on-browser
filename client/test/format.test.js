@@ -9,6 +9,7 @@ import {
   contextWindowFor,
   fmtAgo,
   fmtBytes,
+  fmtClock,
   hasDisplayableCtx,
   CONTEXT_WINDOW,
   CONTEXT_WINDOW_1M,
@@ -314,4 +315,20 @@ test('hasDisplayableCtx: 플래그가 권위, 필드가 없는 구 usage만 옛 
   // 방어: usage 자체가 없을 때
   assert.equal(hasDisplayableCtx(undefined), false);
   assert.equal(hasDisplayableCtx({}), false);
+});
+
+test('fmtClock — 24시간제 HH:MM, 자정은 00:00 (로케일 포매터 금지 이유)', () => {
+  const at = (h, m) => new Date(2026, 6, 30, h, m, 0, 0).getTime();
+  assert.equal(fmtClock(at(0, 0)), '00:00');
+  assert.equal(fmtClock(at(9, 5)), '09:05');
+  assert.equal(fmtClock(at(13, 40)), '13:40');
+  assert.equal(fmtClock(at(23, 59)), '23:59');
+});
+
+test('fmtClock — 유효하지 않은 값은 null', () => {
+  assert.equal(fmtClock(0), null);
+  assert.equal(fmtClock(-1), null);
+  assert.equal(fmtClock(NaN), null);
+  assert.equal(fmtClock(undefined), null);
+  assert.equal(fmtClock('nope'), null);
 });

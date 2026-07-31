@@ -30,6 +30,13 @@ export function createSessionState(partial = {}) {
     messages: [],
     streaming: {},
     pendingPermissions: [],
+    // 실행 중 백그라운드 작업 — CLI의 system/background_tasks_changed 스냅샷 원본.
+    // 항목: {task_id, task_type:'local_bash'|'local_agent', description}
+    // 파생이 아니라 상태로 두는 이유: 메시지에서 되살릴 수 없는 정보이고, CLI가
+    // 권위 있는 전체 목록을 직접 준다(실측 근거는 reduce-cli-event의 해당 case 주석).
+    backgroundTasks: [],
+    // task_id -> tool_use_id — 도크 항목에서 대화 속 도구 카드로 점프하는 연결 고리.
+    taskToolUseIds: {},
     // ctxDisplayable: contextTokens가 "보여줄 만한 값"인가 — 값이 아니라 플래그로
     // 판정해야 /clear 직후의 0을 "아직 아무 값도 없음"과 구별할 수 있다(0 > 0은 거짓이라
     // 값만 보면 링이 사라진다). 측정값(assistant/result)뿐 아니라 /clear의 의도된 0,
@@ -76,7 +83,21 @@ export function createInitialState() {
     // 토글 dispatch가 store 구독자(ChatView)를 리렌더시켜 Message.jsx의 기존
     // debugEnabled()가 재평가된다 — Message는 무수정(설계도 §2).
     debugRaw: false,
+    // 원격 제어 상태 — 서버가 보내는 스냅샷을 그대로 들고 있는다(부분 갱신 없음).
+    // 항목: {cwd, keys[], name, state, environmentId, url, capacity, error, startedAt}
+    // 조회는 cwd 문자열이 아니라 keys(세션 key)로 한다 — 서버만 realpath로 동일성을
+    // 판정할 수 있으므로, 클라이언트가 cwd를 비교하면 심링크·대소문자에서 어긋난다.
+    remoteControls: [],
+    // 대화 속 특정 메시지로 이동 요청 — {key, uid, nonce}. ChatView가 소비하고 지운다.
+    // nonce가 없으면 같은 항목을 두 번 눌렀을 때 상태가 그대로라 effect가 다시 돌지 않는다.
+    jump: null,
   };
+}
+
+/** 이 세션에 걸려 있는 원격 제어 상태 (없으면 null). */
+export function remoteControlFor(state, key) {
+  if (!key) return null;
+  return (state.remoteControls ?? []).find((r) => r.keys?.includes(key)) ?? null;
 }
 
 function updateSession(state, key, fn) {
@@ -98,6 +119,10 @@ function pushToast(state, text, kind = 'info') {
 
 function handleServerMessage(state, msg) {
   switch (msg.type) {
+    case 'remoteControl':
+      // 스냅샷 통째 교체. 서버는 연결 직후·상태 전이·start/stop 응답에서 늘 전체를 보낸다
+      // (빈 배열도 "아무것도 안 켜짐"이라는 복구해야 할 사실이다).
+      return { ...state, remoteControls: Array.isArray(msg.states) ? msg.states : [] };
     case 'started': {
       const opts = state.pendingStarts.get(msg.startId) || {};
       const pendingStarts = new Map(state.pendingStarts);
@@ -128,8 +153,17 @@ function handleServerMessage(state, msg) {
           // 못 보고 히스토리 전체가 isNew=true로 등장 애니·타자기 출력을 탄다.
           // 시딩된 프리로드에 완료 신호 없이 넘어온 'running' 압축 카드가 있으면
           // 완료로 닫는다 — 정적 히스토리 뷰의 무한 진행바 방지(방어).
+          // preloadIsHistory: 디스크 트랜스크립트에서 되살린 과거 대화일 때만 각
+          // 아이템에 preloaded를 찍는다. 실행 중 도크가 "결과 없는 도구 = 실행 중"
+          // 규칙을 그 메시지들에 적용하면, 중단된 채 끝난 옛 도구가 유령으로 뜬다.
+          // effort 재시작은 같은 preloadMessages 경로를 쓰지만 라이브 대화의 이월이라
+          // 표시하지 않는다 — 거기 열려 있는 도구는 실제로 돌고 있다.
           messages: Array.isArray(opts.preloadMessages)
-            ? finalizeCompactionCards([...opts.preloadMessages])
+            ? finalizeCompactionCards(
+              opts.preloadIsHistory
+                ? opts.preloadMessages.map((m) => ({ ...m, preloaded: true }))
+                : [...opts.preloadMessages],
+            )
             : [],
           // 프리로드 메시지에서 활성 목표(/goal)를 복원한다 — 시딩은 리듀서를 안 태우므로
           // 이게 없으면 effort 재시작·재개에서 🎯 배지가 사라진다(같은 대화가 이어지는데도).
@@ -216,6 +250,10 @@ function handleServerMessage(state, msg) {
         ...s,
         status: 'exited',
         pendingPermissions: [],
+        // CLI 프로세스가 사라졌으니 그 프로세스가 돌리던 백그라운드 작업도 없다.
+        // 비우지 않으면 세션 탭이 목록에서 사라지기까지(3초) 죽은 작업이 "실행 중"으로
+        // 맥동한다 — result 없이 끝난 종료에서 실제로 재현된다(codex 지적).
+        backgroundTasks: [],
       }));
 
     case 'error': {
@@ -295,6 +333,11 @@ export function reducer(state, action) {
       return pushToast(state, action.text, action.kind);
     case 'remove-toast':
       return { ...state, toasts: state.toasts.filter((t) => t.id !== action.id) };
+    case 'jump-to':
+      return { ...state, jump: { key: action.key, uid: action.uid, nonce: action.nonce } };
+    case 'jump-done':
+      // 소비한 요청만 지운다 — 처리 중에 새 요청이 들어왔으면 그걸 살린다.
+      return state.jump && state.jump.nonce === action.nonce ? { ...state, jump: null } : state;
     case 'set-debug':
       return { ...state, debugRaw: !!action.value };
     default:
