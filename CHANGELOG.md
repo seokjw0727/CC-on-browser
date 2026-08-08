@@ -8,6 +8,26 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+### Added
+- **Rename or close a session from its right-click menu.** Right-clicking a
+  session in the sidebar (or using the `⋯` button, which is what keyboard and
+  touch users get) opens a menu with **이름 변경 / 닫기**. Renaming edits the row
+  in place — Enter saves, Esc cancels, an empty name falls back to the automatic
+  title. Names are stored in this browser (`localStorage`), keyed by session id,
+  and follow the conversation when a resume forks it into a new id; every place
+  that shows a session title now derives it the same way (sidebar row, the badge
+  shown when the sidebar is collapsed, the "지난 세션" list, the delete
+  confirmation). "닫기" stops the CLI process for a live session, and removes an
+  already-exited one from the list — the menu says which one it will do.
+- **Edit `~/.claude/settings.json` from Settings → Claude Code Config.** The
+  editor loads the file as-is (formatting and key order preserved), validates
+  JSON before saving, and writes through a new authenticated `GET/PUT
+  /api/claude-config`: writes are serialised, applied atomically (temp file +
+  rename, new files `0600`, existing permissions kept), and refused with a
+  "다시 불러오기" prompt if the file changed elsewhere since it was loaded.
+  Saved settings apply to every session started afterwards, including outside
+  this app — the editor says so, and `SECURITY.md` documents the new boundary.
+
 ## [1.8.2] - 2026-08-01
 
 > Windows에서 원격 제어를 켜도 pill이 꺼진 채로 남던 문제 수정(1.8.1의 누락분 포함).

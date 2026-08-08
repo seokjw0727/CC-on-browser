@@ -43,6 +43,17 @@ on your machine. That makes the security boundary explicit:
   and the permission dialog (new sessions default to the `default` permission
   mode, which asks before tool uses that need confirmation under the CLI's
   policy and your own allow rules).
+- **One writable file: `~/.claude/settings.json`** (Settings → Claude Code
+  Config, since v1.9.0). `GET/PUT /api/claude-config` read and replace exactly
+  that one server-chosen path — the client cannot name a different file. Writes
+  require the same token and `Origin` checks as every other endpoint, must parse
+  as a JSON object, are serialised and applied atomically (temp file + rename,
+  new files created `0600`, existing permissions preserved), and are rejected if
+  the file changed since it was loaded. Symlinks and non-regular files are
+  refused. Note that this is a real capability increase: whatever you save here
+  applies to **every Claude Code session started afterwards, including ones
+  outside this app** (e.g. permission rules and hooks), and only JSON syntax is
+  validated — not whether the settings themselves are safe.
 - **No telemetry, no external calls** from the server itself, with one
   exception: the official usage percentages are fetched from a single
   `api.anthropic.com` metadata endpoint using the OAuth token the CLI already
@@ -124,6 +135,15 @@ CC-on-browser는 로컬에 설치된 Claude Code CLI를 자식 프로세스로 �
   않습니다. 프로젝트 파일 접근은 CLI 도구 + CLI 권한 시스템·권한 다이얼로그로만
   이뤄집니다(v1.5.0부터 새 세션 기본은 `default` 모드 — CLI 정책과 사용자 허용
   규칙상 확인이 필요한 도구 사용 전에 묻습니다).
+- **쓸 수 있는 파일은 `~/.claude/settings.json` 하나** (설정 → Claude Code Config,
+  v1.9.0부터). `GET/PUT /api/claude-config`는 서버가 정한 이 한 경로만 읽고
+  교체합니다 — 클라이언트가 다른 파일을 지정할 수 없습니다. 쓰기에도 다른 endpoint와
+  같은 토큰·Origin 검증이 적용되고, JSON 객체로 파싱되는 내용만 허용하며, 직렬화된
+  원자적 교체(임시 파일 + rename, 새 파일은 `0600`, 기존 권한 보존)로 반영합니다.
+  불러온 뒤 파일이 바뀌었으면 덮어쓰지 않고 거부하며, 심볼릭 링크·비정규 파일도
+  거부합니다. 다만 이는 실제로 권한이 넓어지는 기능입니다 — 저장한 내용은 **이후
+  시작되는 모든 Claude Code 세션(이 앱 밖 포함)** 에 적용되고(권한 규칙·훅 등),
+  검사하는 것은 JSON 문법뿐이지 설정 자체의 안전성이 아닙니다.
 - **텔레메트리 없음**: 서버의 외부 호출은 CLI가 저장한 OAuth 토큰으로
   공식 사용률 메타데이터 endpoint(`api.anthropic.com`) 하나를 조회하는 것이
   유일합니다.

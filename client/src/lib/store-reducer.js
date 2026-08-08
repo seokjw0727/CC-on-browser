@@ -27,6 +27,11 @@ export function createSessionState(partial = {}) {
     hasCompletedTurn: false,
     // 재개 원본 id — 재개 직후(새 fork id 채택 전) 다시 재시작할 때의 --resume 대상
     resumeSourceId: null,
+    // sessionId를 CLI가 직접 확정해 줬는가(system/init 또는 이벤트에서 채택).
+    // 재개 세션의 sessionId는 init 전까지 트랜스크립트에서 복원한 "원본 id"라,
+    // 이 플래그 없이 그 값을 최종 id로 믿으면 사용자 지정 이름을 원본 세션에
+    // 덮어써 버린다(설계도 §2 store.jsx 행). 이름 영속의 관문으로만 쓴다.
+    idConfirmed: false,
     messages: [],
     streaming: {},
     pendingPermissions: [],
@@ -58,6 +63,10 @@ export function createSessionState(partial = {}) {
     // 활성 세션 목표(/goal <텍스트>) — 구동 중 기능 배지 표시용. null=설정 안 됨.
     // /goal 커맨드 에코 또는 "Goal set:" stdout에서 best-effort로 추적한다.
     goal: null,
+    // 사용자가 우클릭 메뉴에서 직접 지정한 세션 이름 — ''이면 자동 제목(첫 발화 요약)을
+    // 쓴다. 리듀서는 순수 유지: localStorage 읽기/쓰기는 store.jsx의 몫이고, 여기엔
+    // 화면에 보일 값만 담긴다(debugRaw와 같은 분업).
+    customTitle: '',
     lastSeq: 0,
     ...partial,
   };
@@ -172,6 +181,11 @@ function handleServerMessage(state, msg) {
           // (사이드바/배지 표기 — 이후 system/init의 새 fork id가 덮어쓴다).
           // ctxFromCalls도 이월: true면 result의 턴 합산 usage가 컨텍스트를 못 덮는다.
           sessionId: opts.preloadSessionId ?? null,
+          // 이 세션에 이미 붙어 있던 사용자 지정 이름을 이월한다 — 재개(저장된 이름을
+          // store.jsx가 조회해 넘김)와 effort 재시작(옛 탭의 in-memory 이름) 공통.
+          // 없으면 ''이라 자동 제목으로 돌아간다.
+          customTitle:
+            typeof opts.preloadCustomTitle === 'string' ? opts.preloadCustomTitle.trim() : '',
           ...(opts.preloadUsage ? { usage: opts.preloadUsage } : {}),
           ...(opts.preloadCtxFromCalls ? { ctxFromCalls: true } : {}),
         }),
@@ -302,6 +316,15 @@ export function reducer(state, action) {
       }
       return { ...state, sessions, activeKey };
     }
+    case 'rename-session':
+      // 사용자 지정 이름 설정/해제. 정규화(공백 정리·길이 제한)는 호출측(store.jsx가
+      // session-titles의 normalizeTitle을 통과시킨 값)이 이미 마친 상태로 들어오지만,
+      // 여기서도 trim한다 — 공백뿐인 값이 "이름 있음"으로 남으면 자동 제목이 영영
+      // 가려진다(리듀서를 직접 호출하는 테스트·다른 경로에 대한 방어).
+      return updateSession(state, action.key, (s) => ({
+        ...s,
+        customTitle: typeof action.title === 'string' ? action.title.trim() : '',
+      }));
     case 'open-new-session':
       return { ...state, newSessionOpen: true };
     case 'close-new-session':

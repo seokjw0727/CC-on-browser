@@ -40,6 +40,10 @@ const handle = await startServer({
   // FAKE_PLATFORM: E2E 전용 — 'linux'를 주면 Windows에서도 cwd 직접 입력 UI가 떠
   // 네이티브 폴더 대화상자 없이 자동화할 수 있다. 미설정 시 실제 플랫폼.
   platform: process.env.FAKE_PLATFORM || undefined,
+  // FAKE_CLAUDE_CONFIG: E2E 전용 — 설정 편집기가 다룰 파일을 임시 경로로 갈아 끼운다.
+  // 미설정 시 실제 ~/.claude/settings.json. 이 파일은 CLI 전체의 설정이라, 편집
+  // 테스트를 격리하지 않으면 사용자의 진짜 설정을 덮어쓴다(projectsRoot와 같은 이유).
+  claudeConfigPath: process.env.FAKE_CLAUDE_CONFIG || undefined,
 });
 
 console.log(`[dev-fake] scenario=${process.env.FAKE_SCENARIO || 'echo'}`);

@@ -15,6 +15,9 @@ const STATE_FILE = path.join(STATE_DIR, 'servers.json');
 // 세션 히스토리 루트 — 반드시 격리한다. 서버 기본값은 사용자의 실제
 // ~/.claude/projects라, 삭제를 다루는 테스트가 진짜 대화 기록을 지울 수 있다.
 const PROJECTS_ROOT = path.join(STATE_DIR, 'projects');
+// Claude Code 설정 편집기가 다룰 파일 — 반드시 격리한다. 서버 기본값은 사용자의
+// 실제 ~/.claude/settings.json이라, 저장을 다루는 테스트가 진짜 CLI 설정을 덮어쓴다.
+const CLAUDE_CONFIG = path.join(STATE_DIR, 'claude-config', 'settings.json');
 const READY_TIMEOUT_MS = 30_000;
 
 // 가짜 트랜스크립트 씨앗 — history.js의 파싱 규칙(cwd는 아무 줄의 cwd 필드,
@@ -60,6 +63,8 @@ function startFakeServer(scenario) {
           ...process.env,
           FAKE_PLATFORM: 'linux',
           FAKE_PROJECTS_ROOT: PROJECTS_ROOT,
+          // 설정 편집 테스트가 실제 ~/.claude/settings.json을 건드리지 않게 한다.
+          FAKE_CLAUDE_CONFIG: CLAUDE_CONFIG,
           // bulk 시나리오의 한 턴 분량 — 채팅 윈도잉(기본 창 200)의 경계를 넘겨야
           // "창 상한 · 더 보기 · 모두 불러오기"를 관측할 수 있다.
           FAKE_BULK_COUNT: '500',

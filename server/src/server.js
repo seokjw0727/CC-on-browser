@@ -11,6 +11,7 @@ import { SessionHub } from './session-hub.js';
 import { listProjects, listSessions, loadTranscript, listRecentSessions, deleteSession } from './history.js';
 import { listDirs, pickDirectory, searchFiles } from './fs-api.js';
 import { aggregateDailyUsage, aggregateUsage, MAX_DAILY_DAYS } from './usage.js';
+import { defaultConfigPath, readClaudeConfig, writeClaudeConfig } from './claude-config.js';
 import { fetchQuota } from './quota.js';
 import { canonicalCwdSync, createRemoteControl } from './remote-control.js';
 
@@ -60,6 +61,9 @@ export async function startServer({
   platform = process.platform, // 테스트 주입용 — E2E가 비-Windows UI(cwd 직접 입력 폴백)를 강제
   remoteControl, // 테스트 주입용 — 기본은 remote-control.js의 실제 자식 프로세스 관리자
   closeRemoteGraceMs = CLOSE_REMOTE_GRACE_MS, // 테스트 주입용 — 정리 대기 상한
+  // 설정 편집 API가 다루는 유일한 파일. 기본은 사용자 전역 ~/.claude/settings.json이며,
+  // 테스트는 임시 경로를 주입해 실제 홈 설정을 절대 건드리지 않는다.
+  claudeConfigPath = defaultConfigPath(),
 } = {}) {
   if (!token) throw new TypeError('token is required');
   if (!cliPath) throw new TypeError('cliPath is required');
@@ -350,6 +354,45 @@ export async function startServer({
     }
   }
 
+  // 요청 본문(JSON) 읽기 — 현재 유일한 쓰기 API(PUT /api/claude-config)용.
+  // 상한을 두는 이유: 로컬 도구라도 무한정 버퍼링하면 메모리로 서버를 죽일 수 있다.
+  const MAX_BODY_BYTES = 1024 * 1024; // 1MB — settings.json에는 과분한 여유
+  function readJsonBody(req) {
+    return new Promise((resolve, reject) => {
+      let size = 0;
+      const chunks = [];
+      req.on('data', (chunk) => {
+        size += chunk.length;
+        if (size > MAX_BODY_BYTES) {
+          // 소켓을 여기서 끊지 않는다 — 응답(413)을 먼저 내보내야 클라이언트가
+          // 네트워크 오류가 아니라 이유를 받는다. 정리는 호출측이 응답 후에 한다.
+          req.pause();
+          reject(Object.assign(new Error('request body too large'), { code: 'EPAYLOAD' }));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      req.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        if (!raw.trim()) {
+          resolve({});
+          return;
+        }
+        try {
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            reject(new Error('request body must be a JSON object'));
+            return;
+          }
+          resolve(parsed);
+        } catch (err) {
+          reject(new Error(`invalid request body: ${err.message}`));
+        }
+      });
+      req.on('error', reject);
+    });
+  }
+
   function json(res, status, body, headers = {}) {
     const data = JSON.stringify(body);
     res.writeHead(status, {
@@ -399,7 +442,45 @@ export async function startServer({
     json(res, 200, { ok: true });
   }
 
+  // PUT /api/claude-config — 본문 {content, expectedMtimeMs}로 설정 파일을 교체.
+  // 잘못된 JSON·형식은 400, 다른 곳에서 수정됐으면 409, 파일시스템 오류는 500.
+  async function handleWriteConfig(req, res) {
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch (err) {
+      if (err?.code === 'EPAYLOAD') {
+        json(res, 413, { error: String(err.message) });
+        // 응답을 다 내보낸 뒤에 남은 업로드를 끊는다.
+        res.on('finish', () => req.destroy());
+      } else {
+        json(res, 400, { error: String(err?.message ?? err) });
+      }
+      return;
+    }
+    const { content, expectedMtimeMs } = body ?? {};
+    if (typeof content !== 'string') {
+      json(res, 400, { error: 'content must be a string' });
+      return;
+    }
+    // 생략은 허용하지 않는다 — 빠뜨린 필드가 "파일 없음"(=새로 만들기)으로 해석되면
+    // 실수로 기존 설정을 건너뛰고 덮어쓰는 요청이 만들어진다. 무한대·NaN도 거부.
+    if (expectedMtimeMs !== null && !Number.isFinite(expectedMtimeMs)) {
+      json(res, 400, { error: 'expectedMtimeMs must be a finite number or null' });
+      return;
+    }
+    try {
+      const { mtimeMs } = await writeClaudeConfig(content, expectedMtimeMs, claudeConfigPath);
+      json(res, 200, { ok: true, mtimeMs });
+    } catch (err) {
+      if (err?.code === 'ECONFLICT') json(res, 409, { error: String(err.message) });
+      else if (err?.code === 'EINVALIDCONFIG') json(res, 400, { error: String(err.message) });
+      else json(res, 500, { error: String(err?.message ?? err) });
+    }
+  }
+
   async function handleApi(req, res, url) {
+    // 인증·Origin 검사가 먼저다 — 본문을 읽거나 파일에 손대기 전에 통과해야 한다.
     if (!originAllowed(req.headers.origin) || !tokenEquals(req.headers['x-auth-token'])) {
       json(res, 401, { error: 'unauthorized' });
       return;
@@ -408,8 +489,16 @@ export async function startServer({
       await handleDeleteSession(res, url);
       return;
     }
+    if (req.method === 'PUT' && url.pathname === '/api/claude-config') {
+      await handleWriteConfig(req, res);
+      return;
+    }
     if (req.method !== 'GET') {
-      const allow = url.pathname === '/api/sessions' ? 'GET, DELETE' : 'GET';
+      const allow = url.pathname === '/api/sessions'
+        ? 'GET, DELETE'
+        : url.pathname === '/api/claude-config'
+          ? 'GET, PUT'
+          : 'GET';
       json(res, 405, { error: 'method not allowed' }, { allow });
       return;
     }
@@ -495,6 +584,18 @@ export async function startServer({
           json(res, 200, { ...local, quota });
           return;
         }
+        case '/api/claude-config':
+          // 설정 편집기(설정 → Claude Code Config)의 로드. 경로는 서버가 정한
+          // 하나뿐이고, content는 원문 그대로 준다(사용자 포매팅·주석 없는 JSON 보존).
+          // 오류 분류는 여기서 끝낸다 — 아래 공통 catch의 "그 외는 400"에 맡기면
+          // 권한·IO 오류(EACCES/EPERM/EIO)가 클라이언트 잘못으로 보고된다.
+          try {
+            json(res, 200, await readClaudeConfig(claudeConfigPath));
+          } catch (err) {
+            if (err?.code === 'EINVALIDCONFIG') json(res, 400, { error: String(err.message) });
+            else json(res, 500, { error: String(err?.message ?? err) });
+          }
+          return;
         case '/api/usage-daily': {
           // 사이드바 "돌아보기" 잔디용 일별 집계. days: 정수만 허용(그 외 400), 1..365 clamp.
           const raw = url.searchParams.get('days') ?? String(MAX_DAILY_DAYS);

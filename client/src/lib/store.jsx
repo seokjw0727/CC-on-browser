@@ -14,6 +14,7 @@ import React, {
 import { connect } from './ws.js';
 import { createInitialState, reducer } from './store-reducer.js';
 import { spawnEffort } from './effort.js';
+import { normalizeTitle, saveTitle, titleFor } from './session-titles.js';
 
 const TOKEN_KEY = 'ccob-token';
 
@@ -46,6 +47,11 @@ export function StoreProvider({ children }) {
   const stateRef = useRef(state);
   stateRef.current = state;
   const removalTimersRef = useRef(new Map()); // key -> timeout (exited 세션 제거 예약)
+  // 세션 이름(우클릭 → 이름 변경)의 영속 보조 장부.
+  //  pendingTitles: sessionId가 아직 확정되지 않은 동안 들어온 이름 — 확정 즉시 기록한다.
+  //  titleSync: key -> 이미 처리한 sessionId. 이월(재개 fork)·복원(새로고침)을 id당 1회만.
+  const pendingTitlesRef = useRef(new Map());
+  const titleSyncRef = useRef(new Map());
 
   // exited 세션마다 제거 타이머를 한 번만 건다(키별로 안정 유지 — 다른 세션의
   // 활동으로 이 effect가 재실행돼도 리셋하지 않는다). 재시작 대체 등으로 세션이
@@ -78,6 +84,41 @@ export function StoreProvider({ children }) {
     },
     [],
   );
+
+  // 세션 이름 ↔ localStorage 동기화. sessionId가 확정된(CLI가 직접 알려 준) 세션만
+  // 다룬다 — 재개 직후의 sessionId는 트랜스크립트에서 복원한 "원본 id"라, 그때 쓰면
+  // 원본 세션의 이름을 덮어쓴다.
+  //
+  // 확정된 세션마다 딱 한 번(그 id에 대해) 셋 중 하나를 한다:
+  //  ① 보류된 이름 기록 — id가 없던 동안 사용자가 바꾼 이름
+  //  ② 이월 — 재개 fork로 새 id를 받은 세션의 이름을 새 id에도 남긴다
+  //  ③ 복원 — 새로고침 등으로 메모리 이름이 비었을 때 저장된 이름을 되살린다
+  useEffect(() => {
+    const pending = pendingTitlesRef.current;
+    const synced = titleSyncRef.current;
+    for (const s of state.sessions.values()) {
+      if (!s.idConfirmed || !s.sessionId) continue;
+      if (pending.has(s.key)) {
+        const title = pending.get(s.key);
+        pending.delete(s.key);
+        synced.set(s.key, s.sessionId);
+        saveTitle(s.sessionId, title); // ① (빈 값이면 해제)
+        continue;
+      }
+      if (synced.get(s.key) === s.sessionId) continue;
+      synced.set(s.key, s.sessionId);
+      if (s.customTitle) {
+        saveTitle(s.sessionId, s.customTitle); // ②
+      } else {
+        const stored = titleFor(s.sessionId); // ③
+        if (stored) dispatch({ type: 'rename-session', key: s.key, title: stored });
+      }
+    }
+    // 사라진 세션의 장부 찌꺼기 정리 — 끝내 id를 못 받은 세션의 보류 이름은 버린다
+    // (영속할 대상이 없다). 화면에서 이미 사라진 세션이므로 사용자에게 손실도 없다.
+    for (const key of [...pending.keys()]) if (!state.sessions.has(key)) pending.delete(key);
+    for (const key of [...synced.keys()]) if (!state.sessions.has(key)) synced.delete(key);
+  }, [state.sessions]);
 
   // 디버그 플래그 초기 동기화 — localStorage 'ccob-debug'를 store 상태로 미러.
   // (리듀서/createInitialState는 순수 유지 — window 접근은 여기서만.)
@@ -163,6 +204,23 @@ export function StoreProvider({ children }) {
           ...(cwd ? { cwd } : {}),
         })
         : false),
+      /**
+       * 세션 이름 변경(사이드바 우클릭 메뉴) — 빈 값이면 해제해 자동 제목으로 돌아간다.
+       * 화면에는 즉시 반영하고, 영속은 sessionId가 확정된 세션에만 그 자리에서 한다.
+       * 아직 확정 전이면 보류했다가 위 effect가 확정 시점에 기록한다.
+       */
+      renameSession: (key, rawTitle) => {
+        const title = normalizeTitle(rawTitle);
+        dispatch({ type: 'rename-session', key, title });
+        const s = stateRef.current.sessions.get(key);
+        if (s?.idConfirmed && s.sessionId) {
+          pendingTitlesRef.current.delete(key);
+          titleSyncRef.current.set(key, s.sessionId);
+          saveTitle(s.sessionId, title);
+        } else {
+          pendingTitlesRef.current.set(key, title);
+        }
+      },
       /** 대화에서 특정 메시지로 이동 — 실행 중 도크 항목 클릭. */
       jumpTo: (key, uid) => dispatch({ type: 'jump-to', key, uid, nonce: ++jumpCounter }),
       /** 일시 토스트 알림 — 설정 변경 확인·오류 표시용(자동 소멸). */

@@ -161,3 +161,24 @@ test('mergeRecentSessions: dirName/sessionId 없는 항목은 제외, 기본 인
   assert.deepEqual(mergeRecentSessions(), []);
   assert.deepEqual(mergeRecentSessions({}), []);
 });
+test('sessionDisplayTitle: 커스텀 이름 → 서버 제목 → 첫 발화 → id 8자 → 폴백', async () => {
+  const { sessionDisplayTitle } = await import('../src/lib/sessionTree.js');
+  const messages = [{ kind: 'user-text', text: '첫 발화 요약' }];
+  // ① 사용자가 지정한 이름이 언제나 이긴다
+  assert.equal(
+    sessionDisplayTitle({ customTitle: ' 내 이름 ', title: '서버 제목', messages, sessionId: 'abcdefgh12' }),
+    '내 이름',
+  );
+  // ② 히스토리 행처럼 messages가 없을 때는 서버 제목
+  assert.equal(sessionDisplayTitle({ title: '서버 제목', sessionId: 'abcdefgh12' }), '서버 제목');
+  // ③ 라이브 행: 서버 제목이 없으면 첫 발화 요약
+  assert.equal(sessionDisplayTitle({ messages, sessionId: 'abcdefgh12' }), '첫 발화 요약');
+  // ④ 아무 제목도 없으면 sessionId 앞 8자
+  assert.equal(sessionDisplayTitle({ sessionId: 'abcdefgh12' }), 'abcdefgh');
+  // ⑤ id도 없으면 폴백(기본 '새 세션', 호출측이 바꿀 수 있다)
+  assert.equal(sessionDisplayTitle({}), '새 세션');
+  assert.equal(sessionDisplayTitle(), '새 세션');
+  assert.equal(sessionDisplayTitle({ fallback: '(제목 없음)' }), '(제목 없음)');
+  // 공백뿐인 값은 없는 것으로 취급한다
+  assert.equal(sessionDisplayTitle({ customTitle: '   ', title: '  ', messages }), '첫 발화 요약');
+});

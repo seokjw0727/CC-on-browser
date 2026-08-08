@@ -527,3 +527,114 @@ test('실행 중 도크 — 입력창 아래에 뜨고, 클릭하면 대화 속 
   const cardBox = await flashed.boundingBox();
   expect(cardBox.y).toBeGreaterThan(0);
 });
+
+test('세션 우클릭 메뉴 — 이름 변경이 사이드바 행에 반영된다', async ({ page }) => {
+  await startSession(page, servers.echo.url);
+  const row = page.locator('.sess-row.live').first();
+  await expect(row).toBeVisible();
+
+  // 우클릭 → 메뉴 → 이름 변경 → 입력 → Enter
+  await row.click({ button: 'right' });
+  const menu = page.getByRole('menu', { name: '세션 메뉴' });
+  await expect(menu).toBeVisible();
+  await menu.getByRole('menuitem', { name: '이름 변경' }).click();
+  const input = page.getByLabel('세션 이름');
+  await expect(input).toBeFocused();
+  await input.fill('내가 붙인 이름');
+  await input.press('Enter');
+
+  await expect(row.locator('.sess-main')).toContainText('내가 붙인 이름');
+  // 사이드바를 접으면 상단 배지도 같은 이름을 쓴다(제목 규칙 단일화)
+  await page.getByRole('button', { name: '사이드바 접기' }).click();
+  await expect(page.locator('.session-name-badge')).toContainText('내가 붙인 이름');
+});
+
+test('세션 우클릭 메뉴 — 키보드로 다룰 수 있다(첫 항목 포커스·화살표·Esc)', async ({ page }) => {
+  await startSession(page, servers.echo.url);
+  const row = page.locator('.sess-row.live').first();
+  await row.click({ button: 'right' });
+
+  const menu = page.getByRole('menu', { name: '세션 메뉴' });
+  await expect(menu).toBeVisible();
+  // 열리면 곧바로 첫 항목에 포커스가 있어야 한다 — 여기가 어긋나면 화살표·Esc가
+  // 전부 먹지 않는다(메뉴가 아직 숨겨진 동안 focus()가 실패하던 회귀 방지).
+  await expect(menu.getByRole('menuitem', { name: '이름 변경' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem', { name: '세션 종료' })).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(menu.getByRole('menuitem', { name: '이름 변경' })).toBeFocused();
+  // Esc로 닫히고, 포커스는 메뉴를 연 행으로 돌아온다
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(row.locator('.sess-main')).toBeFocused();
+});
+
+test('세션 우클릭 메뉴 — Esc는 이름 변경을 취소하고, 닫기는 세션을 종료한다', async ({ page }) => {
+  await startSession(page, servers.echo.url);
+  const row = page.locator('.sess-row.live').first();
+
+  // ⋯ 버튼(터치·키보드 대체 진입점)으로도 같은 메뉴가 열린다
+  await row.locator('.session-more').click();
+  const menu = page.getByRole('menu', { name: '세션 메뉴' });
+  await expect(menu).toBeVisible();
+  await menu.getByRole('menuitem', { name: '이름 변경' }).click();
+  const input = page.getByLabel('세션 이름');
+  await input.fill('버려질 이름');
+  await input.press('Escape');
+  await expect(page.getByLabel('세션 이름')).toHaveCount(0);
+  await expect(row.locator('.sess-main')).not.toContainText('버려질 이름');
+
+  // 닫기(세션 종료) → '종료' 배지 → 유예 후 목록에서 사라짐
+  await row.click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: '세션 종료' }).click();
+  await expect(page.locator('.sess-row.live .badge', { hasText: '종료' })).toBeVisible();
+  await expect(page.locator('.sess-row.live')).toHaveCount(0, { timeout: 10_000 });
+});
+
+test('설정 → Claude Code Config — 편집·저장이 파일에 반영되고 충돌은 거부된다', async ({ page }) => {
+  await page.goto(servers.echo.url);
+  await page.getByRole('button', { name: '설정' }).click();
+  const settings = page.getByRole('dialog', { name: '설정' });
+  await settings.getByRole('button', { name: '편집' }).click();
+
+  const editor = page.getByRole('dialog', { name: 'Claude Code Config 편집' });
+  await expect(editor).toBeVisible();
+  const area = editor.getByLabel('settings.json 내용');
+  // 아직 파일이 없으므로 빈 객체가 기준선이다
+  await expect(area).toHaveValue('{}');
+  // 변경 전에는 저장이 잠겨 있다
+  await expect(editor.getByRole('button', { name: '저장' })).toBeDisabled();
+
+  // 잘못된 JSON은 저장되지 않고 문법 오류를 알린다
+  await area.fill('{ "model": ');
+  await editor.getByRole('button', { name: '저장' }).click();
+  await expect(editor.getByRole('alert')).toContainText('JSON 문법 오류');
+
+  // 올바른 JSON은 저장되고 토스트로 알린다
+  await area.fill('{ "model": "opus" }');
+  await editor.getByRole('button', { name: '저장' }).click();
+  await expect(page.getByText('Claude Code 설정을 저장했습니다.', { exact: false })).toBeVisible();
+
+  // 실제 파일에 반영됐는지 확인 — 격리된 e2e 설정 파일(global-setup의 FAKE_CLAUDE_CONFIG)
+  const configFile = path.join(here, '.state', 'claude-config', 'settings.json');
+  expect(readFileSync(configFile, 'utf8')).toBe('{ "model": "opus" }');
+
+  // 저장 뒤 기준선이 갱신돼 연속 저장이 자기 자신과 충돌하지 않는다
+  await area.fill('{ "model": "sonnet" }');
+  await editor.getByRole('button', { name: '저장' }).click();
+  await expect(page.getByText('Claude Code 설정을 저장했습니다.', { exact: false }).first()).toBeVisible();
+  expect(readFileSync(configFile, 'utf8')).toBe('{ "model": "sonnet" }');
+
+  // 외부에서 파일이 바뀌면(다른 편집기·CLI) 덮어쓰지 않고 409로 막는다
+  writeFileSync(configFile, '{ "changed": "outside" }');
+  await area.fill('{ "model": "haiku" }');
+  await editor.getByRole('button', { name: '저장' }).click();
+  await expect(editor.getByRole('alert')).toContainText('다른 곳에서 파일이 바뀌었습니다');
+  expect(readFileSync(configFile, 'utf8')).toBe('{ "changed": "outside" }');
+
+  // 저장하지 않은 변경이 있으면 한 번에 닫히지 않는다
+  await editor.getByRole('button', { name: '닫기' }).first().click();
+  await expect(editor.getByRole('alert', { includeHidden: false }).last()).toContainText('저장하지 않은 변경');
+  await editor.getByRole('button', { name: '변경 버리고 닫기' }).click();
+  await expect(editor).toBeHidden();
+});

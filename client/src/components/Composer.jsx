@@ -533,6 +533,9 @@ export default function Composer() {
       preloadSessionId: canResume ? resumeId : null,
       preloadUsage: canResume ? session.usage : null,
       preloadCtxFromCalls: canResume ? session.ctxFromCalls : false,
+      // 사용자가 붙여 둔 세션 이름은 재시작 이유(노력 수준 변경)와 무관하게 이어진다 —
+      // 같은 탭을 대체하는 재시작이라 이름이 사라지면 사용자에겐 세션이 바뀐 것처럼 보인다.
+      preloadCustomTitle: session.customTitle,
       replaceKey: session.key,
     });
     const label = effortLabel(effort);

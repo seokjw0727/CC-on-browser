@@ -119,11 +119,15 @@ function setStatus(session, status) {
   return { ...session, status };
 }
 
+// CLI가 이벤트에 실어 보낸 session_id 채택. 아직 id가 없을 때는 물론이고, 재개
+// 프리로드로 "원본 id"만 시딩돼 있는 동안(idConfirmed=false)에도 채택한다 — CLI가
+// 말하는 id가 언제나 그 세션의 진짜 id이고, init을 놓친 경로에서도 이 이벤트가
+// 최종 id를 확정해 준다(그러지 않으면 세션 이름 영속이 영영 보류에 머문다).
 function adoptSessionId(session, payload) {
-  if (!session.sessionId && typeof payload.session_id === 'string') {
-    return { ...session, sessionId: payload.session_id };
-  }
-  return session;
+  if (typeof payload.session_id !== 'string' || !payload.session_id) return session;
+  if (session.idConfirmed) return session;
+  if (session.sessionId === payload.session_id) return { ...session, idConfirmed: true };
+  return { ...session, sessionId: payload.session_id, idConfirmed: true };
 }
 
 function hasOpenTool(session) {
@@ -721,6 +725,9 @@ function reduceSystem(session, payload) {
       return {
         ...session,
         sessionId: payload.session_id ?? session.sessionId,
+        // CLI가 직접 알려 준 id = 최종 id(재개는 여기서 fork된 새 id가 온다).
+        // 이 시점부터 세션 이름을 이 id로 영속해도 안전하다(store.jsx).
+        idConfirmed: session.idConfirmed || typeof payload.session_id === 'string',
         model: payload.model ?? session.model,
         cwd: payload.cwd ?? session.cwd,
         tools: payload.tools ?? session.tools,

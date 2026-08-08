@@ -308,3 +308,37 @@ test('한 cwd를 여러 세션이 공유하면 모두 같은 원격 제어를 �
   assert.equal(remoteControlFor(s, 's_1'), remoteControlFor(s, 's_2'));
   assert.equal(remoteControlFor(s, 's_9').cwd, '/other');
 });
+
+test('rename-session: 사용자 지정 이름을 설정·해제하고 없는 키는 무시한다', () => {
+  let s = stateWithSession('a');
+  assert.equal(s.sessions.get('a').customTitle, '');
+  s = reducer(s, { type: 'rename-session', key: 'a', title: '내 세션' });
+  assert.equal(s.sessions.get('a').customTitle, '내 세션');
+  // 빈 문자열 = 해제(자동 제목으로 복귀), 문자열이 아니면 ''로 방어
+  s = reducer(s, { type: 'rename-session', key: 'a', title: '' });
+  assert.equal(s.sessions.get('a').customTitle, '');
+  s = reducer(s, { type: 'rename-session', key: 'a', title: null });
+  assert.equal(s.sessions.get('a').customTitle, '');
+  // 공백뿐인 이름도 해제로 수렴한다 — 남겨 두면 자동 제목이 영영 가려진다
+  s = reducer(s, { type: 'rename-session', key: 'a', title: '   ' });
+  assert.equal(s.sessions.get('a').customTitle, '');
+  // 없는 세션은 상태를 바꾸지 않는다(같은 참조)
+  const before = s;
+  assert.equal(reducer(s, { type: 'rename-session', key: '없음', title: 'x' }), before);
+});
+
+test('started: preloadCustomTitle이 새 세션의 이름으로 이월된다(없으면 빈 값)', () => {
+  let s = createInitialState();
+  s = registerStart(s, 'st_1', { cwd: '/repo', resumeSessionId: 'src', preloadCustomTitle: '이어서 작업' });
+  s = reducer(s, serverMsg({ type: 'started', startId: 'st_1', key: 's_1' }));
+  assert.equal(s.sessions.get('s_1').customTitle, '이어서 작업');
+
+  s = registerStart(s, 'st_2', { cwd: '/repo' });
+  s = reducer(s, serverMsg({ type: 'started', startId: 'st_2', key: 's_2' }));
+  assert.equal(s.sessions.get('s_2').customTitle, '');
+
+  // 공백뿐인 이월 값은 이름 없음으로 수렴
+  s = registerStart(s, 'st_3', { cwd: '/repo', preloadCustomTitle: '   ' });
+  s = reducer(s, serverMsg({ type: 'started', startId: 'st_3', key: 's_3' }));
+  assert.equal(s.sessions.get('s_3').customTitle, '');
+});

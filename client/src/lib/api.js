@@ -89,3 +89,22 @@ export const fetchUsage = () => get('/api/usage');
  * @returns {Promise<{now, days: [{date, totalTokens, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, entries}]}>}
  */
 export const fetchDailyUsage = (days = 365) => get(`/api/usage-daily?days=${days}`);
+
+/**
+ * Claude Code 사용자 설정(~/.claude/settings.json) 원문 로드 — 설정 → Config 편집기.
+ * 파일이 없으면 exists=false, content는 '{}' 기준선.
+ * @returns {Promise<{exists: boolean, content: string, mtimeMs: number|null, path: string}>}
+ */
+export const fetchClaudeConfig = () => get('/api/claude-config');
+
+/**
+ * 설정 저장 — expectedMtimeMs는 마지막으로 읽은 시각(없던 파일이면 null).
+ * 실패 시 err.status로 구분: 400(잘못된 JSON·형식) / 409(다른 곳에서 수정됨) / 500(파일 오류).
+ * @returns {Promise<{ok: true, mtimeMs: number}>} 새 기준선 mtime
+ */
+export const saveClaudeConfig = ({ content, expectedMtimeMs = null }) =>
+  request('/api/claude-config', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content, expectedMtimeMs }),
+  });

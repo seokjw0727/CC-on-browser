@@ -22,10 +22,11 @@ import { createSessionState } from '../lib/store-reducer.js';
 import { isQuestionRequest } from '../lib/ask-user-question.js';
 import {
   buildSessionTree,
-  deriveSessionTitle,
   mergeRecentSessions,
+  sessionDisplayTitle,
   shortDir,
 } from '../lib/sessionTree.js';
+import { MAX_TITLE_LEN, saveTitle, titleFor } from '../lib/session-titles.js';
 import { fmtAgo, fmtBytes, fmtReset, fmtTok } from '../lib/format.js';
 import { buildHeatmap } from '../lib/usage-grid.js';
 import { MODE_LABEL, MODE_CLASS, MODES } from '../lib/permission-modes.js';
@@ -37,6 +38,8 @@ import {
   writePref,
 } from '../lib/preferences.js';
 import { Sparkle, Mascot } from './Brand.jsx';
+import SessionMenu from './SessionMenu.jsx';
+import ConfigEditorModal from './ConfigEditorModal.jsx';
 import { useFocusTrap } from '../lib/useFocusTrap.js';
 import { usePresence } from '../lib/usePresence.js';
 import './interact.css';
@@ -265,6 +268,8 @@ function NewSessionModal({
     }
     // 여기(성공·404)서는 확인 모달을 연 🗑 버튼이 곧 사라진다 — 포커스 착지점을
     // 목록 제목으로 갈아 끼운다(확인 모달 언마운트 시 읽힌다).
+    // 기록 파일이 사라졌으니 그 세션에 붙여 둔 이름도 함께 정리한다(찌꺼기 방지).
+    saveTitle(target.sessionId, '');
     restoreTargetRef.current = pastHeadingRef.current;
     // 낙관적 제거(성공·404 공통): 재조회가 실패해도 삭제된 행이 부활하지 않도록
     // 먼저 목록에서 빼고 나서 갱신을 시도한다.
@@ -288,7 +293,14 @@ function NewSessionModal({
     // 재개는 한 번에 하나만 — 진행 중에는 모든 행의 재개를 잠근다(조용히 무시되는
     // 버튼을 남기지 않기 위해 시각·보조기술 상태도 함께 끈다).
     const resumeBlocked = resuming || !!deletingRow || !s.cwd;
-    const title = s.title || '(제목 없음)';
+    // 지난 세션도 사용자가 지정한 이름을 먼저 쓴다 — 사이드바에서 이름을 바꾼 뒤
+    // 세션을 닫으면 같은 이름 그대로 이 목록에 나타난다.
+    const title = sessionDisplayTitle({
+      customTitle: titleFor(s.sessionId),
+      title: s.title,
+      sessionId: s.sessionId,
+      fallback: '(제목 없음)',
+    });
     // 서브라인: 디렉터리 · 마지막 접근(상대) · 대화 크기
     const meta = [shortDir(s.cwd) || s.dirName, fmtAgo(s.mtime), fmtBytes(s.fileSize)]
       .filter(Boolean)
@@ -713,7 +725,7 @@ function Retrospective({ notify }) {
 //
 // 기본값은 "새 세션 모달을 열 때의 초기 선택값"에만 쓰인다 — 실행 중 세션이나
 // 이미 열려 있는 모달에는 소급 적용하지 않는다.
-function SettingsPanel({ theme, onSetTheme }) {
+function SettingsPanel({ theme, onSetTheme, onEditConfig }) {
   const { state, setDebug } = useStore();
   const [defaults, setDefaults] = useState(() => loadDefaults());
   // 모델 카탈로그는 CLI가 세션 init에서 보고한다 — 앱을 켜고 아직 아무 세션도
@@ -799,6 +811,26 @@ function SettingsPanel({ theme, onSetTheme }) {
       </div>
       {defaults.mode === 'bypassPermissions' && <TrustModeWarning />}
 
+      {/* CLI 전역 설정 파일 편집 — 이 앱의 기본값(위 항목들)과 달리 Claude Code
+          자체의 설정이라, 여는 버튼과 경고를 분명히 분리해 둔다. */}
+      <div className="setting-row">
+        <span
+          className="setting-label"
+          data-tip="Claude Code CLI의 사용자 설정 파일을 직접 편집합니다 — 저장하면 이후 시작되는 모든 세션에 적용됩니다"
+        >
+          Claude Code Config
+          {/* 어떤 파일을 여는지 버튼을 누르기 전에 보이도록 — 절대 경로는 편집기 안에서 */}
+          <span className="setting-sub dim">~/.claude/settings.json</span>
+        </span>
+        <button
+          type="button"
+          className="setting-edit-btn"
+          onClick={(e) => onEditConfig(e.currentTarget)}
+        >
+          편집
+        </button>
+      </div>
+
       <div className="setting-row">
         <span
           className="setting-label"
@@ -845,13 +877,16 @@ function SidebarFoot({ openPanel, onToggle }) {
 
 // 통계·설정 중앙 모달 — 새 세션 모달과 같은 overlay/trap/presence 패턴.
 // 포커스 복원은 useFocusTrap 언마운트 정리가 트리거 버튼으로 되돌린다.
-function FootModal({ panel, presenceStatus, onClose, theme, onSetTheme }) {
+function FootModal({ panel, presenceStatus, onClose, theme, onSetTheme, onEditConfig, inert }) {
   const { state, notify } = useStore();
   const dialogRef = useFocusTrap(true);
   const title = panel === 'stats' ? '통계' : '설정';
   return (
     <div
       className={`modal-overlay${presenceStatus === 'closing' ? ' closing' : ''}`}
+      // Config 편집기가 떠 있는 동안(페이드아웃 포함) 이 레이어 전체를 비활성화 —
+      // 배경 클릭으로 설정 모달이 먼저 닫히거나 Tab이 새는 것을 막는다.
+      inert={inert ? true : undefined}
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
@@ -883,7 +918,7 @@ function FootModal({ panel, presenceStatus, onClose, theme, onSetTheme }) {
               <Retrospective notify={notify} />
             </>
           ) : (
-            <SettingsPanel theme={theme} onSetTheme={onSetTheme} />
+            <SettingsPanel theme={theme} onSetTheme={onSetTheme} onEditConfig={onEditConfig} />
           )}
         </div>
       </div>
@@ -893,6 +928,7 @@ function FootModal({ panel, presenceStatus, onClose, theme, onSetTheme }) {
 
 // 닫힘 페이드아웃(140ms) 동안 마지막 패널 내용을 유지한 채 마운트를 지속.
 function FootModalPresence({ panel, ...rest }) {
+  // rest에는 inert·onEditConfig가 그대로 흘러간다(설정 패널 → Config 편집기 배선).
   const { mounted, status } = usePresence(!!panel, 140);
   const lastPanelRef = useRef(panel);
   if (panel) lastPanelRef.current = panel;
@@ -902,13 +938,30 @@ function FootModalPresence({ panel, ...rest }) {
 
 // ----- 사이드바 본체 -----
 export default function Sidebar({ onCollapse, theme, onSetTheme }) {
-  const { state, dispatch, startSession, stopSession, notify } = useStore();
+  const { state, dispatch, startSession, stopSession, renameSession, notify } = useStore();
   const modalOpen = state.newSessionOpen;
   const openModal = () => dispatch({ type: 'open-new-session' });
   const closeModal = () => dispatch({ type: 'close-new-session' });
   const [defaultCwd, setDefaultCwd] = useState('');
   const [platform, setPlatform] = useState(null); // 네이티브 폴더 선택 버튼 노출 판단
   const [footPanel, setFootPanel] = useState(null); // null | 'stats' | 'settings'
+  // 세션 컨텍스트 메뉴 — {rowKey, x, y}. 행 데이터는 매 렌더에 스토어에서 다시 읽어
+  // 메뉴가 열린 사이 세션이 종료·제거돼도 낡은 정보로 동작하지 않게 한다.
+  const [menu, setMenu] = useState(null);
+  const menuTriggerRef = useRef(null); // 메뉴를 연 요소 — 닫힐 때 포커스를 돌려줄 대상
+  // 인라인 이름 변경 — {rowKey, value}. 한 번에 한 행만 편집한다.
+  const [renaming, setRenaming] = useState(null);
+  // 행 key -> .sess-main 버튼. 우클릭(포커스 불가한 행 div)과 이름 변경 종료 뒤
+  // 포커스를 돌려줄 실제 대상이다 — 없으면 포커스가 <body>로 떨어진다.
+  const rowBtnRefs = useRef(new Map());
+  // 행이 통째로 사라지는 동작(목록에서 제거) 뒤 포커스가 갈 곳
+  const newSessionBtnRef = useRef(null);
+  const [focusRow, setFocusRow] = useState(null); // 렌더 후 포커스를 줄 행 key
+  // Claude Code Config 편집기 — 설정 모달 위에 형제로 뜬다. 페이드아웃(140ms)까지
+  // 마운트를 유지해야 아래 레이어의 inert 해제 시점이 애니메이션과 어긋나지 않는다.
+  const [configOpen, setConfigOpen] = useState(false);
+  const configTriggerRef = useRef(null); // "편집" 버튼 — 닫힐 때 포커스 복귀 대상
+  const { mounted: configMounted, status: configStatus } = usePresence(configOpen, 140);
   // 재개 잠금 — 모달 밖에 두어 모달을 닫았다 다시 열어도 유지된다. ref는 첫 await
   // 전에 동기적으로 세우는 실제 관문이고, state는 UI 표시용 미러다.
   const [resumingKey, setResumingKey] = useState(null);
@@ -990,6 +1043,10 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
         // 대화를 이월하는 경로에는 붙이지 않는다(그건 실제로 돌고 있는 작업이다).
         preloadIsHistory: true,
         preloadSessionId: pre.sessionId,
+        // 이 세션에 붙여 둔 이름을 이어 간다 — 재개하면 CLI가 새 id로 fork할 수
+        // 있어, 화면 이름이 자동 제목으로 되돌아가 보이는 것을 막는다. 새 id로의
+        // 영속 이월은 id가 확정될 때 store.jsx가 맡는다.
+        preloadCustomTitle: titleFor(meta.sessionId),
         preloadUsage: pre.usage,
         // 트랜스크립트에 호출별 usage가 있었다면 그 사실도 이월 — 시딩 직후의
         // result성 이벤트가 합산 usage로 컨텍스트를 덮는 경로를 원천 차단(방어).
@@ -1044,6 +1101,44 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
   });
   const liveOthers = tree.others.filter((n) => n.live.length > 0);
 
+  // 컨텍스트 메뉴 열기 — 우클릭(커서 좌표)과 ⋯ 버튼(버튼 모서리) 공용.
+  // 키보드 컨텍스트 메뉴 키는 좌표가 0/음수로 오는 브라우저가 있어, 그때는 행 기준으로.
+  const openRowMenu = (rowKey, trigger, point) => {
+    const usable = point && point.x > 0 && point.y > 0;
+    const rect = trigger?.getBoundingClientRect?.();
+    menuTriggerRef.current = trigger ?? null;
+    setMenu({
+      rowKey,
+      x: usable ? point.x : (rect?.left ?? 0),
+      y: usable ? point.y : (rect?.bottom ?? 0),
+    });
+  };
+
+  const closeMenu = useCallback(() => setMenu(null), []);
+
+  // 메뉴가 열려 있는 사이 세션이 사라지면(종료 유예 만료·재시작 대체) 조용히 닫는다.
+  useEffect(() => {
+    if (menu && !state.sessions.has(menu.rowKey)) setMenu(null);
+    if (renaming && !state.sessions.has(renaming.rowKey)) setRenaming(null);
+  }, [state.sessions, menu, renaming]);
+
+  // 이름 변경 종료. restoreFocus는 키보드로 끝낸 경우(Enter·Esc)에만 참 —
+  // 다른 곳을 클릭해서 끝난(blur) 경우까지 포커스를 되돌리면 방금 누른 컨트롤에서
+  // 포커스를 빼앗는다.
+  const endRename = ({ save, restoreFocus }) => {
+    if (!renaming) return;
+    if (save) renameSession(renaming.rowKey, renaming.value);
+    if (restoreFocus) setFocusRow(renaming.rowKey);
+    setRenaming(null);
+  };
+
+  // 이름 변경이 끝난 뒤 그 행으로 포커스 복귀 — 버튼이 다시 그려진 다음에 실행된다.
+  useEffect(() => {
+    if (!focusRow) return;
+    rowBtnRefs.current.get(focusRow)?.focus?.();
+    setFocusRow(null);
+  }, [focusRow]);
+
   // 라이브 세션 행 — 렌더 헬퍼(요소 인스턴스화가 아니라 호출)로 두어 DOM을 안정화.
   // 매 렌더마다 새 컴포넌트 타입이 생기지 않으므로 React가 remount 없이 patch한다.
   const liveRow = (row, node) => {
@@ -1055,21 +1150,79 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
       isQuestionRequest(sess?.pendingPermissions?.[0])
         ? { label: '질문 대기', cls: 'warn' }
         : STATUS_BADGE[row.status] ?? { label: row.status, cls: '' };
-    // 세션 이름 = 첫 사용자 발화 요약 → 없으면 세션 id 앞 8자 → 그것도 없으면 '새 세션'.
-    const label =
-      deriveSessionTitle(sess?.messages) ||
-      (row.sessionId ? row.sessionId.slice(0, 8) : '새 세션');
+    // 세션 이름 — 사용자가 지정한 이름이 있으면 그것, 없으면 자동 제목(sessionDisplayTitle).
+    const label = sessionDisplayTitle({
+      customTitle: sess?.customTitle,
+      messages: sess?.messages,
+      sessionId: row.sessionId,
+    });
+    // 이름 변경 중인 행은 입력 한 줄로 바뀐다 — Enter 저장 / Esc 취소 / 포커스를
+    // 잃으면 저장(다른 곳을 눌러 편집을 "끝내는" 흔한 기대에 맞춘다).
+    if (renaming?.rowKey === row.key) {
+      return (
+        <div key={row.key} className={`sess-row live renaming${row.active ? ' active' : ''}`}>
+          <span className="sess-dot live" aria-hidden="true" />
+          <input
+            className="sess-rename-input"
+            autoFocus
+            value={renaming.value}
+            aria-label="세션 이름"
+            placeholder={label}
+            maxLength={MAX_TITLE_LEN}
+            onChange={(e) => setRenaming((cur) => (cur ? { ...cur, value: e.target.value } : cur))}
+            onBlur={() => endRename({ save: true, restoreFocus: false })}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                endRename({ save: true, restoreFocus: true });
+              } else if (e.key === 'Escape') {
+                e.stopPropagation();
+                endRename({ save: false, restoreFocus: true });
+              }
+            }}
+          />
+        </div>
+      );
+    }
+
     return (
-      <div key={row.key} className={`sess-row live${row.active ? ' active' : ''}`}>
+      <div
+        key={row.key}
+        className={`sess-row live${row.active ? ' active' : ''}`}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          // 복원 대상은 행 <div>(포커스 불가)가 아니라 그 안의 세션 버튼이다.
+          openRowMenu(row.key, rowBtnRefs.current.get(row.key), { x: e.clientX, y: e.clientY });
+        }}
+      >
         <button
           type="button"
           className="sess-main"
+          ref={(el) => {
+            if (el) rowBtnRefs.current.set(row.key, el);
+            else rowBtnRefs.current.delete(row.key);
+          }}
           onClick={() => dispatch({ type: 'set-active', key: row.key })}
           data-tip={label !== node.cwd ? `${label}${node.cwd ? ` — ${node.cwd}` : ''}` : node.cwd || node.label}
         >
           <span className="sess-dot live" aria-hidden="true" />
           <span className="truncate">{label}</span>
           <span className={`badge ${badge.cls}`}>{badge.label}</span>
+        </button>
+        {/* 우클릭을 쓸 수 없는 환경(터치·키보드)의 같은 메뉴 진입점 */}
+        <button
+          type="button"
+          className="session-more"
+          aria-label={`세션 메뉴: ${label}`}
+          aria-haspopup="menu"
+          aria-expanded={menu?.rowKey === row.key}
+          data-tip="이름 변경 · 닫기"
+          // 열려 있는 메뉴의 트리거를 다시 누르면 닫는다(표준 토글).
+          onClick={(e) => (menu?.rowKey === row.key
+            ? closeMenu()
+            : openRowMenu(row.key, e.currentTarget, null))}
+        >
+          ⋯
         </button>
         {row.status !== 'exited' && (
           <button
@@ -1120,7 +1273,7 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
       </div>
 
       <div className="sidebar-inner">
-        <button type="button" className="new-session-btn" onClick={openModal}>
+        <button type="button" className="new-session-btn" ref={newSessionBtnRef} onClick={openModal}>
           <span className="ns-plus" aria-hidden="true">+</span> 새 세션
         </button>
 
@@ -1172,13 +1325,78 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
         onHistoryChanged={refreshProjects}
       />
 
+      {/* 세션 컨텍스트 메뉴 — position:fixed라 aside 밖에서 커서 좌표에 뜬다.
+          항목은 지금 상태로 매번 다시 만든다(메뉴가 열린 사이 상태가 바뀔 수 있다). */}
+      {menu && state.sessions.has(menu.rowKey) && (
+        <SessionMenu
+          anchor={{ x: menu.x, y: menu.y }}
+          label="세션 메뉴"
+          restoreRef={menuTriggerRef}
+          onClose={closeMenu}
+          items={[
+            {
+              key: 'rename',
+              icon: '✎',
+              label: '이름 변경',
+              onSelect: () => {
+                const sess = state.sessions.get(menu.rowKey);
+                // 입력 초기값은 "지금 지정된 이름"뿐 — 자동 제목을 채워 넣으면
+                // 사용자가 지우지 않는 한 그 요약이 고정 이름으로 굳어 버린다.
+                setRenaming({ rowKey: menu.rowKey, value: sess?.customTitle ?? '' });
+              },
+            },
+            // 실행 중이면 CLI 프로세스를 정지하고, 이미 끝난 세션이면 목록에서 치운다.
+            // 같은 자리에서 다른 일을 하므로 라벨도 다르게 — "닫기"가 무엇을 하는지
+            // 사용자가 눌러 보기 전에 알 수 있어야 한다.
+            // key는 'close'로 고정한다 — 메뉴가 열린 사이 세션이 종료되면 라벨과
+            // 동작만 갈아 끼우고 버튼은 그대로 둔다(키가 바뀌면 remount되며 그 항목에
+            // 있던 포커스가 사라진다).
+            state.sessions.get(menu.rowKey)?.status === 'exited'
+              ? {
+                key: 'close',
+                icon: '✕',
+                label: '목록에서 제거',
+                onSelect: () => {
+                  dispatch({ type: 'remove-session', key: menu.rowKey });
+                  // 행과 트리거가 같은 렌더에서 사라진다 — 메뉴가 돌려줄 포커스가
+                  // 없으므로 사이드바의 안정된 지점("새 세션")으로 옮긴다.
+                  menuTriggerRef.current = newSessionBtnRef.current;
+                },
+              }
+              : {
+                key: 'close',
+                icon: '✕',
+                label: '세션 종료 (CLI 정지)',
+                danger: true,
+                onSelect: () => stopSession(menu.rowKey),
+              },
+          ]}
+        />
+      )}
+
       {/* 통계·설정 모달도 aside 밖 — 새 세션 모달과 같은 이유. */}
       <FootModalPresence
         panel={footPanel}
         onClose={() => setFootPanel(null)}
         theme={theme}
         onSetTheme={onSetTheme}
+        inert={configMounted}
+        onEditConfig={(trigger) => {
+          configTriggerRef.current = trigger ?? null;
+          setConfigOpen(true);
+        }}
       />
+
+      {/* Config 편집기 — 설정 모달의 형제로 렌더(중첩 금지). DOM 순서상 뒤라
+          같은 z-index에서도 위에 쌓이지만, CSS로도 의도를 못박아 둔다. */}
+      {configMounted && (
+        <ConfigEditorModal
+          presenceStatus={configStatus}
+          restoreRef={configTriggerRef}
+          notify={notify}
+          onClose={() => setConfigOpen(false)}
+        />
+      )}
     </>
   );
 }
@@ -1188,7 +1406,14 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
 // 성공이면 (그 버튼이 사라지므로) 지난 세션 목록 제목 — 호출측이 갈아 끼운다.
 function ConfirmDeleteModal({ target, presenceStatus, busy, restoreRef, onConfirm, onClose }) {
   const dialogRef = useFocusTrap(true, undefined, restoreRef);
-  const title = target.title || target.sessionId;
+  // 목록 행과 같은 이름을 보여 준다 — 확인 모달만 다른 제목을 쓰면 "무엇을 지우는지"가
+  // 어긋난다. 이름이 전혀 없을 때만 sessionId 전체를 노출한다.
+  const title = sessionDisplayTitle({
+    customTitle: titleFor(target.sessionId),
+    title: target.title,
+    sessionId: target.sessionId,
+    fallback: '(제목 없음)',
+  });
   return (
     <div
       className={`modal-overlay confirm-overlay${presenceStatus === 'closing' ? ' closing' : ''}`}

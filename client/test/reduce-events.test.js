@@ -684,3 +684,34 @@ test('at — 깨진 timestamp는 주입 시계로 폴백한다', () => {
   }, FIXED_NOW);
   assert.equal(s.messages.find((m) => m.kind === 'assistant-text').at, FIXED_NOW);
 });
+
+test('session_id 채택: 재개 프리로드의 원본 id는 CLI가 알려 준 fork id로 확정된다', () => {
+  // 재개 세션은 트랜스크립트에서 복원한 원본 id로 시작한다(idConfirmed=false).
+  const seeded = createSessionState({ sessionId: 'src-id', resumeSourceId: 'src-id' });
+  // init이 fork된 새 id를 알려 주면 그 값으로 확정된다.
+  const afterInit = reduceCliEvent(seeded, { type: 'system', subtype: 'init', session_id: 'fork-id' });
+  assert.equal(afterInit.sessionId, 'fork-id');
+  assert.equal(afterInit.idConfirmed, true);
+
+  // init을 놓쳐도 다른 이벤트의 session_id가 같은 일을 한다(이름 영속이 보류에 머물지 않게).
+  const viaEvent = reduceCliEvent(seeded, {
+    type: 'assistant',
+    session_id: 'fork-id',
+    message: { content: [{ type: 'text', text: 'hi' }] },
+  });
+  assert.equal(viaEvent.sessionId, 'fork-id');
+  assert.equal(viaEvent.idConfirmed, true);
+
+  // 이미 확정된 뒤에는 다른 이벤트가 id를 흔들지 못한다.
+  const later = reduceCliEvent(afterInit, {
+    type: 'assistant',
+    session_id: '엉뚱한-id',
+    message: { content: [{ type: 'text', text: 'hi' }] },
+  });
+  assert.equal(later.sessionId, 'fork-id');
+
+  // 신규 세션(시딩 없음)도 첫 이벤트에서 채택·확정된다.
+  const fresh = reduceCliEvent(createSessionState(), { type: 'system', subtype: 'init', session_id: 'new-id' });
+  assert.equal(fresh.sessionId, 'new-id');
+  assert.equal(fresh.idConfirmed, true);
+});
