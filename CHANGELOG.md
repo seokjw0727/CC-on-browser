@@ -8,6 +8,13 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.8.3] - 2026-08-09
+
+> 사이드바 세션을 우클릭해 이름 변경·닫기, 설정에서 Claude Code 설정
+> (`~/.claude/settings.json`) 직접 편집.
+> (Right-click a sidebar session to rename or close it; edit your Claude Code
+> settings file from Settings.)
+
 ### Added
 - **Rename or close a session from its right-click menu.** Right-clicking a
   session in the sidebar (or using the `⋯` button, which is what keyboard and
