@@ -26,8 +26,12 @@ async function makeFixture() {
   await fs.writeFile(path.join(cwd, 'a.html'), '<h1>A</h1>');
   await fs.writeFile(path.join(cwd, 'sub', 's.css'), 'h1{color:red}');
   await fs.writeFile(path.join(root, 'outside.txt'), 'secret');
-  return { root, cwd, cleanup: () => fs.rm(root, { recursive: true, force: true }) };
+  return { root, cwd, cleanup: () => rmTemp(root) };
 }
+
+// Windows는 서빙이 방금 닫은 파일 핸들이 잠깐 남아 rmdir이 EBUSY로 튄다(CI 실측) —
+// e2e/global-setup의 .state 정리와 같은 이유·같은 처방이다. 재시도는 노드가 해 준다.
+const rmTemp = (p) => fs.rm(p, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 
 test('티켓: 발급 → 파일 자신과 같은 스코프의 하위 리소스를 연다', async () => {
   const fx = await makeFixture();
@@ -102,7 +106,7 @@ const CASE_INSENSITIVE_FS = await (async () => {
   } catch {
     return false;
   } finally {
-    await fs.rm(dir, { recursive: true, force: true });
+    await rmTemp(dir);
   }
 })();
 
