@@ -78,6 +78,16 @@ export const searchFiles = (cwd, q = '') =>
   get(`/api/files?cwd=${encodeURIComponent(cwd)}${q ? `&q=${encodeURIComponent(q)}` : ''}`);
 
 /**
+ * 결과물 미리보기 티켓 발급 — 반환된 url은 인증 없이 열 수 있는 단명 capability라
+ * iframe/img에 그대로 실을 수 있다(메인 토큰은 URL에 절대 싣지 않는다).
+ * 실패 시 err.status: 403(세션 작업 디렉터리 밖) / 404(없는 파일·세션 아님) /
+ * 415(정규 파일 아님).
+ * @returns {Promise<{ticket: string, url: string, name: string}>}
+ */
+export const fetchPreviewTicket = (key, absPath) =>
+  get(`/api/preview-ticket?key=${encodeURIComponent(key)}&path=${encodeURIComponent(absPath)}`);
+
+/**
  * @returns {Promise<{now, fiveHour, sevenDay, quota}>}
  * 로컬 트랜스크립트 집계(5h/7d) + 계정 공식 사용률 quota({fiveHour,sevenDay} — 실패 시 null)
  */

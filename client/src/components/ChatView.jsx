@@ -4,7 +4,7 @@
 // 목록은 **윈도잉**해서 그린다(lib/chat-window.js): 대화 전체를 DOM에 두면 힙의 72%가
 // DOM이 되고 그 임계를 넘으면 GC 스래싱으로 스트리밍 중 메인스레드가 초 단위로 멈춘다
 // (실측 2026-07-27: 메시지 1920개·도구 결과 20KB에서 총 블로킹 3851ms → 윈도잉 후 0ms).
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
 import Message, { debugEnabled } from './Message.jsx';
 import { WINDOW_SIZE, expandStart, windowStartFor } from '../lib/chat-window.js';
@@ -339,6 +339,16 @@ export default function ChatView() {
     flashTimerRef.current = setTimeout(clearFlash, 1400);
   });
 
+  // 도구 카드 → 미리보기 패널. 세션 key에만 의존하는 안정된 참조를 내려보낸다
+  // (Message가 memo라 매 렌더 새 함수를 주면 스트리밍마다 전량 재렌더된다).
+  const activeKey = session?.key;
+  const openPreview = useCallback(
+    (path) => {
+      if (activeKey) dispatch({ type: 'open-preview', key: activeKey, path });
+    },
+    [activeKey, dispatch],
+  );
+
   const empty = !session || session.messages.length === 0;
   const busy = session && (session.status === 'thinking' || session.status === 'tool');
 
@@ -378,7 +388,9 @@ export default function ChatView() {
                 const idx = winStart + i;
                 const key = m.uid ?? `i${idx}`;
                 const isNew = idx >= seenCount;
-                return <Message key={key} item={m} isNew={isNew} debug={debug} />;
+                return (
+                  <Message key={key} item={m} isNew={isNew} debug={debug} onPreview={openPreview} />
+                );
               })}
               {busy && (
                 <div className="status-line dim">

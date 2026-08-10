@@ -2,6 +2,7 @@
 // item: {name, input|null, inputJson, result:{content,isError,structured}|null,
 //        streaming, parentToolUseId}
 // chat.css를 직접 import — PermissionDialog가 ChatView 없이 ToolCard를 써도 스타일 보장.
+import { previewPathOf } from '../lib/artifacts.js';
 import './chat.css';
 
 function textOfResult(result) {
@@ -211,9 +212,14 @@ function ResultBlock({ result, collapsedByDefault }) {
   );
 }
 
-export default function ToolCard({ item }) {
+// item: 위 계약 + (선택) onPreview — 있으면 "미리보기" 버튼을 띄운다.
+// 이 prop은 **채팅 뷰에서만** 내려온다. PermissionDialog도 같은 카드를 재사용하는데,
+// 거기 카드는 아직 승인되지 않은(=파일이 만들어지기 전) 호출이라 열 대상이 없다.
+export default function ToolCard({ item, onPreview }) {
   const { name, input, inputJson, result, streaming } = item;
   const isError = !!(result && result.isError);
+  // 성공한 파일 쓰기만 미리보기 대상 — 실패·미완 카드에는 버튼이 생기지 않는다.
+  const previewPath = onPreview ? previewPathOf(item) : null;
   const chip = streaming
     ? { cls: 'running', label: '입력 수신 중' }
     : result == null
@@ -230,6 +236,16 @@ export default function ToolCard({ item }) {
         <span className="tool-name">{name || '도구'}</span>
         {item.parentToolUseId && <span className="tool-chip">서브에이전트</span>}
         <span className="spacer" />
+        {previewPath && (
+          <button
+            type="button"
+            className="tool-preview-btn"
+            onClick={() => onPreview(previewPath)}
+            data-tip="옆에서 결과물 미리보기"
+          >
+            미리보기
+          </button>
+        )}
         <span className={`tool-chip ${chip.cls}`}>
           {(streaming || result == null) && <span className="pulse-dot on" />}{' '}
           {chip.label}

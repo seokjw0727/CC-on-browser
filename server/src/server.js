@@ -14,6 +14,7 @@ import { aggregateDailyUsage, aggregateUsage, MAX_DAILY_DAYS } from './usage.js'
 import { defaultConfigPath, readClaudeConfig, writeClaudeConfig } from './claude-config.js';
 import { fetchQuota } from './quota.js';
 import { canonicalCwdSync, createRemoteControl } from './remote-control.js';
+import { createPreviewApi, PREVIEW_PREFIX } from './preview-api.js';
 
 const VERSION_TIMEOUT_MS = 3_000;
 // close()가 원격 제어 자식 정리를 기다리는 상한. remote-control.js의 stop 유예
@@ -64,6 +65,7 @@ export async function startServer({
   // 설정 편집 API가 다루는 유일한 파일. 기본은 사용자 전역 ~/.claude/settings.json이며,
   // 테스트는 임시 경로를 주입해 실제 홈 설정을 절대 건드리지 않는다.
   claudeConfigPath = defaultConfigPath(),
+  previewApi, // 테스트 주입용 — 기본은 preview-api.js의 티켓 저장소(시계·TTL 실제값)
 } = {}) {
   if (!token) throw new TypeError('token is required');
   if (!cliPath) throw new TypeError('cliPath is required');
@@ -87,6 +89,8 @@ export async function startServer({
   const dailyCache = new Map();
   const getQuota = quotaFetcher ?? fetchQuota;
   const pickDir = directoryPicker ?? pickDirectory;
+  // 결과물 미리보기 — 티켓 발급/서빙. 읽기 범위는 라이브 세션 cwd 안으로 제한된다.
+  const preview = previewApi ?? createPreviewApi({ platform });
 
   const tokenBuf = Buffer.from(String(token));
   const tokenEquals = (candidate) => {
@@ -144,6 +148,10 @@ export async function startServer({
 
   hub.on('broadcast', (msg) => {
     broadcast(msg);
+    // 세션이 끝나면 그 세션이 발급한 미리보기 티켓도 즉시 무효화한다 — 티켓의 유효
+    // 범위는 "라이브 세션의 작업 디렉터리"이므로, 세션이 사라진 뒤에도 TTL까지
+    // 살아 있으면 그 계약이 깨진다.
+    if (msg?.type === 'exit') preview.revokeSession(msg.key);
     // 세션이 끝나면 각 원격 제어에 붙은 keys가 달라진다. 원격 프로세스 변화에만
     // 방송을 걸어 두면, 종료된 세션의 pill이 다음 원격 이벤트까지 켜진 채로 남는다
     // (codex 지적). 켜진 원격 제어가 있을 때만 덧붙여 잡음을 만들지 않는다.
@@ -553,6 +561,35 @@ export async function startServer({
             ),
           });
           return;
+        case '/api/preview-ticket': {
+          // 결과물 미리보기 티켓 발급. 여기까지 온 요청은 이미 토큰·Origin 검사를
+          // 통과했다. 경로 격리의 기준 cwd는 **클라이언트 말이 아니라** 서버의 세션
+          // 장부에서 되찾는다(remote-control과 같은 원칙) — 라이브 세션이 아니면 404.
+          const key = url.searchParams.get('key');
+          const filePath = url.searchParams.get('path');
+          try {
+            const issued = await preview.issue({
+              sessionKey: key,
+              cwd: key ? hub.cwdOf(key) : null,
+              filePath,
+            });
+            // 발급은 realpath/stat를 await하므로, 그 사이에 세션이 끝나면 exit 방송의
+            // 폐기가 **삽입 전에** 지나가 죽은 세션의 티켓이 살아남는다(codex 지적).
+            // 반환 직후 생존을 다시 확인하고, 아니면 방금 만든 티켓을 되돌린다.
+            if (!key || !hub.cwdOf(key)) {
+              preview.revoke(issued.ticket);
+              json(res, 404, { error: 'session is not live' });
+              return;
+            }
+            json(res, 200, issued);
+          } catch (err) {
+            // 예상한 실패(EPREVIEW*)는 자기 status를, 없는 파일은 404를 쓴다.
+            // 그 밖의 파일시스템 오류(EACCES/EIO 등)는 클라이언트 잘못이 아니므로 500.
+            const status = err?.status ?? (err?.code === 'ENOENT' ? 404 : 500);
+            json(res, status, { error: String(err?.message ?? err) });
+          }
+          return;
+        }
         case '/api/pick-directory':
           // 네이티브 폴더 선택 대화상자를 사용자 데스크톱에 띄우고 선택 경로를 반환.
           // 사용자가 응답할 때까지 블록되는 GET(로컬 도구라 허용). 취소 시 path=null.
@@ -683,10 +720,65 @@ export async function startServer({
     res.end(req.method === 'HEAD' ? undefined : data);
   }
 
+  // GET /preview/<ticket>/<relpath> — 티켓만으로 여는 미리보기 서빙.
+  // 메인 토큰을 요구하지 않는다: 티켓 자체가 "이 디렉터리, 30분" 한정 capability이고,
+  // iframe/img가 직접 여는 URL에 토큰을 실을 수 없기 때문이다(preview-api.js 서두 참조).
+  //
+  // 경로는 WHATWG URL이 정규화한 pathname이 아니라 **원본 요청 라인**에서 뽑는다.
+  // new URL()은 '..'·'%2e%2e'·'\'를 미리 접어 버려서, 티켓 스코프 안으로 접히는
+  // 상위 참조가 거부되지 않고 조용히 통과한다(codex 지적). 스코프 밖으로 나가는
+  // 경우는 '/preview/' 접두사째 사라져 여기 오지도 않지만, 계약("상위 참조 거부")은
+  // 원본 경로로 판정해야 실제로 성립한다.
+  const PREVIEW_ERRORS = {
+    EPREVIEWARG: [400, 'invalid preview path'],
+    EPREVIEWTICKET: [404, 'preview link expired or unknown'],
+    EPREVIEWTYPE: [415, 'not a previewable file'],
+    EPREVIEWSIZE: [413, 'file is too large to preview'],
+  };
+
+  async function handlePreview(req, res, rawPath) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      json(res, 405, { error: 'method not allowed' }, { allow: 'GET, HEAD' });
+      return;
+    }
+    try {
+      await preview.serve(req, res, rawPath);
+    } catch (err) {
+      // 이 경로는 토큰이 아니라 티켓으로 열린다 — 원문 오류 메시지를 그대로 흘리면
+      // 없는 하위 리소스 요청 하나로 세션 절대경로가 노출된다. 분류만 돌려준다.
+      const mapped = PREVIEW_ERRORS[err?.code];
+      const [status, message] = mapped
+        ?? (err?.code === 'ENOENT'
+          ? [404, 'not found']
+          : err?.status === 409
+            ? [409, 'file changed during read']
+            : [500, 'internal error']);
+      // iframe/fetch가 opaque origin에서 상태를 읽을 수 있게 성공과 같은 CORS 정책을
+      // 오류에도 준다(없으면 네트워크 오류로만 보여 원인을 알 수 없다).
+      json(res, status, { error: message }, { 'access-control-allow-origin': '*' });
+    }
+  }
+
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, `http://${host}:${boundPort ?? port}`);
     if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
       handleApi(req, res, url).catch(() => {
+        if (!res.headersSent) json(res, 500, { error: 'internal error' });
+        else res.end();
+      });
+      return;
+    }
+    // 정적 SPA fallback보다 **먼저** 가로챈다 — 만료·오작동 티켓이 index.html 200으로
+    // 떨어지면 클라이언트가 실패를 성공으로 오인한다.
+    //
+    // 정규화 전 원본 경로(쿼리·프래그먼트 제외)로 판정한다. 절대 URL 형식으로 온
+    // 요청은 그런 형태를 쓰지 않는 로컬 클라이언트가 아니므로 정규화된 값으로 폴백.
+    // **라우팅도 원본으로** 해야 한다 — `/preview/<t>/%2e%2e/%2e%2e/x`처럼 정규화가
+    // 접두사째 지워 버리는 요청이 미리보기 오류가 아니라 SPA 200으로 떨어지기 때문
+    // (codex 지적). 둘 중 하나라도 미리보기 경로면 미리보기 처리기로 보낸다.
+    const rawPath = req.url.startsWith('/') ? req.url.split(/[?#]/)[0] : url.pathname;
+    if (rawPath.startsWith(PREVIEW_PREFIX) || url.pathname.startsWith(PREVIEW_PREFIX)) {
+      handlePreview(req, res, rawPath).catch(() => {
         if (!res.headersSent) json(res, 500, { error: 'internal error' });
         else res.end();
       });

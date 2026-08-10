@@ -105,63 +105,10 @@
   color: var(--text-dim);
   flex: none;
 }
-.badge.idle {
-  color: var(--success);
-  border-color: color-mix(in srgb, var(--success) 45%, transparent);
-}
-.badge.busy {
-  color: var(--warning);
-  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
-}
-.badge.warn {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
-}
-.badge.off {
-  opacity: 0.55;
-}
-.session-stop {
-  flex: none;
-  cursor: pointer;
-  color: var(--text-faint);
-  background: none;
-  border: none;
-  border-radius: 6px;
-  padding: 3px 7px;
-  opacity: 0;
-  transition: opacity 0.12s, color 0.12s;
-}
-.session-stop:focus-visible {
-  opacity: 1;
-}
-.session-stop:hover {
-  color: var(--danger);
-}
-
-/* 세션 메뉴(⋯) 트리거 — ✕(세션 종료)와 같은 hover/focus 노출 규칙. */
-.session-more {
-  flex: none;
-  cursor: pointer;
-  color: var(--text-faint);
-  background: none;
-  border: none;
-  border-radius: 6px;
-  padding: 3px 6px;
-  line-height: 1;
-  opacity: 0;
-  transition: opacity 0.12s, color 0.12s;
-}
-.session-more:focus-visible {
-  opacity: 1;
-}
-.session-more:hover {
-  color: var(--text);
-}
-/* 메뉴가 열려 있는 동안에는 어느 행에서 열렸는지 보이도록 계속 노출한다. */
-.session-more[aria-expanded='true'] {
-  opacity: 1;
-  color: var(--text);
-}
+/* .badge의 상태 변형(idle/busy/warn/off)은 사이드바 세션 행의 상태 배지 전용이었다 —
+   상태가 점 색으로 옮겨가며 함께 제거(2026-08-09). 기본 .badge는 디렉터리 헤더의
+   "열린 세션 수"가 계속 쓴다. 라이브 행의 ⋯·✕ 버튼(.session-more/.session-stop)도
+   같은 변경에서 사라졌다 — 이름 변경·종료는 우클릭 메뉴 전용이다. */
 
 /* 인라인 이름 변경 입력 — 행 높이를 바꾸지 않도록 테두리 대신 밑줄만. */
 .sess-rename-input {
@@ -1251,21 +1198,7 @@ select.mode-trust:focus {
   color: var(--text-dim);
   text-align: left;
 }
-.sess-row.live { padding-right: 4px; }
-.sess-row.live.active .session-stop,
-.sess-row.live:hover .session-stop,
-.sess-row.live.active .session-more,
-.sess-row.live:hover .session-more,
-/* 키보드로 행에 들어와도 메뉴 진입점이 보여야 한다 — 우클릭을 못 쓰는 경로 */
-.sess-row.live:focus-within .session-more {
-  opacity: 1;
-}
-/* 터치 기기: hover가 없으므로 ⋯를 늘 보여 준다(우클릭 대체 진입점). */
-@media (hover: none) {
-  .session-more { opacity: 1; }
-}
-/* 이름 변경 중에는 입력이 행을 다 쓴다 — 버튼과의 자리 다툼 없이. */
-.sess-row.live.renaming { gap: 7px; }
+/* 라이브 행에는 더 이상 우측 버튼이 없다 — 오른쪽 여백 보정도 함께 사라졌다. */
 .sess-row .sess-main {
   display: flex; align-items: center; gap: 7px;
   flex: 1; min-width: 0; padding: 0; border: none; background: none;
@@ -1276,8 +1209,43 @@ select.mode-trust:focus {
   box-shadow: inset 2px 0 0 var(--accent);
   color: var(--text);
 }
-.sess-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex: none; }
-.sess-dot.live { background: var(--accent); }
+/* ----- 세션 상태 점 -----
+   라이브 행의 유일한 상태 표시다(텍스트 배지 제거, 2026-08-09). 상태 → 클래스
+   매핑과 보조기술 라벨은 lib/session-status.js가 소유하고, 여기서는 색만 붙인다.
+   색은 --dot 하나로 모아 둔다 — 점 본체와 광륜이 같은 색을 써야 하기 때문. */
+.sess-dot {
+  --dot: var(--text-faint);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dot);
+  flex: none;
+}
+.sess-dot.st-idle { --dot: var(--success); }
+.sess-dot.st-think { --dot: var(--info); }
+.sess-dot.st-tool { --dot: var(--warning); }
+/* 권한 대기·질문 대기 — "사용자 확인이 필요해 멈춰 있음"의 단일 색 */
+.sess-dot.st-attn { --dot: var(--danger); }
+.sess-dot.st-exited { --dot: var(--text-faint); }
+
+/* 움직이는 상태(생각·도구)와 멈춰 기다리는 상태(권한·질문)는 바깥 광륜만
+   맥동시킨다 — 점 자체를 흐리면 색이라는 유일한 상시 신호가 약해진다.
+   키프레임 이름은 theme.css의 전역 @keyframes pulse(.pulse-dot 전용)와
+   충돌하지 않게 따로 둔다. */
+.sess-dot.st-think,
+.sess-dot.st-tool,
+.sess-dot.st-attn {
+  animation: sess-status-pulse 1.8s ease-out infinite;
+}
+@keyframes sess-status-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--dot) 55%, transparent); }
+  70% { box-shadow: 0 0 0 4px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* 전역 규칙(theme.css)이 이미 재생을 끊지만, 색만 남기는 의도를 못박아 둔다. */
+  .sess-dot { animation: none !important; }
+}
 
 /* 설정 라벨 아래 보조 줄 — 어떤 파일을 다루는지 같은 짧은 부연. */
 .setting-sub {

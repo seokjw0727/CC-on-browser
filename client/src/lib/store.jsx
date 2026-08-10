@@ -36,7 +36,7 @@ const StoreContext = createContext(null);
 let startCounter = 0;
 let jumpCounter = 0;
 
-// 종료된 세션이 '종료' 배지로 남아 있다가 사이드바 목록에서 사라지기까지의
+// 종료된 세션이 회색 상태 점으로 남아 있다가 사이드바 목록에서 사라지기까지의
 // 유예(사용자 의도: 닫기 → 3초 후 제거). 기준 시점은 CLI exit 확인 시점이며,
 // 제거 후에도 새 세션 모달의 "지난 세션"에서 재개할 수 있어 데이터 손실이 아니다.
 const EXITED_UI_RETENTION_MS = 3_000;

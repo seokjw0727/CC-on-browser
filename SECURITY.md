@@ -42,7 +42,30 @@ on your machine. That makes the security boundary explicit:
   happens exclusively through CLI tools, gated by the CLI's permission system
   and the permission dialog (new sessions default to the `default` permission
   mode, which asks before tool uses that need confirmation under the CLI's
-  policy and your own allow rules).
+  policy and your own allow rules). The one narrow exception is the artifact
+  preview panel, described next.
+- **Artifact preview (since v1.9.0)** — the side panel that renders files the
+  assistant wrote reads file *contents*, but only within a deliberately narrow
+  capability. `GET /api/preview-ticket` requires the same token and `Origin`
+  checks as every other endpoint; the client sends only a session key and a
+  path, and the server re-derives the working directory from **its own session
+  ledger** (never the browser's claim), resolves symlinks with `realpath`, and
+  refuses anything that is not a regular file inside that live session's `cwd`.
+  It returns a short-lived **ticket** — 128 bits of randomness, 30 minutes,
+  scoped to that one file's directory, and revoked the moment the session
+  exits. `GET /preview/<ticket>/<relpath>` then serves bytes without the main
+  token: `<iframe>`/`<img>` cannot send headers, and putting the real token in
+  a URL would let previewed scripts read it out of `location.href`. Served
+  responses are capped at 10 MB, carry `nosniff` and `no-store`, and HTML/SVG
+  additionally carry `Content-Security-Policy: sandbox allow-scripts
+  allow-modals`, so previewed documents run without the app origin's storage or
+  API access **even if opened directly in a new tab** (the panel's `<iframe>`
+  omits `allow-same-origin` for the same reason). Unknown types are sent as
+  `attachment` rather than rendered. What this does **not** do: sandboxing
+  restricts app-origin privileges, not outbound network requests made by
+  content you authored; there is no preview for historical (non-live) sessions,
+  no path outside the session `cwd`, and no file-watcher — only files written
+  through the structured `Write`/`Edit`/`NotebookEdit` tools appear in the list.
 - **One writable file: `~/.claude/settings.json`** (Settings → Claude Code
   Config, since v1.8.3). `GET/PUT /api/claude-config` read and replace exactly
   that one server-chosen path — the client cannot name a different file. Writes
@@ -134,7 +157,28 @@ CC-on-browser는 로컬에 설치된 Claude Code CLI를 자식 프로세스로 �
   `~/.claude`의 대화 트랜스크립트 제공까지만 하며, 임의의 프로젝트 파일을 읽지
   않습니다. 프로젝트 파일 접근은 CLI 도구 + CLI 권한 시스템·권한 다이얼로그로만
   이뤄집니다(v1.5.0부터 새 세션 기본은 `default` 모드 — CLI 정책과 사용자 허용
-  규칙상 확인이 필요한 도구 사용 전에 묻습니다).
+  규칙상 확인이 필요한 도구 사용 전에 묻습니다). 유일하게 좁은 예외가 아래의
+  결과물 미리보기입니다.
+- **결과물 미리보기 (v1.9.0부터)** — 어시스턴트가 쓴 파일을 옆 패널에서 렌더하는
+  기능은 파일 *내용*을 읽지만, 의도적으로 좁힌 capability 안에서만 그렇습니다.
+  `GET /api/preview-ticket`은 다른 endpoint와 같은 토큰·Origin 검증을 요구하고,
+  클라이언트는 세션 key와 경로만 보냅니다 — 격리 기준이 되는 작업 디렉터리는
+  **서버가 자기 세션 장부에서** 되찾습니다(브라우저의 주장을 신뢰하지 않습니다).
+  `realpath`로 심볼릭 링크를 편 뒤, 그 라이브 세션 `cwd` 안의 정규 파일이 아니면
+  거부합니다. 반환값은 **단명 티켓**입니다 — 128비트 난수, 30분, 해당 파일의
+  디렉터리로 한정, 세션이 끝나면 즉시 폐기. 이어지는
+  `GET /preview/<ticket>/<relpath>`는 메인 토큰 없이 바이트를 제공합니다:
+  `<iframe>`·`<img>`는 헤더를 실을 수 없고, 진짜 토큰을 URL에 넣으면 미리본
+  스크립트가 `location.href`에서 그것을 읽어낼 수 있기 때문입니다. 응답은 10MB로
+  제한되고 `nosniff`·`no-store`가 붙으며, HTML/SVG에는
+  `Content-Security-Policy: sandbox allow-scripts allow-modals`가 추가돼
+  **새 탭으로 직접 열어도** 앱 오리진의 저장소·API 권한 없이 실행됩니다(패널의
+  `<iframe>`이 `allow-same-origin`을 넣지 않는 것도 같은 이유입니다). 모르는
+  형식은 렌더하지 않고 `attachment`로 내려받게 합니다. **하지 않는 것**: 샌드박스는
+  앱 오리진 권한을 막을 뿐 사용자가 만든 콘텐츠의 외부 네트워크 요청까지 막지는
+  않습니다. 과거(비-라이브) 세션의 미리보기, 세션 `cwd` 밖 경로, 파일 워처는
+  없습니다 — 목록에 잡히는 것은 구조화된 `Write`/`Edit`/`NotebookEdit` 도구로 쓴
+  파일뿐입니다.
 - **쓸 수 있는 파일은 `~/.claude/settings.json` 하나** (설정 → Claude Code Config,
   v1.8.3부터). `GET/PUT /api/claude-config`는 서버가 정한 이 한 경로만 읽고
   교체합니다 — 클라이언트가 다른 파일을 지정할 수 없습니다. 쓰기에도 다른 endpoint와

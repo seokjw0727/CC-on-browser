@@ -1,9 +1,10 @@
 // 전역 스토어의 순수 상태 로직 — React 없는 모듈로 분리해 node --test로 검증한다.
 // (store.jsx가 이 리듀서를 useReducer에 연결하고 WS/컨텍스트를 소유한다.)
 import { reduceCliEvent, finalizeCompactionCards, deriveGoalFromMessages } from './reduce-cli-event.js';
+import { autoPreviewPath } from './artifacts.js';
 
 export function createSessionState(partial = {}) {
-  return {
+  const s = {
     key: null,
     cwd: null,
     sessionId: null,
@@ -67,9 +68,19 @@ export function createSessionState(partial = {}) {
     // 쓴다. 리듀서는 순수 유지: localStorage 읽기/쓰기는 store.jsx의 몫이고, 여기엔
     // 화면에 보일 값만 담긴다(debugRaw와 같은 분업).
     customTitle: '',
+    // 결과물 미리보기 패널 — {open, path, suppressed}. path는 산출물의 **원본 절대경로**
+    // (표시·티켓 발급에 그대로 쓴다). 산출물 목록 자체는 상태로 두지 않고 messages에서
+    // 파생한다(lib/artifacts.js) — 재개·effort 재시작의 이월 경로마다 시딩을 배선하지
+    // 않기 위해. suppressed=사용자가 직접 닫아 이번 턴의 자동 열기를 원치 않음
+    // (close-preview가 켜고, 수동 열기·다음 사용자 턴이 끈다 — 수명은 그 턴 하나다).
+    preview: { open: false, path: null, suppressed: false },
     lastSeq: 0,
     ...partial,
   };
+  // preview는 shape 불변식을 여기서 강제한다 — 옛 2필드 형태({open, path})가 partial로
+  // 들어와도 suppressed가 undefined로 남지 않게(그러면 "억제 안 됨"과 구별할 수 없다).
+  s.preview = { open: false, path: null, suppressed: false, ...s.preview };
+  return s;
 }
 
 export function createInitialState() {
@@ -188,6 +199,11 @@ function handleServerMessage(state, msg) {
             typeof opts.preloadCustomTitle === 'string' ? opts.preloadCustomTitle.trim() : '',
           ...(opts.preloadUsage ? { usage: opts.preloadUsage } : {}),
           ...(opts.preloadCtxFromCalls ? { ctxFromCalls: true } : {}),
+          // 미리보기 선택 이월 — effort 재시작(replaceKey)은 같은 대화를 이어가므로
+          // 메시지가 이월되는 만큼 열려 있던 패널도 그대로 따라와야 한다. 없으면
+          // 기본값(닫힘)이라 재개/새 세션에서는 빈 패널이 열리지 않는다.
+          // shape 정규화(suppressed 보충)는 createSessionState가 맡는다.
+          ...(opts.preloadPreview ? { preview: opts.preloadPreview } : {}),
         }),
       );
       return {
@@ -208,8 +224,30 @@ function handleServerMessage(state, msg) {
         const reduced = reduceCliEvent(s, msg.payload);
         return { ...reduced, lastSeq: msg.seq ?? s.lastSeq };
       });
-      // 턴 실패(result.is_error)는 채팅 기록 대신 토스트 — 재접속 리플레이 분은 제외.
+      // 턴이 성공적으로 끝났으면 이번 턴의 결과물을 미리보기로 자동 표시한다.
+      // 반드시 reduce **후에** 판정한다 — 마지막 tool_result가 붙어야 그 쓰기가
+      // "성공한 산출물"로 보인다. 여는 시점도 result 하나뿐이다(도구 결과 시점이 아니라).
+      // 가드 넷은 서로 독립이다:
+      //   isReplayed  — 이미 반영한 seq(중복). WS 순단 중 놓쳤다가 처음 도착한 result는
+      //                 seq가 새것이라 여기 걸리지 않고 정상적으로 연다.
+      //   isReplay    — CLI가 자기 히스토리를 되쏜 것(대화 진행이 아님)
+      //   is_error    — 실패·인터럽트 턴은 보여줄 결과물이 아니다
+      //   suppressed  — 사용자가 이번 턴에 패널을 직접 닫았다
       const p = msg.payload;
+      if (!isReplayed && p?.type === 'result' && !p.is_error && !p.isReplay) {
+        next = updateSession(next, msg.key, (s) => {
+          if (s.preview?.suppressed) return s;
+          // openPath는 패널이 실제로 열려 있을 때만 — 닫힌 패널에 남은 마지막 선택이
+          // 주 산출물 판정을 가로채면 안 된다.
+          const path = autoPreviewPath(s.messages, {
+            openPath: s.preview?.open ? s.preview.path : null,
+          });
+          // 이번 턴에 쓴 것이 없으면 상태를 건드리지 않는다 — 닫아 둔 패널은 닫힌 채로.
+          if (!path) return s;
+          return { ...s, preview: { open: true, path, suppressed: false } };
+        });
+      }
+      // 턴 실패(result.is_error)는 채팅 기록 대신 토스트 — 재접속 리플레이 분은 제외.
       if (!isReplayed && p?.type === 'result' && p.is_error) {
         next = pushToast(
           next,
@@ -324,6 +362,25 @@ export function reducer(state, action) {
       return updateSession(state, action.key, (s) => ({
         ...s,
         customTitle: typeof action.title === 'string' ? action.title.trim() : '',
+      }));
+    case 'open-preview':
+      // 미리보기 열기/전환. 선택은 세션별이라 탭을 오가도 각자 보던 파일이 유지된다.
+      // 직접 열었다는 건 "보고 싶다"는 뜻이므로 억제도 함께 푼다.
+      return updateSession(state, action.key, (s) => ({
+        ...s,
+        preview: {
+          open: true,
+          path: action.path ?? s.preview?.path ?? null,
+          suppressed: false,
+        },
+      }));
+    case 'close-preview':
+      // 닫아도 마지막 선택은 남긴다 — 다시 열 때 보던 파일로 돌아가게.
+      // 직접 닫은 것은 "이번 턴엔 방해하지 말라"는 뜻이라 자동 열기를 억제한다
+      // (다음 프롬프트를 보내면 reduce-cli-event가 풀어 준다).
+      return updateSession(state, action.key, (s) => ({
+        ...s,
+        preview: { open: false, path: s.preview?.path ?? null, suppressed: true },
       }));
     case 'open-new-session':
       return { ...state, newSessionOpen: true };

@@ -624,6 +624,15 @@ const COMPACT_SUMMARY_RE = /^This session is being continued from a previous con
 // 직접 입력할 수 없는 형식이라 오검 위험이 없다.
 const INJECTED_NOISE_RE = /^(?:<local-command-caveat>|Stop hook feedback:)/;
 
+// 새 사용자 턴이 시작되면 "이번 턴엔 미리보기를 띄우지 말라"는 억제를 푼다
+// (store-reducer의 close-preview가 켠 플래그 — 수명은 그 턴 하나다). 여기 두는 이유:
+// 낙관 렌더(컴포저 직접 전송)와 CLI 에코가 모두 reduceUser를 지나므로 리셋 지점이
+// 하나로 모이고, 멱등이라 둘 다 지나가도 문제가 없다.
+function clearPreviewSuppression(session) {
+  if (!session.preview?.suppressed) return session;
+  return { ...session, preview: { ...session.preview, suppressed: false } };
+}
+
 function reduceUser(session, payload, at) {
   const msg = payload.message || {};
   const content = msg.content;
@@ -639,7 +648,14 @@ function reduceUser(session, payload, at) {
     // 주입 메시지 억제(아래)보다 먼저 — caveat 블록이 에코를 감싸서 한 이벤트로 오는
     // 실측 케이스에서 커맨드 칩을 잃지 않기 위해서다(parseCommandEcho 주석 참조).
     const cmd = parseCommandEcho(content);
-    if (cmd) return reduceCommandInvocation(next, cmd.name, cmd.args, payload.optimistic === true);
+    if (cmd) {
+      const before = next.messages.length;
+      const after = reduceCommandInvocation(next, cmd.name, cmd.args, payload.optimistic === true);
+      // 억제 해제는 **새 칩이 실제로 붙었을 때만** — 뒤늦게 도착한 CLI 에코가 낙관 칩을
+      // 확정만 하는 경우(길이 그대로)는 이미 센 턴이다. 여기서 다시 풀면, 그 사이에
+      // 사용자가 닫은 패널이 같은 턴의 result에 도로 열린다(codex 지적).
+      return after.messages.length > before ? clearPreviewSuppression(after) : after;
+    }
     // 로컬 커맨드 출력(슬래시 커맨드 결과)은 삼키지 않고 결과 블록으로 보여준다.
     // ANSI 색 이스케이프는 제거 — TUI가 기록한 세션은 "\x1b[2mCompacted (ctrl+o…)"
     // 처럼 출력 앞에 이스케이프가 붙어(실측) ^Compacted 판별이 빗나가고, 렌더 시
@@ -697,7 +713,10 @@ function reduceUser(session, payload, at) {
 
   if (typeof content === 'string') {
     // 인터럽트 복구(재시도/수정)를 위해 사용자가 보낸 프롬프트 원문을 기억한다.
-    return { ...append(next, { kind: 'user-text', text: content }, at), lastUserText: content };
+    return clearPreviewSuppression({
+      ...append(next, { kind: 'user-text', text: content }, at),
+      lastUserText: content,
+    });
   }
   if (!Array.isArray(content)) return next;
 
@@ -707,6 +726,10 @@ function reduceUser(session, payload, at) {
     } else if (item && item.type === 'text') {
       next = append(next, { kind: 'user-text', text: item.text ?? '' }, at);
       next = { ...next, lastUserText: item.text ?? '' };
+      // 주입 메시지 판별(soleText 경로)은 단일 텍스트 본문에만 걸리므로, tool_result와
+      // 텍스트가 섞여 온 meta/synthetic 페이로드는 여기까지 내려온다. 그런 합성 이벤트를
+      // "사용자가 새 프롬프트를 보냈다"로 세면 방금 닫은 패널이 그 턴에 다시 열린다.
+      if (!payload.isMeta && !payload.isSynthetic) next = clearPreviewSuppression(next);
     } else {
       next = append(next, { kind: 'raw', payload: item });
     }

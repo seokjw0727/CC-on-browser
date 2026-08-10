@@ -342,3 +342,222 @@ test('started: preloadCustomTitle이 새 세션의 이름으로 이월된다(없
   s = reducer(s, serverMsg({ type: 'started', startId: 'st_3', key: 's_3' }));
   assert.equal(s.sessions.get('s_3').customTitle, '');
 });
+
+test('preview: 열기/닫기는 세션별이고, 닫아도 마지막 선택은 남는다', () => {
+  let s = createInitialState();
+  s = registerStart(s, 'st_a', { cwd: '/repo' });
+  s = reducer(s, serverMsg({ type: 'started', startId: 'st_a', key: 'a' }));
+  s = registerStart(s, 'st_b', { cwd: '/repo2' });
+  s = reducer(s, serverMsg({ type: 'started', startId: 'st_b', key: 'b' }));
+  // 기본은 닫힘 + 선택 없음 + 자동 열기 억제 없음
+  assert.deepEqual(s.sessions.get('a').preview, { open: false, path: null, suppressed: false });
+
+  s = reducer(s, { type: 'open-preview', key: 'a', path: 'C:/repo/x.html' });
+  assert.deepEqual(s.sessions.get('a').preview, { open: true, path: 'C:/repo/x.html', suppressed: false });
+  // 다른 세션은 영향받지 않는다(선택은 세션별)
+  assert.deepEqual(s.sessions.get('b').preview, { open: false, path: null, suppressed: false });
+
+  // 닫아도 경로는 보존 — 다시 열면 보던 파일로 돌아간다. 직접 닫았으므로 이번 턴의
+  // 자동 열기는 억제되고, 다시 직접 열면 억제가 풀린다.
+  s = reducer(s, { type: 'close-preview', key: 'a' });
+  assert.deepEqual(s.sessions.get('a').preview, { open: false, path: 'C:/repo/x.html', suppressed: true });
+  s = reducer(s, { type: 'open-preview', key: 'a' });
+  assert.deepEqual(s.sessions.get('a').preview, { open: true, path: 'C:/repo/x.html', suppressed: false });
+
+  // 없는 세션은 상태를 바꾸지 않는다(같은 참조)
+  const before = s;
+  assert.equal(reducer(s, { type: 'open-preview', key: '없음', path: 'y' }), before);
+});
+
+test('started: preloadPreview가 effort 재시작(replaceKey)에서 이월된다', () => {
+  let s = createInitialState();
+  s = registerStart(s, 'st_1', {
+    cwd: '/repo',
+    preloadPreview: { open: true, path: 'C:/repo/report.html' },
+  });
+  s = reducer(s, serverMsg({ type: 'started', startId: 'st_1', key: 's_1' }));
+  // suppressed가 없는 옛 형태가 들어와도 shape는 정규화된다(undefined로 남지 않는다).
+  assert.deepEqual(s.sessions.get('s_1').preview, {
+    open: true, path: 'C:/repo/report.html', suppressed: false,
+  });
+
+  // 이월 값이 없으면 기본(닫힘) — 새로 시작한 세션에 빈 패널이 열리지 않는다
+  s = registerStart(s, 'st_2', { cwd: '/repo' });
+  s = reducer(s, serverMsg({ type: 'started', startId: 'st_2', key: 's_2' }));
+  assert.deepEqual(s.sessions.get('s_2').preview, { open: false, path: null, suppressed: false });
+
+  // 억제 상태도 그대로 따라온다 — 같은 대화를 이어가는 재시작이므로.
+  s = registerStart(s, 'st_3', {
+    cwd: '/repo',
+    preloadPreview: { open: false, path: 'C:/repo/report.html', suppressed: true },
+  });
+  s = reducer(s, serverMsg({ type: 'started', startId: 'st_3', key: 's_3' }));
+  assert.equal(s.sessions.get('s_3').preview.suppressed, true);
+});
+
+// ----- 턴 종료 자동 열기 -----
+// 이번 턴에 쓴 산출물 판정 자체는 artifacts.test.js가 검증한다. 여기서는 "언제 여는가"
+// (가드)와 억제 수명만 본다.
+
+const okResult = { content: 'Created', isError: false, structured: null };
+const writeEvent = (id, file_path) => ({
+  type: 'assistant',
+  message: { id: `m_${id}`, content: [{ type: 'tool_use', id, name: 'Write', input: { file_path } }] },
+});
+const toolResultEvent = (id) => ({
+  type: 'user',
+  message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'Created', is_error: false }] },
+});
+const promptEvent = (text) => ({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } });
+
+/**
+ * 프롬프트 → Write → tool_result까지 진행한 세션(아직 result 전). seq는 이어서 쓴다.
+ * toolId는 턴마다 달라야 한다 — 같은 id를 재사용하면 tool_result가 이미 닫힌 앞 카드에
+ * 붙어 두 번째 쓰기가 영영 "실행 중"으로 남는다.
+ */
+function turnUpToToolResult(state, key, file_path, startSeq, toolId = 't1') {
+  let s = state;
+  let seq = startSeq;
+  for (const payload of [promptEvent('만들어줘'), writeEvent(toolId, file_path), toolResultEvent(toolId)]) {
+    s = reducer(s, serverMsg({ type: 'event', key, seq: seq++, payload }));
+  }
+  return { s, seq };
+}
+
+test('event: 성공한 턴이 끝나면 이번 턴 산출물로 미리보기가 자동으로 열린다', () => {
+  let { s, seq } = turnUpToToolResult(stateWithSession('a'), 'a', '/repo/out.html', 1);
+  // 도구 결과 시점에는 아직 열리지 않는다 — 여는 시점은 result 하나뿐이다.
+  assert.equal(s.sessions.get('a').preview.open, false);
+
+  s = reducer(s, serverMsg({ type: 'event', key: 'a', seq: seq++, payload: { type: 'result', subtype: 'success' } }));
+  assert.deepEqual(s.sessions.get('a').preview, {
+    open: true, path: '/repo/out.html', suppressed: false,
+  });
+});
+
+test('event: 실패·리플레이 턴은 산출물이 있어도 자동으로 열지 않는다', () => {
+  // 실패한 턴 — 같은 산출물을 깔아 두고도 안 열려야 한다(비어 있어서 안 열린 게 아님).
+  let t = turnUpToToolResult(stateWithSession('a'), 'a', '/repo/out.html', 1);
+  let s = reducer(t.s, serverMsg({
+    type: 'event', key: 'a', seq: t.seq, payload: { type: 'result', subtype: 'error_during_execution', is_error: true },
+  }));
+  assert.equal(s.sessions.get('a').preview.open, false, 'is_error 턴');
+
+  // CLI가 자기 히스토리를 되쏜 result
+  t = turnUpToToolResult(stateWithSession('b'), 'b', '/repo/out.html', 1);
+  s = reducer(t.s, serverMsg({
+    type: 'event', key: 'b', seq: t.seq, payload: { type: 'result', subtype: 'success', isReplay: true },
+  }));
+  assert.equal(s.sessions.get('b').preview.open, false, 'payload.isReplay');
+
+  // 이미 반영한 seq(재접속 중복 전달)
+  t = turnUpToToolResult(stateWithSession('c'), 'c', '/repo/out.html', 1);
+  s = reducer(t.s, serverMsg({
+    type: 'event', key: 'c', seq: 1, payload: { type: 'result', subtype: 'success' },
+  }));
+  assert.equal(s.sessions.get('c').preview.open, false, '중복 seq');
+
+  // 반면 순단 중 놓쳤다가 처음 도착한 result(새 seq)는 정상적으로 연다 — 중복을 한 번
+  // 흘려보낸 **그 상태에서** 이어서 검증한다(중복 처리가 상태를 망가뜨리지 않았는가).
+  s = reducer(s, serverMsg({
+    type: 'event', key: 'c', seq: t.seq, payload: { type: 'result', subtype: 'success' },
+  }));
+  assert.equal(s.sessions.get('c').preview.path, '/repo/out.html');
+});
+
+test('event: 산출물 없는 턴은 미리보기 상태를 건드리지 않는다', () => {
+  let s = stateWithSession('a');
+  s = reducer(s, { type: 'open-preview', key: 'a', path: '/repo/old.html' });
+  s = reducer(s, { type: 'close-preview', key: 'a' }); // 사용자가 직접 닫음
+  const closed = s.sessions.get('a').preview;
+
+  s = reducer(s, serverMsg({ type: 'event', key: 'a', seq: 1, payload: promptEvent('그냥 물어봄') }));
+  // 새 프롬프트가 억제를 푼 직후의 상태 — result가 이 객체를 그대로 두어야 한다.
+  const afterPrompt = s.sessions.get('a').preview;
+  assert.deepEqual(afterPrompt, { open: false, path: closed.path, suppressed: false });
+
+  s = reducer(s, serverMsg({ type: 'event', key: 'a', seq: 2, payload: { type: 'result', subtype: 'success' } }));
+  // 열 산출물이 없으므로 닫힌 채 유지된다 — 필드 하나가 아니라 객체 전체가 그대로다.
+  assert.deepEqual(s.sessions.get('a').preview, afterPrompt);
+});
+
+test('event: 텍스트와 tool_result가 섞인 meta 이벤트는 사용자 턴으로 세지 않는다', () => {
+  // 주입 메시지 판별은 단일 텍스트 본문에만 걸린다 — 혼합 블록 meta 이벤트가 억제를
+  // 풀어 버리면, 방금 닫은 패널이 같은 턴에 도로 열린다.
+  let { s, seq } = turnUpToToolResult(stateWithSession('a'), 'a', '/repo/out.html', 1);
+  s = reducer(s, { type: 'close-preview', key: 'a' });
+  s = reducer(s, serverMsg({
+    type: 'event',
+    key: 'a',
+    seq: seq++,
+    payload: {
+      type: 'user',
+      isMeta: true,
+      message: {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'x', content: 'ok', is_error: false },
+          { type: 'text', text: 'Stop hook feedback: …' },
+        ],
+      },
+    },
+  }));
+  assert.equal(s.sessions.get('a').preview.suppressed, true, 'meta 이벤트는 억제를 풀지 않는다');
+  s = reducer(s, serverMsg({ type: 'event', key: 'a', seq: seq++, payload: { type: 'result', subtype: 'success' } }));
+  assert.equal(s.sessions.get('a').preview.open, false);
+});
+
+test('event: 턴 중 직접 닫으면 그 턴은 안 열리고, 다음 프롬프트에서 억제가 풀린다', () => {
+  let { s, seq } = turnUpToToolResult(stateWithSession('a'), 'a', '/repo/out.html', 1);
+  // 턴이 도는 중에 사용자가 패널을 닫는다(직전 턴에서 열려 있던 상태를 닫는 상황).
+  s = reducer(s, { type: 'close-preview', key: 'a' });
+  s = reducer(s, serverMsg({ type: 'event', key: 'a', seq: seq++, payload: { type: 'result', subtype: 'success' } }));
+  assert.equal(s.sessions.get('a').preview.open, false, '직접 닫은 턴은 조용히');
+
+  // 다음 프롬프트가 억제를 풀고, 그 턴의 산출물로 다시 열린다.
+  const t = turnUpToToolResult(s, 'a', '/repo/next.html', seq, 't2');
+  assert.equal(t.s.sessions.get('a').preview.suppressed, false, '새 프롬프트가 억제 해제');
+  s = reducer(t.s, serverMsg({ type: 'event', key: 'a', seq: t.seq, payload: { type: 'result', subtype: 'success' } }));
+  assert.deepEqual(s.sessions.get('a').preview, {
+    open: true, path: '/repo/next.html', suppressed: false,
+  });
+});
+
+test('event: 뒤늦은 커맨드 에코는 이미 센 턴이라 억제를 다시 풀지 않는다', () => {
+  const commandEvent = (optimistic) => ({
+    type: 'user',
+    ...(optimistic ? { optimistic: true } : {}),
+    message: {
+      role: 'user',
+      content: '<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>',
+    },
+  });
+  let s = stateWithSession('a');
+  let seq = 1;
+  // 낙관 렌더(사용자가 방금 실행) → 새 턴이므로 억제가 풀리는 것이 맞다.
+  s = reducer(s, { type: 'close-preview', key: 'a' });
+  s = reducer(s, serverMsg({ type: 'event', key: 'a', seq: seq++, payload: commandEvent(true) }));
+  assert.equal(s.sessions.get('a').preview.suppressed, false, '낙관 렌더는 새 턴');
+
+  // 사용자가 그 턴 도중 패널을 닫는다 → 뒤늦은 CLI 에코가 낙관 칩을 확정만 한다.
+  s = reducer(s, { type: 'close-preview', key: 'a' });
+  const beforeEcho = s.sessions.get('a').messages.length;
+  s = reducer(s, serverMsg({ type: 'event', key: 'a', seq: seq++, payload: commandEvent(false) }));
+  assert.equal(s.sessions.get('a').messages.length, beforeEcho, '에코는 새 칩을 만들지 않는다');
+  assert.equal(s.sessions.get('a').preview.suppressed, true, '에코는 억제를 풀지 않는다');
+});
+
+test('event: 보고 있던 파일이 이번 턴에도 수정되면 선택을 바꾸지 않는다', () => {
+  let s = stateWithSession('a');
+  s = reducer(s, { type: 'open-preview', key: 'a', path: '/repo/notes.md' });
+  let seq = 1;
+  for (const payload of [
+    promptEvent('둘 다 고쳐줘'),
+    writeEvent('t1', '/repo/notes.md'), toolResultEvent('t1'),
+    writeEvent('t2', '/repo/page.html'), toolResultEvent('t2'),
+  ]) {
+    s = reducer(s, serverMsg({ type: 'event', key: 'a', seq: seq++, payload }));
+  }
+  s = reducer(s, serverMsg({ type: 'event', key: 'a', seq: seq++, payload: { type: 'result', subtype: 'success' } }));
+  assert.equal(s.sessions.get('a').preview.path, '/repo/notes.md', '우선순위(html)보다 사용자의 선택이 앞선다');
+});

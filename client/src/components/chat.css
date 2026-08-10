@@ -329,6 +329,24 @@
   color: var(--text-dim);
 }
 
+/* 성공한 파일 쓰기 카드의 "미리보기" — 옆 패널에서 결과물을 바로 연다.
+   권한 대화상자가 재사용하는 카드에는 콜백이 없어 렌더되지 않는다. */
+.tool-preview-btn {
+  font-size: 11.5px;
+  line-height: 1;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.tool-preview-btn:hover {
+  color: var(--text);
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+}
+
 .tool-chip.running {
   color: var(--warning);
   border-color: var(--warning);

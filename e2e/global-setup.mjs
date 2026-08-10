@@ -18,6 +18,9 @@ const PROJECTS_ROOT = path.join(STATE_DIR, 'projects');
 // Claude Code 설정 편집기가 다룰 파일 — 반드시 격리한다. 서버 기본값은 사용자의
 // 실제 ~/.claude/settings.json이라, 저장을 다루는 테스트가 진짜 CLI 설정을 덮어쓴다.
 const CLAUDE_CONFIG = path.join(STATE_DIR, 'claude-config', 'settings.json');
+// preview 시나리오가 **실제 파일**을 쓰는 작업 디렉터리 — 레포가 아니라 테스트 소유
+// 임시 디렉터리여야 한다(teardown이 .state를 통째로 지운다).
+const PREVIEW_CWD = path.join(STATE_DIR, 'preview-cwd');
 const READY_TIMEOUT_MS = 30_000;
 
 // 가짜 트랜스크립트 씨앗 — history.js의 파싱 규칙(cwd는 아무 줄의 cwd 필드,
@@ -130,18 +133,26 @@ export default async function globalSetup() {
   // 무조건 kill하지 않고, 저장된 URL의 토큰으로 /api/bootstrap이 200을 주는
   // 경우(= 그 토큰을 아는 우리 dev-fake가 확실)에만 종료한다(codex 지적).
   await reclaimStaleServers();
-  rmSync(STATE_DIR, { recursive: true, force: true });
+  // teardown과 같은 이유로 재시도한다 — 직전 실행의 CLI가 .state 안 cwd를 놓는 데
+  // 시간이 걸리면 Windows에서 EPERM이 나고, 그러면 셋업 자체가 죽는다.
+  rmSync(STATE_DIR, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   // 서버를 띄우기 전에 시딩 — 첫 요청부터 목록이 결정적이어야 한다.
   seedProjects();
+  // preview 시나리오가 파일을 쓸 격리 cwd. 스펙이 이 경로를 cwd 입력란에 넣는다.
+  mkdirSync(PREVIEW_CWD, { recursive: true });
   const started = [];
   try {
-    for (const scenario of ['echo', 'permission', 'bulk', 'bgtask']) {
+    for (const scenario of ['echo', 'permission', 'bulk', 'bgtask', 'preview']) {
       started.push(await startFakeServer(scenario));
     }
     // 상태 기록 실패도 같은 정리 범위 — 서버만 남고 파일이 없는 상태를 만들지 않는다.
     mkdirSync(STATE_DIR, { recursive: true });
     writeFileSync(STATE_FILE, JSON.stringify(
-      Object.fromEntries(started.map((s) => [s.scenario, { url: s.url, pid: s.pid }])),
+      {
+        ...Object.fromEntries(started.map((s) => [s.scenario, { url: s.url, pid: s.pid }])),
+        // 스펙이 cwd 입력란에 넣을 경로 — 서버 목록과 같은 파일로 전달한다.
+        previewCwd: PREVIEW_CWD,
+      },
       null,
       2,
     ));

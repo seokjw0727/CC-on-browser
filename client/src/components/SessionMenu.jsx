@@ -1,4 +1,4 @@
-// 세션 행 컨텍스트 메뉴 — 사이드바 세션을 우클릭(또는 ⋯ 버튼)했을 때 뜨는 작은 메뉴.
+// 세션 행 컨텍스트 메뉴 — 사이드바 세션을 우클릭(키보드는 Shift+F10)했을 때 뜨는 작은 메뉴.
 //
 // 모달이 아니라 메뉴다(ARIA menu 패턴): 배경을 가리지 않고, Esc·바깥 클릭·스크롤로
 // 닫히며, 닫히면 연 요소로 포커스를 돌려준다. 포커스 트랩은 걸지 않는다 — 메뉴는
@@ -41,7 +41,8 @@ export default function SessionMenu({ anchor, label, items, onClose, restoreRef 
     focusedRef.current = true;
   }, [pos]);
 
-  // 닫힐 때 포커스 복원 — 연 요소(행 또는 ⋯ 버튼)가 아직 살아 있을 때만.
+  // 닫힐 때 포커스 복원 — 연 요소(행 버튼, 또는 행이 사라진 경우 "새 세션")가
+  // 아직 살아 있을 때만.
   useEffect(() => () => {
     const target = restoreRef?.current;
     if (target instanceof HTMLElement && target.isConnected && !target.closest('[inert]')) {
@@ -54,10 +55,9 @@ export default function SessionMenu({ anchor, label, items, onClose, restoreRef 
   useEffect(() => {
     const onPointerDown = (e) => {
       if (ref.current?.contains(e.target)) return;
-      // 메뉴를 연 버튼(⋯) 위의 눌림은 그 버튼의 클릭 핸들러가 토글로 처리한다 —
-      // 여기서 먼저 닫아 버리면 이어지는 click이 곧바로 다시 열어 깜빡인다.
-      const trigger = restoreRef?.current;
-      if (trigger instanceof HTMLElement && trigger.contains(e.target)) return;
+      // 트리거 위의 눌림도 바깥 클릭이다. 예전에는 ⋯ 버튼의 토글 클릭이 곧바로
+      // 다시 여는 깜빡임을 막으려 예외를 뒀지만, ⋯를 없앤 뒤로 트리거는 세션 행
+      // 버튼이다 — 예외를 남기면 메뉴가 열린 채 그 세션을 클릭해도 닫히지 않는다.
       onClose();
     };
     const close = () => onClose();
@@ -73,7 +73,7 @@ export default function SessionMenu({ anchor, label, items, onClose, restoreRef 
       window.removeEventListener('resize', close);
       window.removeEventListener('blur', close);
     };
-  }, [onClose, restoreRef]);
+  }, [onClose]);
 
   const moveFocus = useCallback((dir) => {
     const node = ref.current;

@@ -536,6 +536,9 @@ export default function Composer() {
       // 사용자가 붙여 둔 세션 이름은 재시작 이유(노력 수준 변경)와 무관하게 이어진다 —
       // 같은 탭을 대체하는 재시작이라 이름이 사라지면 사용자에겐 세션이 바뀐 것처럼 보인다.
       preloadCustomTitle: session.customTitle,
+      // 열려 있던 미리보기도 이월한다 — 메시지가 그대로 넘어오므로 산출물 목록은
+      // 저절로 복원되는데, 선택만 잃으면 패널이 혼자 닫혀 재시작이 티가 난다.
+      preloadPreview: session.preview,
       replaceKey: session.key,
     });
     const label = effortLabel(effort);

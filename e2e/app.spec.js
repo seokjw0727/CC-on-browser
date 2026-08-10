@@ -540,6 +540,8 @@ test('세션 우클릭 메뉴 — 이름 변경이 사이드바 행에 반영된
   await menu.getByRole('menuitem', { name: '이름 변경' }).click();
   const input = page.getByLabel('세션 이름');
   await expect(input).toBeFocused();
+  // 편집 중이라고 세션이 멈추는 것은 아니다 — 상태 점은 색·라벨을 그대로 유지한다.
+  await expect(row.locator('.sess-dot.st-idle')).toHaveAttribute('aria-label', '상태: 대기');
   await input.fill('내가 붙인 이름');
   await input.press('Enter');
 
@@ -573,8 +575,10 @@ test('세션 우클릭 메뉴 — Esc는 이름 변경을 취소하고, 닫기�
   await startSession(page, servers.echo.url);
   const row = page.locator('.sess-row.live').first();
 
-  // ⋯ 버튼(터치·키보드 대체 진입점)으로도 같은 메뉴가 열린다
-  await row.locator('.session-more').click();
+  // 우클릭을 못 쓰는 키보드 사용자의 진입점 — 행 버튼에 포커스한 뒤 Shift+F10.
+  // (⋯ 버튼은 제거됐고, 이것이 남은 유일한 대체 경로다.)
+  await row.locator('.sess-main').focus();
+  await page.keyboard.press('Shift+F10');
   const menu = page.getByRole('menu', { name: '세션 메뉴' });
   await expect(menu).toBeVisible();
   await menu.getByRole('menuitem', { name: '이름 변경' }).click();
@@ -584,11 +588,42 @@ test('세션 우클릭 메뉴 — Esc는 이름 변경을 취소하고, 닫기�
   await expect(page.getByLabel('세션 이름')).toHaveCount(0);
   await expect(row.locator('.sess-main')).not.toContainText('버려질 이름');
 
-  // 닫기(세션 종료) → '종료' 배지 → 유예 후 목록에서 사라짐
+  // 닫기(세션 종료) → 회색 종료 점 → 유예 후 목록에서 사라짐
   await row.click({ button: 'right' });
   await menu.getByRole('menuitem', { name: '세션 종료' }).click();
-  await expect(page.locator('.sess-row.live .badge', { hasText: '종료' })).toBeVisible();
+  await expect(page.locator('.sess-row.live .sess-dot.st-exited')).toBeVisible();
   await expect(page.locator('.sess-row.live')).toHaveCount(0, { timeout: 10_000 });
+});
+
+test('사이드바 세션 행 — 버튼 없이 이름 + 상태 점만, 행 클릭은 메뉴를 닫는다', async ({ page }) => {
+  await startSession(page, servers.echo.url);
+  const row = page.locator('.sess-row.live').first();
+  await expect(row).toBeVisible();
+
+  // 행에 남는 것은 세션 버튼 하나뿐 — ⋯·✕과 상태 텍스트 배지는 전부 사라졌다.
+  await expect(row.locator('.session-more')).toHaveCount(0);
+  await expect(row.locator('.session-stop')).toHaveCount(0);
+  await expect(row.locator('.badge')).toHaveCount(0);
+  await expect(row.locator('button')).toHaveCount(1);
+
+  // 상태는 점의 색으로만 — 화면 텍스트는 없고 라벨은 보조기술에 남는다.
+  const dot = row.locator('.sess-dot');
+  await expect(dot).toHaveClass(/\bst-idle\b/);
+  await expect(dot).toHaveAttribute('aria-label', '상태: 대기');
+  await expect(row.locator('.sess-main')).not.toContainText('대기');
+
+  // 메뉴가 열린 채 같은 행을 좌클릭하면 닫힌다(⋯ 토글용 예외 제거 회귀 방지).
+  // 메뉴는 커서 지점에서 아래·오른쪽으로 펼쳐지므로, 행 오른쪽 아래에서 열고
+  // 왼쪽 위를 눌러야 메뉴가 클릭을 가로채지 않는다.
+  const box = await row.boundingBox();
+  await row.click({ button: 'right', position: { x: box.width - 4, y: box.height - 2 } });
+  const menu = page.getByRole('menu', { name: '세션 메뉴' });
+  await expect(menu).toBeVisible();
+  await row.locator('.sess-main').click({ position: { x: 2, y: 2 } });
+  await expect(menu).toHaveCount(0);
+  // 클릭이 메뉴에 먹히지 않고 행 버튼까지 닿았다는 증거 — 세션 전환 자체는
+  // 세션이 둘인 앞쪽 테스트가 검증한다(여기선 행이 하나뿐이라 무의미하다).
+  await expect(row.locator('.sess-main')).toBeFocused();
 });
 
 test('설정 → Claude Code Config — 편집·저장이 파일에 반영되고 충돌은 거부된다', async ({ page }) => {

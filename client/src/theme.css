@@ -284,6 +284,39 @@ select:focus {
   grid-template-columns: 0 1fr;
 }
 
+/* 결과물 미리보기 — 넓은 화면에서는 3열(사이드바 | 대화 | 미리보기).
+   폭은 App.jsx가 --preview-width로 넣고, 리사이저(6px)를 포함한 열이다. */
+.app.preview-open {
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--preview-width, 480px);
+}
+
+.app.preview-open.sidebar-collapsed {
+  grid-template-columns: 0 minmax(0, 1fr) var(--preview-width, 480px);
+}
+
+.preview-col {
+  grid-column: 3;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.preview-col > .preview-panel {
+  flex: 1 1 auto;
+}
+
+/* 좁은 창 — 3열을 유지하면 대화가 읽을 수 없을 만큼 눌린다. 오른쪽에서 덮는다. */
+.app.preview-overlay .preview-col {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  width: min(var(--preview-width, 480px), 100vw);
+  box-shadow: var(--shadow-2, 0 8px 32px rgba(0, 0, 0, 0.4));
+}
+
 .main {
   position: relative;
   grid-column: 2; /* 사이드바가 display:none(접힘)이어도 main이 1열(0px)로 떨어지지 않게 고정 */

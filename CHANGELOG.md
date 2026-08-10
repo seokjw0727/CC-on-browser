@@ -8,7 +8,47 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
-## [1.8.3] - 2026-08-09
+## [1.9.0] - 2026-08-10
+
+> 어시스턴트가 만든 결과물을 대화 옆 패널에서 바로 확인 — 턴이 끝나면 저절로
+> 열립니다. 사이드바 세션 행은 이름 + 상태 점만 남기고 정리했습니다.
+> (See what the assistant just wrote in a side panel — it opens by itself when
+> the turn finishes. Sidebar session rows are now just a name and a status dot.)
+
+### Added
+- **Artifact preview panel — opens by itself when a turn finishes.** When a turn
+  ends successfully and the assistant wrote a file during it, the panel opens on
+  the right with that result already rendered. If several files were written, it
+  picks the one you most likely want to look at (HTML → Markdown → image/PDF →
+  text), and if you were already looking at a file it also touched, your
+  selection is kept rather than swapped out. Failed or interrupted turns never
+  open it, and if you close the panel yourself the rest of that turn stays quiet
+  — sending your next prompt re-arms it. You can still open any artifact by hand
+  from the **미리보기** button on a successful `Write`/`Edit`/`MultiEdit`/
+  `NotebookEdit` card, switch files from the header picker, refresh, or pop the
+  file out to a new tab. HTML and SVG render in a sandboxed `<iframe>` (relative
+  `./style.css` and `img/*.png` load from the same scope), Markdown renders
+  through the chat's own renderer with relative links rebased, images and PDFs
+  use the browser's viewers, other text is syntax-highlighted, and anything else
+  offers a download. The panel is resizable (drag or arrow keys) and slides over
+  the conversation instead of squeezing it on narrow windows.
+  Serving is deliberately narrow: an authenticated `GET /api/preview-ticket`
+  returns a short-lived, directory-scoped ticket, and `GET /preview/<ticket>/…`
+  serves bytes without the app token so previewed documents can never read it.
+  The server re-derives the session's working directory from its own ledger,
+  resolves symlinks, refuses anything outside that directory, caps responses at
+  10 MB, and sends `Content-Security-Policy: sandbox …` with HTML/SVG so a
+  previewed document has no app-origin privileges even when opened directly.
+  `SECURITY.md` documents the boundary and what it does not cover.
+
+### Changed
+- **Sidebar session rows are now just a name and a status dot.** The text status
+  badge and the inline `⋯`/`✕` buttons are gone; state is carried by the dot's
+  colour (waiting · thinking · tool · needs you · exited), with the wording kept
+  for screen readers and the hover tooltip so nothing is colour-only. Rename and
+  close moved entirely to the row's right-click menu (Shift+F10 for keyboard
+  users, announced via `aria-keyshortcuts`), which makes the row a single
+  focusable target and stops the buttons from crowding long session names.
 
 > 사이드바 세션을 우클릭해 이름 변경·닫기, 설정에서 Claude Code 설정
 > (`~/.claude/settings.json`) 직접 편집.
@@ -355,7 +395,8 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
-[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.8.3...v1.9.0
 [1.7.1]: https://github.com/seokjw0727/CC-on-browser/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.5.0...v1.6.0

@@ -2,6 +2,10 @@
 // / 다른 열린 세션(타 프로젝트 라이브 전환·종료)
 // / 하단 고정 통계·설정 버튼(.sidebar-foot) — 패널은 화면 중앙 모달로 표시.
 //
+// 라이브 세션 행은 "이름 + 상태 점"뿐이다(2026-08-09). 이름 변경·세션 종료는 행
+// 우클릭(키보드는 Shift+F10) 메뉴로만 열고, 상태는 텍스트 배지 없이 점의 색으로만
+// 표현한다 — 색↔의미 매핑과 보조기술용 라벨은 lib/session-status.js가 소유한다.
+//
 // 사이드바는 "지금 열려 있는 세션"만 다룬다. 히스토리(지난 세션)의 조회·재개·삭제는
 // 전부 새 세션 모달 한 곳으로 모았다(2026-07-21) — 상시 노출되던 "지난 세션" 섹션과
 // 방금 닫힌 세션의 로컬 캡처 로직은 함께 사라졌다. 모달은 열릴 때와 열린 세션 집합이
@@ -20,6 +24,7 @@ import {
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
 import { createSessionState } from '../lib/store-reducer.js';
 import { isQuestionRequest } from '../lib/ask-user-question.js';
+import { statusDotOf } from '../lib/session-status.js';
 import {
   buildSessionTree,
   mergeRecentSessions,
@@ -49,14 +54,6 @@ const PAST_LIMIT_DEFAULT = 20;
 const PAST_LIMIT_MAX = 50;
 // 재개 잠금 안전망 — 트랜스크립트 요청이 끝내 정착하지 않을 때 잠금을 회수한다.
 const RESUME_BUSY_TIMEOUT_MS = 15_000;
-
-const STATUS_BADGE = {
-  idle: { label: '대기', cls: 'idle' },
-  thinking: { label: '생각 중', cls: 'busy' },
-  tool: { label: '도구', cls: 'busy' },
-  'awaiting-permission': { label: '권한 대기', cls: 'warn' },
-  exited: { label: '종료', cls: 'off' },
-};
 
 // 모달용 상세 설명 — 표시 이름·색 클래스는 permission-modes.js와 공유
 const MODE_DESC = {
@@ -953,6 +950,7 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
   const [renaming, setRenaming] = useState(null);
   // 행 key -> .sess-main 버튼. 우클릭(포커스 불가한 행 div)과 이름 변경 종료 뒤
   // 포커스를 돌려줄 실제 대상이다 — 없으면 포커스가 <body>로 떨어진다.
+  // ⋯·✕ 버튼을 없앤 뒤로는 행에서 포커스를 받을 수 있는 유일한 요소이기도 하다.
   const rowBtnRefs = useRef(new Map());
   // 행이 통째로 사라지는 동작(목록에서 제거) 뒤 포커스가 갈 곳
   const newSessionBtnRef = useRef(null);
@@ -1101,8 +1099,9 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
   });
   const liveOthers = tree.others.filter((n) => n.live.length > 0);
 
-  // 컨텍스트 메뉴 열기 — 우클릭(커서 좌표)과 ⋯ 버튼(버튼 모서리) 공용.
-  // 키보드 컨텍스트 메뉴 키는 좌표가 0/음수로 오는 브라우저가 있어, 그때는 행 기준으로.
+  // 컨텍스트 메뉴 열기 — 이제 진입점은 행 우클릭 하나뿐이다(⋯ 버튼 제거, 2026-08-09).
+  // 키보드(컨텍스트 메뉴 키·Shift+F10)도 같은 contextmenu 이벤트로 오지만 좌표가
+  // 0/음수인 브라우저가 있어, 그때는 행 버튼의 모서리를 기준으로 띄운다.
   const openRowMenu = (rowKey, trigger, point) => {
     const usable = point && point.x > 0 && point.y > 0;
     const rect = trigger?.getBoundingClientRect?.();
@@ -1143,13 +1142,15 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
   // 매 렌더마다 새 컴포넌트 타입이 생기지 않으므로 React가 remount 없이 patch한다.
   const liveRow = (row, node) => {
     const sess = state.sessions.get(row.key);
-    // 대기 중인 요청의 앞머리가 AskUserQuestion이면 '권한 대기' 대신 '질문 대기' —
-    // 다이얼로그(QuestionDialog/PermissionPrompt) 분기와 같은 판별을 쓴다.
-    const badge =
-      row.status === 'awaiting-permission' &&
-      isQuestionRequest(sess?.pendingPermissions?.[0])
-        ? { label: '질문 대기', cls: 'warn' }
-        : STATUS_BADGE[row.status] ?? { label: row.status, cls: '' };
+    // 상태는 텍스트 배지가 아니라 점의 색으로만 보인다 — 라벨은 보조기술과 툴팁에
+    // 남는다(lib/session-status.js). 대기 중인 요청의 앞머리가 AskUserQuestion이면
+    // '권한 대기' 대신 '질문 대기'로, 다이얼로그 분기와 같은 판별을 쓴다.
+    const dot = statusDotOf(
+      row.status,
+      isQuestionRequest(sess?.pendingPermissions?.[0]),
+    );
+    const dotCls = `sess-dot${dot.cls ? ` ${dot.cls}` : ''}`;
+    const dotLabel = `상태: ${dot.label}`;
     // 세션 이름 — 사용자가 지정한 이름이 있으면 그것, 없으면 자동 제목(sessionDisplayTitle).
     const label = sessionDisplayTitle({
       customTitle: sess?.customTitle,
@@ -1161,7 +1162,9 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
     if (renaming?.rowKey === row.key) {
       return (
         <div key={row.key} className={`sess-row live renaming${row.active ? ' active' : ''}`}>
-          <span className="sess-dot live" aria-hidden="true" />
+          {/* 이름을 고치는 동안에도 상태 점은 그대로 — 편집 중이라고 세션이
+              멈추는 것은 아니다(편집 중 색이 accent로 되돌아가던 회귀 방지). */}
+          <span className={dotCls} role="img" aria-label={dotLabel} />
           <input
             className="sess-rename-input"
             autoFocus
@@ -1203,38 +1206,17 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
             else rowBtnRefs.current.delete(row.key);
           }}
           onClick={() => dispatch({ type: 'set-active', key: row.key })}
-          data-tip={label !== node.cwd ? `${label}${node.cwd ? ` — ${node.cwd}` : ''}` : node.cwd || node.label}
+          // 상태 텍스트가 화면에서 사라졌으므로 툴팁에 꼬리로 붙인다 — 색만으로
+          // 구분하기 어려운 사용자의 확인 경로(hover 없는 기기에는 닿지 않는다).
+          data-tip={`${
+            label !== node.cwd ? `${label}${node.cwd ? ` — ${node.cwd}` : ''}` : node.cwd || node.label
+          } · ${dot.label}`}
+          // 이름 변경·종료는 우클릭 메뉴에만 있다 — 키보드 사용자에게 여는 법을 알린다.
+          aria-keyshortcuts="Shift+F10"
         >
-          <span className="sess-dot live" aria-hidden="true" />
+          <span className={dotCls} role="img" aria-label={dotLabel} />
           <span className="truncate">{label}</span>
-          <span className={`badge ${badge.cls}`}>{badge.label}</span>
         </button>
-        {/* 우클릭을 쓸 수 없는 환경(터치·키보드)의 같은 메뉴 진입점 */}
-        <button
-          type="button"
-          className="session-more"
-          aria-label={`세션 메뉴: ${label}`}
-          aria-haspopup="menu"
-          aria-expanded={menu?.rowKey === row.key}
-          data-tip="이름 변경 · 닫기"
-          // 열려 있는 메뉴의 트리거를 다시 누르면 닫는다(표준 토글).
-          onClick={(e) => (menu?.rowKey === row.key
-            ? closeMenu()
-            : openRowMenu(row.key, e.currentTarget, null))}
-        >
-          ⋯
-        </button>
-        {row.status !== 'exited' && (
-          <button
-            type="button"
-            className="session-stop"
-            aria-label="세션 종료"
-            data-tip="세션 종료 (CLI 프로세스 정지)"
-            onClick={() => stopSession(row.key)}
-          >
-            ✕
-          </button>
-        )}
       </div>
     );
   };

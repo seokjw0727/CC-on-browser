@@ -6,6 +6,7 @@
 //   | subagent(Task tool_use → 지연 → tool_result → result — 마스코트 juggle 관찰용)
 //   | question(AskUserQuestion — can_use_tool에 requires_user_interaction:true, 실 CLI 2026-07-12 실측 미러)
 //   | bulk(프롬프트 1회당 assistant 텍스트 N개 — 채팅 윈도잉 계약 e2e용)
+//   | preview(cwd에 실제 HTML+CSS를 쓰고 Write→Edit tool_use/result 방출 — 미리보기 e2e용)
 // 관찰용 env:
 //   FAKE_ECHO_DELAY_MS     echo 응답 전 지연(기본 0 — 즉답, 테스트 계약 유지)
 //   FAKE_SUBAGENT_MS       subagent 도구 실행 시간(기본 1500ms, 0 허용)
@@ -13,6 +14,8 @@
 //   FAKE_SUGGEST_BYPASS=1  permission 시나리오의 제안에 setMode(bypassPermissions) 추가
 //                          — 신뢰모드 제안 필터(session-hub) 계약 검증용
 // 지연 중 interrupt가 오면 대기 턴을 취소하고 is_error result로 닫는다(실 CLI 미러).
+import nodeFs from 'node:fs';
+import nodePath from 'node:path';
 import { createJsonlParser } from '../src/jsonl.js';
 
 // `claude remote-control` 분기 — stream-json 루프에 **들어가기 전에** 처리해야 한다.
@@ -427,6 +430,59 @@ function handle(msg) {
         session_id: SESSION_ID,
       });
       out({ type: 'result', subtype: 'success', result: '백그라운드로 돌렸습니다.', session_id: SESSION_ID });
+      return;
+    }
+
+    if (scenario === 'preview') {
+      // 결과물 미리보기 e2e용 — **실제로** cwd 안에 파일을 만들고, 그 파일을 가리키는
+      // Write(첫 턴)/Edit(이후 턴) tool_use + 성공 tool_result를 뱉는다. 미리보기는
+      // 디스크의 진짜 파일을 티켓으로 여는 기능이라, 이벤트만 흉내 내면 검증이 안 된다.
+      // 상대 리소스(같은 디렉터리의 CSS)도 같이 만들어 티켓 스코프를 확인할 수 있게 한다.
+      const dir = process.cwd();
+      const htmlPath = nodePath.join(dir, 'preview-artifact.html');
+      const cssPath = nodePath.join(dir, 'preview-artifact.css');
+      const first = !nodeFs.existsSync(htmlPath);
+      const heading = first ? 'PREVIEW-V1' : 'PREVIEW-V2';
+      nodeFs.writeFileSync(cssPath, 'h1{color:rgb(0,128,0)}\n');
+      nodeFs.writeFileSync(
+        htmlPath,
+        `<!doctype html><html><head><meta charset="utf-8">`
+        + `<link rel="stylesheet" href="preview-artifact.css"></head>`
+        + `<body><h1 id="head">${heading}</h1></body></html>\n`,
+      );
+      const toolUseId = `toolu_prev_${turn}`;
+      out({
+        type: 'assistant',
+        message: {
+          id: `msg_prev_${turn}`,
+          role: 'assistant',
+          model: assistantModel,
+          content: [{
+            type: 'tool_use',
+            id: toolUseId,
+            name: first ? 'Write' : 'Edit',
+            input: first
+              ? { file_path: htmlPath, content: `<h1>${heading}</h1>` }
+              : { file_path: htmlPath, old_string: 'PREVIEW-V1', new_string: 'PREVIEW-V2' },
+          }],
+        },
+        session_id: SESSION_ID,
+      });
+      out({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: toolUseId,
+            content: `${first ? 'Created' : 'Updated'} ${htmlPath}`,
+            is_error: false,
+          }],
+        },
+        tool_use_result: { success: true },
+        session_id: SESSION_ID,
+      });
+      emitResult(first ? 'wrote artifact' : 'edited artifact', {}, turn);
       return;
     }
 

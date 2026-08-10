@@ -186,7 +186,7 @@ function Message(props) {
   return cloneElement(body, { id: `msg-${props.item.uid}` });
 }
 
-function MessageBody({ item, isNew, debug = false }) {
+function MessageBody({ item, isNew, debug = false, onPreview }) {
   const enter = isNew ? ' msg-enter' : '';
   switch (item.kind) {
     case 'user-text':
@@ -207,7 +207,10 @@ function MessageBody({ item, isNew, debug = false }) {
       return <div className={enter ? 'msg-enter' : undefined}><ThinkingBlock item={item} /></div>;
 
     case 'tool_use':
-      return <div className={enter ? 'msg-enter' : undefined}><ToolCard item={item} /></div>;
+      // onPreview는 ChatView가 useCallback으로 만든 안정된 참조여야 한다 — 매 렌더
+      // 새 함수를 내려보내면 아래 memo가 무력화돼 스트리밍 델타마다 보이는 메시지가
+      // 전부 다시 그려진다(윈도잉/memo로 얻은 이득이 사라진다).
+      return <div className={enter ? 'msg-enter' : undefined}><ToolCard item={item} onPreview={onPreview} /></div>;
 
     case 'command':
       return (
