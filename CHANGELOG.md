@@ -50,6 +50,8 @@ Full bilingual (EN/KO) release notes live on the
   users, announced via `aria-keyshortcuts`), which makes the row a single
   focusable target and stops the buttons from crowding long session names.
 
+## [1.8.3] - 2026-08-09
+
 > 사이드바 세션을 우클릭해 이름 변경·닫기, 설정에서 Claude Code 설정
 > (`~/.claude/settings.json`) 직접 편집.
 > (Right-click a sidebar session to rename or close it; edit your Claude Code
