@@ -89,7 +89,26 @@ test('티켓: 스코프 탈출 시도(.. · 인코딩 · 드라이브 · 빈 세
   }
 });
 
-test('티켓: cwd 철자의 대소문자가 달라도 정상 파일은 거부되지 않는다', async () => {
+// 이 테스트는 platform 플래그(비교 정책)만이 아니라 **파일시스템 자체가** 대소문자를
+// 무시해야 성립한다 — issue()가 격리 판정 전에 cwd를 realpath하기 때문이다. 대소문자를
+// 구분하는 fs(리눅스 CI)에서는 철자를 바꾼 경로가 애초에 존재하지 않아 ENOENT로 죽는다.
+// 그래서 정책을 상수로 짐작하지 않고 tmpdir에서 실제로 한 번 확인하고 건너뛴다
+// (Windows·macOS에서는 그대로 돈다).
+const CASE_INSENSITIVE_FS = await (async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ccob-case-'));
+  try {
+    await fs.realpath(dir.toUpperCase());
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+})();
+
+test('티켓: cwd 철자의 대소문자가 달라도 정상 파일은 거부되지 않는다', {
+  skip: CASE_INSENSITIVE_FS ? false : '대소문자를 구분하는 파일시스템 — 철자를 바꾼 cwd가 존재하지 않는다',
+}, async () => {
   const fx = await makeFixture();
   try {
     // 격리 판정을 "대소문자 구분"으로만 바꾸면 여기서 오탐(403)이 난다.
