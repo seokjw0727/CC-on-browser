@@ -142,9 +142,23 @@ async function readWhenReady(file) {
   return null;
 }
 
+// 스폰된 bin이 보는 os.tmpdir()도 홈과 함께 격리한다 — 실제 앱 기동은
+// pasteCleanup을 켜므로(server.js 참조), 격리하지 않으면 이 테스트가 사용자
+// %TEMP%에 쌓인 24시간 지난 붙여넣기 폴더를 실제로 지운다. 홈 아래에 두면
+// isolatedHome의 t.after가 정리까지 함께 책임진다.
+const isolatedTmp = (home) => {
+  const dir = path.join(home, 'tmp');
+  mkdirSync(dir, { recursive: true });
+  return dir;
+};
+
 const homeEnv = (home) => ({
   HOME: home,
   USERPROFILE: home,
+  // Node의 os.tmpdir()가 보는 이름은 플랫폼마다 다르다 — 셋 다 덮어야 확실히 격리된다.
+  TMPDIR: isolatedTmp(home),
+  TEMP: isolatedTmp(home),
+  TMP: isolatedTmp(home),
   // 브라우저는 열지 않는다 — 존재하지 않는 명령이면 spawn이 'error'로 끝나고
   // openBrowser의 핸들러가 조용히 흡수한다.
   BROWSER: path.join(root, 'no-such-browser-binary-for-test'),
