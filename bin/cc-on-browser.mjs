@@ -409,6 +409,9 @@ try {
     cliPath,
     staticDir,
     onClientCountChange: noOpen ? undefined : onClientCountChange,
+    // 붙여넣기 임시 폴더 청소는 실제 앱 기동에서만 켠다 — 이 부수효과가 startServer의
+    // 기본값이면 테스트가 서버를 띄우는 것만으로 사용자 %TEMP%를 지운다.
+    pasteCleanup: true,
   });
 } catch (err) {
   if (err?.code === 'EADDRINUSE') {

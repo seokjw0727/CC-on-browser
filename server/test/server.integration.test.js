@@ -2,11 +2,13 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import { startServer } from '../src/server.js';
+import { saveClipboardFile } from '../src/attachments.js';
 
 const fakeCliPath = fileURLToPath(new URL('./fake-cli.mjs', import.meta.url));
 const TOKEN = 'test-token-abc123';
@@ -1220,5 +1222,248 @@ test('원격 제어: win32에서도 cwds가 채워진다 (세션 종료 후 끄�
     assert.ok(seen.states[0].keys.includes(s.key));
   } finally {
     await h.close();
+  }
+});
+
+// ----- 붙여넣기 첨부 REST -----
+// attachmentsApi를 통째로 주입한다 — 실제 PowerShell 클립보드 조회와 사용자 공용 tmp의
+// cc-on-browser-paste 폴더를 테스트가 건드리지 않기 위해서다. 다만 저장만은 진짜 구현에
+// root만 바꿔 위임한다: 여기서 보려는 것이 "attachments가 던진 오류를 서버가 어떤 상태
+// 코드로 옮기는가"라서, 그 오류까지 흉내 내면 검증이 공허해진다.
+function fakeAttachments(root) {
+  const calls = [];
+  const state = { clipboard: [], listError: null, saveError: null };
+  return {
+    calls,
+    state,
+    listClipboardFiles: async ({ platform } = {}) => {
+      calls.push({ op: 'list', platform });
+      if (state.listError) throw state.listError;
+      return state.clipboard;
+    },
+    saveClipboardFile: (body) => {
+      calls.push({ op: 'save' });
+      // 디스크 가득·권한 거부처럼 실제로 만들기 어려운 실패만 주입한다.
+      if (state.saveError) throw state.saveError;
+      return saveClipboardFile(body, { root });
+    },
+    cleanupStalePasteDirs: async () => {
+      calls.push({ op: 'cleanup' });
+      return 0;
+    },
+  };
+}
+
+test('POST /api/paste-file: 인증 전에는 저장하지 않고, 통과하면 파일과 경로가 생긴다', async () => {
+  const root = path.join(tmpRoot, 'paste-ok');
+  const at = fakeAttachments(root);
+  const h = await startServer({
+    port: 0, token: TOKEN, cliPath: process.execPath, cliArgsPrefix: [fakeCliPath],
+    projectsRoot, staticDir, attachmentsApi: at,
+  });
+  const b = `http://127.0.0.1:${h.port}`;
+  const post = (init) => fetch(`${b}/api/paste-file`, { method: 'POST', ...init });
+  const payload = JSON.stringify({ name: 'x.png', data: 'AAAA' });
+  try {
+    // 토큰이 없거나 Origin이 위조면 본문을 읽기도 전에 401 — 디스크에 아무 일도 없어야 한다
+    assert.equal((await post({ body: payload })).status, 401);
+    assert.equal((await post({
+      headers: { 'x-auth-token': TOKEN, Origin: 'http://evil.example' },
+      body: payload,
+    })).status, 401);
+    assert.equal(at.calls.filter((c) => c.op === 'save').length, 0, '인증 전 저장은 없어야 한다');
+
+    const bytes = Buffer.from('붙여넣은 스크린샷 바이트', 'utf8');
+    const res = await post({
+      headers: { 'x-auth-token': TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '스크린샷 2026-08-11.png', data: bytes.toString('base64') }),
+    });
+    assert.equal(res.status, 200);
+    const { path: saved } = await res.json();
+    // 저장 위치는 서버가 정한다 — 클라이언트가 준 것은 이름과 바이트뿐이다
+    assert.ok(saved.startsWith(root + path.sep), `서버가 정한 root 안이어야 한다: ${saved}`);
+    assert.equal(path.basename(saved), '스크린샷 2026-08-11.png');
+    assert.deepEqual(await fs.readFile(saved), bytes);
+  } finally {
+    await h.close();
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+// 상한을 넘기는 업로드를 조각으로 흘려보내다가, 응답이 오면 그 자리에서 멈춘다.
+//
+// fetch를 쓰지 않는다. 서버는 413을 내보낸 **뒤에** 남은 업로드를 끊는데, undici는 그
+// 소켓 리셋을 만나면 이미 받아 둔 응답까지 버리고 ECONNRESET만 남긴다 — "이유를 먼저
+// 준다"는 계약이 지켜져도 확인할 방법이 없어진다. content-length를 명시한 raw http
+// 클라이언트는 같은 상황에서 응답을 먼저 읽어 낸다(본문 한 덩어리 write도 같은 이유로
+// 실패하므로 조각내 보낸다).
+function postOversized(port, pathname, { headers, chunk, count }) {
+  return new Promise((resolve, reject) => {
+    let answered = false;
+    const req = http.request({
+      host: '127.0.0.1', port, path: pathname, method: 'POST',
+      headers: { ...headers, 'content-length': String(chunk.length * count) },
+      agent: false, // 끊긴 소켓이 풀에 남아 다음 요청을 오염시키지 않게
+    }, (res) => {
+      answered = true;
+      res.resume();
+      resolve({ status: res.statusCode, headers: res.headers });
+      req.destroy(); // 이유를 받았으니 남은 업로드를 마저 보낼 이유가 없다
+    });
+    // 서버가 업로드를 끊으면 소켓 쪽에서도 write 오류가 난다 — 여기서 삼키지 않으면
+    // uncaught로 테스트 프로세스가 죽는다. 응답을 못 받았을 때만 실패로 본다.
+    req.on('socket', (socket) => { socket.on('error', () => { /* 기대한 결과 */ }); });
+    req.on('error', (err) => { if (!answered) reject(err); });
+    let sent = 0;
+    const pump = () => {
+      while (!answered && sent < count) {
+        sent += 1;
+        if (!req.write(chunk)) {
+          req.once('drain', pump);
+          return;
+        }
+      }
+      if (!answered) req.end();
+    };
+    pump();
+  });
+}
+
+test('POST /api/paste-file: 잘못된 base64는 400, 과대 본문은 413, 다른 메서드는 405', async () => {
+  const root = path.join(tmpRoot, 'paste-err');
+  const at = fakeAttachments(root);
+  const h = await startServer({
+    port: 0, token: TOKEN, cliPath: process.execPath, cliArgsPrefix: [fakeCliPath],
+    projectsRoot, staticDir, attachmentsApi: at,
+  });
+  const b = `http://127.0.0.1:${h.port}`;
+  const auth = { 'x-auth-token': TOKEN, 'content-type': 'application/json' };
+  const post = (body) => fetch(`${b}/api/paste-file`, { method: 'POST', headers: auth, body });
+  try {
+    // base64가 아닌 문자열 — 관대한 디코더였다면 쓰레기 파일이 남았을 자리다
+    const bad = await post(JSON.stringify({ name: 'x.png', data: 'not base64!!' }));
+    assert.equal(bad.status, 400);
+    // 본문이 JSON 객체가 아니어도 400(500이 아니다)
+    assert.equal((await post('[1,2,3]')).status, 400);
+
+    // 본문 상한(32MB)은 파싱보다 **먼저** 걸린다 — 그래서 내용이 JSON이 아니어도 413이다
+    // 상한을 딱 한 조각만 넘겨 보낸다. 크게 넘기면 서버가 응답과 함께 소켓을 끊는
+    // 순간 클라이언트에 아직 못 보낸 본문이 남아, 응답 대신 write 오류를 보게 된다.
+    const huge = await postOversized(h.port, '/api/paste-file', {
+      headers: auth, chunk: Buffer.alloc(64 * 1024, 0x78), count: 32 * 16 + 1,
+    });
+    assert.equal(huge.status, 413);
+
+    // 저장 계층의 실패도 제 상태 코드로 옮겨진다: 디코드 후 상한 초과는 413,
+    // 예상 밖 파일시스템 오류는 클라이언트 잘못이 아니므로 500.
+    const ok = JSON.stringify({ name: 'x.png', data: 'AAAA' });
+    at.state.saveError = Object.assign(new Error('pasted file exceeds'), { code: 'EPAYLOAD' });
+    assert.equal((await post(ok)).status, 413);
+    at.state.saveError = Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+    assert.equal((await post(ok)).status, 500);
+    at.state.saveError = null;
+
+    // GET은 이 창구의 메서드가 아니다 — 404가 아니라 Allow를 단 405여야 한다
+    const wrong = await fetch(`${b}/api/paste-file`, { headers: auth });
+    assert.equal(wrong.status, 405);
+    assert.equal(wrong.headers.get('allow'), 'POST');
+
+    // 본문 상한·형식 위반·잘못된 메서드는 저장 계층까지 내려가지 않는다
+    // (내려간 것은 base64 1건 + 주입 실패 2건뿐)
+    assert.equal(at.calls.filter((c) => c.op === 'save').length, 3);
+  } finally {
+    await h.close();
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('POST /api/clipboard-files: 주입한 경로를 그대로 주고, 조회 실패는 빈 목록으로 수렴', async () => {
+  const at = fakeAttachments(path.join(tmpRoot, 'paste-clip'));
+  at.state.clipboard = ['C:\\Users\\me\\보고서.pdf', 'C:\\Users\\me\\사진 1.png'];
+  const h = await startServer({
+    port: 0, token: TOKEN, cliPath: process.execPath, cliArgsPrefix: [fakeCliPath],
+    projectsRoot, staticDir, platform: 'win32', attachmentsApi: at,
+  });
+  const b = `http://127.0.0.1:${h.port}`;
+  const auth = { 'x-auth-token': TOKEN };
+  try {
+    // 인증을 통과하기 전에는 클립보드를 들여다보지 않는다
+    assert.equal((await fetch(`${b}/api/clipboard-files`, { method: 'POST' })).status, 401);
+    assert.equal(at.calls.filter((c) => c.op === 'list').length, 0);
+
+    const res = await fetch(`${b}/api/clipboard-files`, { method: 'POST', headers: auth });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { paths: at.state.clipboard });
+    // 조회 플랫폼은 클라이언트가 아니라 서버가 정한다
+    assert.deepEqual(at.calls.at(-1), { op: 'list', platform: 'win32' });
+
+    // 조회가 던져도 200 {paths: []} — 클라이언트는 빈 목록을 보고 업로드 폴백으로 간다
+    at.state.listError = new Error('powershell을 찾을 수 없습니다');
+    const failed = await fetch(`${b}/api/clipboard-files`, { method: 'POST', headers: auth });
+    assert.equal(failed.status, 200);
+    assert.deepEqual(await failed.json(), { paths: [] });
+
+    const wrong = await fetch(`${b}/api/clipboard-files`, { headers: auth });
+    assert.equal(wrong.status, 405);
+    assert.equal(wrong.headers.get('allow'), 'POST');
+  } finally {
+    await h.close();
+  }
+});
+
+test('붙여넣기 임시 폴더 청소는 기동을 붙잡지 않고, 실패해도 기동을 깨지 않는다', async () => {
+  const common = {
+    port: 0, token: TOKEN, cliPath: process.execPath, cliArgsPrefix: [fakeCliPath],
+    projectsRoot, staticDir,
+    // 청소는 기본 꺼짐(부수효과 옵트인) — 실제 앱 기동을 흉내 내려면 여기서 켠다.
+    pasteCleanup: true,
+  };
+  const stub = (cleanupStalePasteDirs) => ({
+    listClipboardFiles: async () => [],
+    saveClipboardFile: async () => ({ path: '' }),
+    cleanupStalePasteDirs,
+  });
+
+  // 끝나지 않는 청소 — await하는 구현이었다면 startServer가 여기서 영영 안 돌아온다
+  let hung = 0;
+  const h1 = await startServer({
+    ...common,
+    attachmentsApi: stub(() => { hung += 1; return new Promise(() => {}); }),
+  });
+  try {
+    assert.equal(hung, 1, '기동마다 정확히 1회');
+    assert.equal(h1.server.listening, true);
+  } finally {
+    await h1.close();
+  }
+
+  // 거부하는 청소 — catch가 없으면 unhandled rejection으로 프로세스가 죽는다
+  let failed = 0;
+  const h2 = await startServer({
+    ...common,
+    attachmentsApi: stub(async () => { failed += 1; throw new Error('청소 실패'); }),
+  });
+  try {
+    const r = await fetch(`http://127.0.0.1:${h2.port}/api/bootstrap`, {
+      headers: { 'x-auth-token': TOKEN },
+    });
+    assert.equal(r.status, 200);
+    assert.equal(failed, 1);
+  } finally {
+    await h2.close();
+  }
+
+  // 옵트인하지 않으면 청소는 아예 돌지 않는다 — 이 스위트의 나머지 20여 개
+  // startServer 호출이 개발자 %TEMP%의 붙여넣기 폴더를 지우지 않는다는 보장.
+  let uninvited = 0;
+  const h3 = await startServer({
+    ...common,
+    pasteCleanup: undefined,
+    attachmentsApi: stub(async () => { uninvited += 1; }),
+  });
+  try {
+    assert.equal(uninvited, 0, '옵트인 없으면 청소는 호출조차 되지 않는다');
+  } finally {
+    await h3.close();
   }
 });

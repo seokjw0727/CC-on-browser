@@ -2,10 +2,12 @@
 // 노력 수준 진행 바 + 전송), 그 아래 상태줄(컨텍스트·5h/7d 사용량·연결).
 // 상단 바를 대체한다. 설정 변경(모델·권한 모드·노력)은 채팅 기록 대신 토스트로 알린다.
 // 턴별 토큰(입/출력)은 상태줄이 아니라 채팅에 usage 아이템으로 표시(reduce-cli-event).
-// Enter 전송/Shift+Enter 개행, `/` 커맨드 드롭다운, Esc/버튼 interrupt.
+// Enter 전송/Shift+Enter 개행, `/` 커맨드 드롭다운, Esc/버튼 interrupt,
+// 클립보드 사진·파일 붙여넣기 → 파일 경로 삽입.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
-import { searchFiles } from '../lib/api.js';
+import { searchFiles, clipboardFiles, uploadPasteFile } from '../lib/api.js';
+import { insertPaths, dataUrlToBase64 } from '../lib/paste-paths.js';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
 import { openSubagents } from '../lib/subagents.js';
 import { fmtTok, fmtReset, shortPath, contextWindowFor, hasDisplayableCtx } from '../lib/format.js';
@@ -245,6 +247,50 @@ function EffortPicker({ session, options, disabled, onSelect }) {
   );
 }
 
+// ----- 클립보드 붙여넣기 헬퍼 (컴포넌트 상태에 의존하지 않는 부분) -----
+
+// paste 이벤트에 실린 "실제 파일"만 모은다. 같은 파일이 items와 files 양쪽으로 들어오는
+// 브라우저가 있는데, getAsFile()은 호출마다 새 인스턴스를 만들어 객체 동일성으로는 못
+// 거른다 — 이름·크기·타입으로 접는다. lastModified는 비트맵 붙여넣기에서 "File을 만든
+// 시각"으로 채워져 호출 사이에 달라질 수 있으므로 키에서 뺀다(넣으면 스크린샷 하나가
+// 두 번 삽입된다).
+function clipboardFileList(dt) {
+  const seen = new Set();
+  const files = [];
+  const add = (f) => {
+    if (!f) return;
+    const id = `${f.name}\u0000${f.size}\u0000${f.type}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    files.push(f);
+  };
+  // DataTransferItemList·FileList는 배열이 아니라 유사 배열이다.
+  for (const item of Array.from(dt?.items ?? [])) {
+    if (item.kind === 'file') add(item.getAsFile());
+  }
+  for (const file of Array.from(dt?.files ?? [])) add(file);
+  return files;
+}
+
+// 업로드 폴백의 클라이언트 측 상한 — 서버 attachments.js의 MAX_PASTE_BYTES와 같은 값이다.
+// 서버가 어차피 거부할 파일을 읽고 나서 알면 늦다: 500MB짜리 동영상 하나면 브라우저가
+// 메인 스레드에서 약 667MB짜리 base64 문자열을 만들다 탭이 멈추거나 OOM으로 죽고,
+// 살아남아도 본문 상한을 넘긴 요청은 서버가 413을 쓴 직후 소켓을 끊어 사용자에게는
+// 이유를 알 수 없는 'Failed to fetch'만 남는다. 그래서 읽기 **전에** 크기로 거른다.
+const MAX_PASTE_FILE_BYTES = 20 * 1024 * 1024;
+
+// FileReader는 콜백 API라 순차 업로드 루프에 태우려면 Promise로 감싸야 한다.
+// ArrayBuffer가 아니라 dataURL로 읽는 이유: 서버 계약이 base64 문자열이라, 바이트 →
+// base64 변환을 손으로 하지 않고 브라우저 내장 인코더에 맡긴다(헤더는 dataUrlToBase64가 뗀다).
+function readAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(dataUrlToBase64(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error('파일을 읽지 못했습니다'));
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function Composer() {
   const { state, dispatch, send, startSession, stopSession, notify, jumpTo } = useStore();
   const session = useActiveSession();
@@ -370,6 +416,109 @@ export default function Composer() {
       el.setSelectionRange(pos, pos);
       setCaret(pos);
     });
+  };
+
+  // ----- 클립보드 사진·파일 붙여넣기 → 경로 삽입 -----
+  // 붙여넣기 처리는 서버 왕복(원본 경로 조회·임시 저장)이라 비동기인데, 끝났을 때는
+  // 핸들러의 렌더 클로저가 이미 낡아 있다 — 그새 다른 세션으로 옮겨 갔을 수도 있으므로
+  // "지금 열려 있는 세션"을 ref로 본다(남의 대화 입력창에 경로를 흘리지 않게).
+  const sessionKeyRef = useRef(null);
+  useEffect(() => {
+    sessionKeyRef.current = session?.key ?? null;
+  }, [session?.key]);
+  // 붙여넣기 작업을 도착 순서대로 이어 붙이는 체인. 병렬로 두면 늦게 끝난 업로드가 먼저
+  // 삽입되거나, 두 작업이 같은 캐럿을 기준으로 삼아 서로를 덮어쓴다.
+  const pasteChainRef = useRef(Promise.resolve());
+
+  // 삽입할 경로 확보: ① OS 클립보드의 원본 경로(탐색기에서 복사한 파일)를 먼저 보고,
+  // ② 없으면 붙여넣은 바이트를 서버 임시 파일로 만들어 그 경로를 쓴다.
+  const resolvePastePaths = async (files) => {
+    try {
+      const { paths } = await clipboardFiles();
+      const found = Array.isArray(paths) ? paths.filter((p) => typeof p === 'string' && p) : [];
+      // 원본 경로를 그대로 넘겨야 Claude가 사본이 아니라 그 파일을 읽고 고칠 수 있다.
+      if (found.length > 0) return found;
+    } catch {
+      // 조회 실패는 알리지 않는다 — 아래 업로드가 같은 결과(경로)를 만들어 낸다.
+    }
+    // 여기까지 왔으면 디스크에 원본이 없는 붙여넣기(스크린샷 비트맵)이거나 비Windows다.
+    // 업로드는 왕복이 눈에 띄게 걸리므로 이 경로에서만, 파일 수와 무관하게 한 번 알린다.
+    notify('클립보드 파일 처리 중…');
+    const saved = [];
+    for (const file of files) {
+      if (file.size > MAX_PASTE_FILE_BYTES) {
+        const mb = Math.round(MAX_PASTE_FILE_BYTES / (1024 * 1024));
+        notify(`붙여넣기 실패: ${file.name || '파일'} — ${mb}MB를 넘는 파일은 붙여넣을 수 없습니다`, 'error');
+        continue;
+      }
+      try {
+        const data = await readAsBase64(file);
+        const { path } = await uploadPasteFile(file.name, data);
+        if (path) saved.push(path);
+      } catch (err) {
+        // 한 파일이 읽기·저장에 실패해도 나머지는 살린다 — 어느 파일이 빠졌는지 알린다.
+        notify(`붙여넣기 실패: ${file.name || '파일'} — ${String(err.message ?? err)}`, 'error');
+      }
+    }
+    return saved;
+  };
+
+  const insertPastedPaths = (key, paths, baseText, baseStart, baseEnd) => {
+    if (sessionKeyRef.current !== key) return; // 세션이 바뀌었으면 결과를 버린다
+    const el = taRef.current;
+    const cur = el ? el.value : baseText;
+    // 기다리는 동안 사용자가 타이핑했으면 캡처한 선택 범위는 이미 엉뚱한 자리를 가리킨다 —
+    // 남이 쓴 단어 사이를 쪼개는 대신 끝에 붙인다.
+    const fresh = cur === baseText;
+    // 선택 영역이 있었으면 그 자리를 경로로 **대체**한다(@태그를 넣는 pickFile과 같은
+    // 규약). preventDefault로 브라우저의 선택 삭제까지 막아 놨으므로, 여기서 직접
+    // 걷어내지 않으면 사용자가 지우려던 글자가 경로 뒤에 그대로 남는다.
+    const body = fresh ? cur.slice(0, baseStart) + cur.slice(baseEnd) : cur;
+    const at = fresh ? baseStart : body.length;
+    const next = insertPaths(body, at, paths);
+    setText(next.text);
+    // 캐럿 복원은 pickFile과 같은 rAF 패턴(제어 textarea라 값 반영 뒤라야 한다).
+    requestAnimationFrame(() => {
+      const ta = taRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(next.caret, next.caret);
+      setCaret(next.caret);
+    });
+  };
+
+  const onPaste = (e) => {
+    // textarea가 이미 disabled지만, 확장이 쏘는 합성 paste까지 막아 주지는 않는다.
+    if (!session || exited) return;
+    const dt = e.clipboardData;
+    // 텍스트가 함께 실려 있으면 그건 "파일 붙여넣기"가 아니다. Office 계열은 셀 범위·표·
+    // 도형을 복사할 때 텍스트와 비트맵(CF_DIB)을 같이 올리는데, 크롬은 그 비트맵을
+    // image.png File로 합성해 넘긴다 — 파일 유무만 보고 가로채면 사용자가 원한 탭 구분
+    // 텍스트가 통째로 사라지고 임시 png 경로만 남는다. 탐색기의 파일 복사(types가
+    // ["Files"]뿐)와 웹 이미지 복사에는 text/plain이 없어 이 가드에 걸리지 않는다.
+    if (Array.from(dt?.types ?? []).includes('text/plain')) return;
+    const files = clipboardFileList(dt);
+    // 파일이 없으면 평범한 텍스트 붙여넣기 — 손대지 않고 네이티브 동작에 맡긴다
+    // (undo 스택·IME 조합·서식 정리가 전부 브라우저 몫이라 가로채면 잃을 것만 많다).
+    if (files.length === 0) return;
+    e.preventDefault(); // 파일이 확인된 뒤에만, 그리고 await 이전(동기 구간)에 막는다
+
+    // clipboardData는 핸들러가 끝나면 비워지므로 필요한 것을 지금 전부 캡처한다.
+    const key = session.key;
+    const el = taRef.current;
+    const baseText = el ? el.value : text;
+    const baseStart = el?.selectionStart ?? baseText.length;
+    // 끝(selectionEnd)까지 잡아 둬야 선택 영역을 대체할 수 있다 — 캐럿만 있는 평소에는
+    // start와 같은 값이라 동작이 달라지지 않는다.
+    const baseEnd = el?.selectionEnd ?? baseStart;
+
+    pasteChainRef.current = pasteChainRef.current
+      .then(async () => {
+        const paths = await resolvePastePaths(files);
+        if (paths.length > 0) insertPastedPaths(key, paths, baseText, baseStart, baseEnd);
+      })
+      // 한 건이 reject하면 체인이 끊겨 이후 붙여넣기가 통째로 조용히 사라진다 — 봉합한다.
+      .catch((err) => notify(`붙여넣기 실패: ${String(err.message ?? err)}`, 'error'));
   };
 
   useEffect(() => {
@@ -777,6 +926,7 @@ export default function Composer() {
               setCaret(e.target.selectionStart ?? e.target.value.length);
             }}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
             onKeyUp={syncCaret}
             onClick={syncCaret}
             onSelect={syncCaret}

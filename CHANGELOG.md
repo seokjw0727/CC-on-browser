@@ -8,6 +8,37 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-08-11
+
+> 탐색기에서 복사한 파일이나 방금 찍은 스크린샷을 입력창에 그대로 붙여넣으면
+> 파일 경로가 들어갑니다 — 원본 파일이면 원본 경로가, 스크린샷이면 저장된 임시
+> 파일의 경로가 삽입돼 그대로 읽고 고칠 수 있습니다.
+> (Paste a copied file or a fresh screenshot straight into the composer and its
+> path lands in the prompt — the original path for a real file, a saved temp
+> file for a screenshot.)
+
+### Added
+- **Paste a file or a screenshot into the composer and get its path.** Copy a
+  file in Explorer, paste into the input, and its **original absolute path** is
+  inserted at the caret — so the CLI reads and edits that file in place rather
+  than a copy. Paste a screenshot (or anything the clipboard holds only as
+  bitmap bytes) and it is saved under your OS temp directory first, with that
+  path inserted instead. Paths containing spaces are quoted, several files come
+  in as a space-separated run, the insertion respects your caret and replaces
+  the current selection, and a trailing space closes the token so you can keep
+  typing. Plain-text paste is completely untouched: a clipboard that carries
+  text alongside a bitmap — an Excel range, a Word table — falls through to the
+  browser's native paste, so copying a spreadsheet still pastes the spreadsheet.
+  Two authenticated local endpoints back it, `POST /api/clipboard-files` (reads
+  only the clipboard's *file list*, and only when the browser has already handed
+  over files) and `POST /api/paste-file` (20 MB per file). Uploaded names are
+  sanitised for path separators, control characters, Windows reserved names and
+  byte length before touching disk; each paste lands in its own unpredictable
+  sub-directory; and the temp root is refused if it is a symlink or junction, so
+  a planted link cannot redirect writes or deletions. Left-over paste folders
+  older than 24 hours are swept on the next app start — from the real entry
+  point only, so running the test suite never deletes yours.
+
 ## [1.9.0] - 2026-08-10
 
 > 어시스턴트가 만든 결과물을 대화 옆 패널에서 바로 확인 — 턴이 끝나면 저절로
@@ -397,7 +428,8 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
-[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.1...HEAD
+[1.9.1]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.8.3...v1.9.0
 [1.7.1]: https://github.com/seokjw0727/CC-on-browser/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.6.0...v1.7.0

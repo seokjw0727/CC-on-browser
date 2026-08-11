@@ -118,3 +118,26 @@ export const saveClaudeConfig = ({ content, expectedMtimeMs = null }) =>
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ content, expectedMtimeMs }),
   });
+
+/**
+ * OS 클립보드에 담긴 파일들의 절대경로 — 탐색기에서 복사한 파일을 붙여넣을 때 사본이
+ * 아니라 원본 경로를 그대로 쓰기 위한 조회다(파일 내용이 아니라 경로 목록만 읽는다).
+ * 브라우저 paste에 파일이 실려 있을 때만 호출한다. 스크린샷 비트맵·비Windows는 빈 배열.
+ * GET이 아닌 POST인 이유: OS 클립보드를 건드리는 부수효과성 조회라 캐시·프리페치 대상이
+ * 되면 안 된다.
+ * @returns {Promise<{paths: string[]}>}
+ */
+export const clipboardFiles = () => request('/api/clipboard-files', { method: 'POST' });
+
+/**
+ * 디스크에 원본이 없는 붙여넣기(스크린샷 등)를 서버 임시 폴더에 저장하고 그 절대경로를
+ * 돌려받는다. data는 원시 base64 — dataUrlToBase64로 data: URL 헤더를 떼고 넘긴다.
+ * 실패 시 err.status: 400(이름·형식) / 413(크기 상한 초과) / 500(저장 실패).
+ * @returns {Promise<{path: string}>}
+ */
+export const uploadPasteFile = (name, data) =>
+  request('/api/paste-file', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, data }),
+  });

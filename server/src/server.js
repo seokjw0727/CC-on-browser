@@ -15,6 +15,7 @@ import { defaultConfigPath, readClaudeConfig, writeClaudeConfig } from './claude
 import { fetchQuota } from './quota.js';
 import { canonicalCwdSync, createRemoteControl } from './remote-control.js';
 import { createPreviewApi, PREVIEW_PREFIX } from './preview-api.js';
+import { cleanupStalePasteDirs, listClipboardFiles, saveClipboardFile } from './attachments.js';
 
 const VERSION_TIMEOUT_MS = 3_000;
 // close()가 원격 제어 자식 정리를 기다리는 상한. remote-control.js의 stop 유예
@@ -44,6 +45,15 @@ const CONTENT_TYPES = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
+// /api/* 경로별 허용 메서드. 405의 Allow 헤더와 "이 메서드를 받아 주는가" 판정이 같은
+// 표에서 나와야 둘이 어긋나지 않는다 — 표에 없는 경로는 지금까지처럼 GET 전용이다.
+const API_METHODS = {
+  '/api/sessions': ['GET', 'DELETE'],
+  '/api/claude-config': ['GET', 'PUT'],
+  '/api/clipboard-files': ['POST'],
+  '/api/paste-file': ['POST'],
+};
+
 export async function startServer({
   port = 8787,
   host = '127.0.0.1',
@@ -66,6 +76,14 @@ export async function startServer({
   // 테스트는 임시 경로를 주입해 실제 홈 설정을 절대 건드리지 않는다.
   claudeConfigPath = defaultConfigPath(),
   previewApi, // 테스트 주입용 — 기본은 preview-api.js의 티켓 저장소(시계·TTL 실제값)
+  // 테스트 주입용 — 기본은 attachments.js의 실제 구현. 주입하면 실제 OS 클립보드
+  // (PowerShell)와 공용 tmp의 붙여넣기 폴더를 건드리지 않는다.
+  attachmentsApi,
+  // 기동 시 지난 실행이 남긴 붙여넣기 임시 폴더를 청소할지. **기본 꺼짐**이고 앱
+  // 진입점(bin/cc-on-browser.mjs)만 켠다 — 켜져 있으면 startServer를 띄우는 것만으로
+  // 사용자 %TEMP%의 파일이 지워져, 테스트가 개발자 머신의 어제 붙여넣기를 날린다.
+  // 부수효과를 갖는 쪽이 옵트인해야 한다.
+  pasteCleanup = false,
 } = {}) {
   if (!token) throw new TypeError('token is required');
   if (!cliPath) throw new TypeError('cliPath is required');
@@ -91,6 +109,9 @@ export async function startServer({
   const pickDir = directoryPicker ?? pickDirectory;
   // 결과물 미리보기 — 티켓 발급/서빙. 읽기 범위는 라이브 세션 cwd 안으로 제한된다.
   const preview = previewApi ?? createPreviewApi({ platform });
+  // 붙여넣기 첨부 — OS 클립보드의 파일 경로 조회와 비트맵 임시 저장.
+  const attachments = attachmentsApi
+    ?? { cleanupStalePasteDirs, listClipboardFiles, saveClipboardFile };
 
   const tokenBuf = Buffer.from(String(token));
   const tokenEquals = (candidate) => {
@@ -362,16 +383,20 @@ export async function startServer({
     }
   }
 
-  // 요청 본문(JSON) 읽기 — 현재 유일한 쓰기 API(PUT /api/claude-config)용.
+  // 요청 본문(JSON) 읽기 — 쓰기 API(PUT /api/claude-config, POST /api/paste-file)용.
   // 상한을 두는 이유: 로컬 도구라도 무한정 버퍼링하면 메모리로 서버를 죽일 수 있다.
   const MAX_BODY_BYTES = 1024 * 1024; // 1MB — settings.json에는 과분한 여유
-  function readJsonBody(req) {
+  // 붙여넣기 업로드만 예외적으로 크다. 상한은 **경로별**로 준다 — 기본값을 올리면
+  // 설정 저장 창구까지 32MB를 버퍼링하게 되어, 상한을 둔 이유가 사라진다.
+  // 20MB 바이너리가 base64로 약 4/3배 부풀고 JSON 이스케이프가 더 얹히는 몫까지 여유.
+  const MAX_PASTE_BODY_BYTES = 32 * 1024 * 1024;
+  function readJsonBody(req, maxBytes = MAX_BODY_BYTES) {
     return new Promise((resolve, reject) => {
       let size = 0;
       const chunks = [];
       req.on('data', (chunk) => {
         size += chunk.length;
-        if (size > MAX_BODY_BYTES) {
+        if (size > maxBytes) {
           // 소켓을 여기서 끊지 않는다 — 응답(413)을 먼저 내보내야 클라이언트가
           // 네트워크 오류가 아니라 이유를 받는다. 정리는 호출측이 응답 후에 한다.
           req.pause();
@@ -487,6 +512,36 @@ export async function startServer({
     }
   }
 
+  // POST /api/paste-file — 본문 {name, data(원시 base64)}를 임시 폴더에 저장하고 절대경로 반환.
+  // 스크린샷처럼 디스크에 실체가 없는 붙여넣기의 폴백 창구다(탐색기에서 복사한 파일은
+  // /api/clipboard-files의 원본 경로를 쓴다). 저장 위치는 서버가 정한다 —
+  // claude-config와 같은 원칙으로, 클라이언트가 주는 것은 이름과 바이트뿐이다.
+  async function handlePasteFile(req, res) {
+    let body;
+    try {
+      body = await readJsonBody(req, MAX_PASTE_BODY_BYTES);
+    } catch (err) {
+      if (err?.code === 'EPAYLOAD') {
+        json(res, 413, { error: String(err.message) });
+        // 응답을 다 내보낸 뒤에 남은 업로드를 끊는다(handleWriteConfig와 같은 처방).
+        res.on('finish', () => req.destroy());
+      } else {
+        json(res, 400, { error: String(err?.message ?? err) });
+      }
+      return;
+    }
+    try {
+      const saved = await attachments.saveClipboardFile({ name: body?.name, data: body?.data });
+      json(res, 200, { path: saved.path });
+    } catch (err) {
+      // EBADBODY = 클라이언트가 준 값이 base64가 아님, EPAYLOAD = 디코드 후 상한 초과.
+      // 그 밖(디스크 가득·권한 거부)은 클라이언트 잘못이 아니므로 500으로 분류한다.
+      if (err?.code === 'EBADBODY') json(res, 400, { error: String(err.message) });
+      else if (err?.code === 'EPAYLOAD') json(res, 413, { error: String(err.message) });
+      else json(res, 500, { error: String(err?.message ?? err) });
+    }
+  }
+
   async function handleApi(req, res, url) {
     // 인증·Origin 검사가 먼저다 — 본문을 읽거나 파일에 손대기 전에 통과해야 한다.
     if (!originAllowed(req.headers.origin) || !tokenEquals(req.headers['x-auth-token'])) {
@@ -501,13 +556,28 @@ export async function startServer({
       await handleWriteConfig(req, res);
       return;
     }
-    if (req.method !== 'GET') {
-      const allow = url.pathname === '/api/sessions'
-        ? 'GET, DELETE'
-        : url.pathname === '/api/claude-config'
-          ? 'GET, PUT'
-          : 'GET';
-      json(res, 405, { error: 'method not allowed' }, { allow });
+    if (req.method === 'POST' && url.pathname === '/api/clipboard-files') {
+      // 본문 없는 POST다. GET이 아닌 이유는 부작용이 없어서가 아니라, 브라우저가
+      // 링크·프리페치로 흘려보낼 수 있는 창구에 OS 클립보드 조회를 두지 않기 위해서다.
+      let paths = [];
+      try {
+        paths = await attachments.listClipboardFiles({ platform });
+      } catch {
+        // 조회 실패(PowerShell 부재·타임아웃)는 오류가 아니라 "목록 없음"이다 —
+        // 클라이언트는 빈 목록을 받으면 곧바로 업로드 폴백으로 넘어간다.
+        paths = [];
+      }
+      json(res, 200, { paths });
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/api/paste-file') {
+      await handlePasteFile(req, res);
+      return;
+    }
+    // 여기까지 왔다면 이 경로가 받는 메서드가 아니다 — POST 전용 경로에 온 GET도 포함.
+    const allowed = API_METHODS[url.pathname] ?? ['GET'];
+    if (!allowed.includes(req.method)) {
+      json(res, 405, { error: 'method not allowed' }, { allow: allowed.join(', ') });
       return;
     }
     try {
@@ -843,6 +913,16 @@ export async function startServer({
     });
   });
   boundPort = server.address().port;
+
+  // 지난 실행이 남긴 붙여넣기 임시 폴더 청소. **기다리지 않는다** — 청소는 서버가
+  // 준비됐는지와 아무 상관이 없고, tmp 트리 순회가 느린 날 브라우저를 붙잡을 이유가
+  // 없다. 대신 catch를 반드시 달아 실패가 unhandled rejection으로 프로세스를 죽이지
+  // 않게 한다(다음 기동에서 다시 시도하면 그만인 일이다).
+  if (pasteCleanup) {
+    Promise.resolve()
+      .then(() => attachments.cleanupStalePasteDirs())
+      .catch(() => { /* 청소 실패는 기능에 영향이 없다 */ });
+  }
 
   // 멱등 종료. 원격 제어 자식을 **먼저** 확실히 정리한 뒤에 리스너를 놓는다 —
   // 순서가 바뀌면 데몬이 먼저 사라지고 자식이 고아로 남는다.
