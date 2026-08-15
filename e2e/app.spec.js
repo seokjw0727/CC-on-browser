@@ -12,7 +12,7 @@
 // 재개 시 스폰 인자(model/permissionMode) 계보는 client/test/store-reducer.test.js
 // 단위 테스트가 담당한다 — 브라우저에서는 관측 지점이 없다.
 import { test, expect } from '@playwright/test';
-import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -626,14 +626,31 @@ test('사이드바 세션 행 — 버튼 없이 이름 + 상태 점만, 행 클�
   await expect(row.locator('.sess-main')).toBeFocused();
 });
 
-test('설정 → Claude Code Config — 편집·저장이 파일에 반영되고 충돌은 거부된다', async ({ page }) => {
+// 설정 편집기 열기 — 세 시나리오가 공유한다. 각 테스트는 먼저 설정 파일을 자기
+// 손으로 시딩/리셋한다(앞 테스트가 남긴 내용에 기대면 재시도·필터 실행에서 깨진다).
+const CONFIG_FILE = path.join(here, '.state', 'claude-config', 'settings.json');
+
+function seedConfig(content) {
+  mkdirSync(path.dirname(CONFIG_FILE), { recursive: true });
+  if (content === null) rmSync(CONFIG_FILE, { force: true });
+  else writeFileSync(CONFIG_FILE, content);
+}
+
+async function openConfigEditor(page) {
   await page.goto(servers.echo.url);
   await page.getByRole('button', { name: '설정' }).click();
   const settings = page.getByRole('dialog', { name: '설정' });
   await settings.getByRole('button', { name: '편집' }).click();
-
   const editor = page.getByRole('dialog', { name: 'Claude Code Config 편집' });
   await expect(editor).toBeVisible();
+  return editor;
+}
+
+test('설정 → Claude Code Config(JSON 탭) — 편집·저장이 파일에 반영되고 충돌은 거부된다', async ({ page }) => {
+  seedConfig(null); // 파일 없음 상태에서 시작
+  const editor = await openConfigEditor(page);
+
+  await editor.getByRole('tab', { name: 'JSON' }).click();
   const area = editor.getByLabel('settings.json 내용');
   // 아직 파일이 없으므로 빈 객체가 기준선이다
   await expect(area).toHaveValue('{}');
@@ -651,7 +668,7 @@ test('설정 → Claude Code Config — 편집·저장이 파일에 반영되고
   await expect(page.getByText('Claude Code 설정을 저장했습니다.', { exact: false })).toBeVisible();
 
   // 실제 파일에 반영됐는지 확인 — 격리된 e2e 설정 파일(global-setup의 FAKE_CLAUDE_CONFIG)
-  const configFile = path.join(here, '.state', 'claude-config', 'settings.json');
+  const configFile = CONFIG_FILE;
   expect(readFileSync(configFile, 'utf8')).toBe('{ "model": "opus" }');
 
   // 저장 뒤 기준선이 갱신돼 연속 저장이 자기 자신과 충돌하지 않는다
@@ -672,4 +689,96 @@ test('설정 → Claude Code Config — 편집·저장이 파일에 반영되고
   await expect(editor.getByRole('alert', { includeHidden: false }).last()).toContainText('저장하지 않은 변경');
   await editor.getByRole('button', { name: '변경 버리고 닫기' }).click();
   await expect(editor).toBeHidden();
+});
+
+test('Config 일반 탭 — 폼으로 고친 값이 파일에 반영되고 모르는 키는 보존된다', async ({ page }) => {
+  // 폼이 다루지 않는 hooks가 있는 파일로 시작 — 저장 뒤에도 그대로여야 한다.
+  seedConfig('{"hooks":{"Stop":[{"x":1}]},"model":"opus"}');
+  const editor = await openConfigEditor(page);
+
+  // 기본 탭이 폼(일반)이다
+  await expect(editor.getByRole('tab', { name: '일반' })).toHaveAttribute('aria-selected', 'true');
+  await expect(editor.getByLabel('모델')).toHaveValue('opus');
+  // 폼이 다루지 않는 키는 "그 외 항목"으로 알리기만 한다
+  await expect(editor.getByText('그 외 항목')).toBeVisible();
+
+  await editor.getByLabel('모델').fill('sonnet');
+  await editor.getByLabel('기본 권한 모드').selectOption('plan');
+  await editor.getByRole('button', { name: '저장' }).click();
+  await expect(page.getByText('Claude Code 설정을 저장했습니다.', { exact: false })).toBeVisible();
+
+  const saved = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'));
+  expect(saved.model).toBe('sonnet');
+  expect(saved.permissions.defaultMode).toBe('plan');
+  expect(saved.hooks).toEqual({ Stop: [{ x: 1 }] }); // 모르는 키 보존
+
+  // 폼 → JSON 탭: 같은 원문을 본다(탭마다 상태가 갈리지 않는다)
+  await editor.getByRole('tab', { name: 'JSON' }).click();
+  await expect(editor.getByLabel('settings.json 내용')).toHaveValue(/"defaultMode": "plan"/);
+
+  // JSON 탭에서 고친 값이 폼에 그대로 나타난다(반대 방향)
+  await editor.getByLabel('settings.json 내용').fill('{"model":"haiku"}');
+  await editor.getByRole('tab', { name: '일반' }).click();
+  await expect(editor.getByLabel('모델')).toHaveValue('haiku');
+
+  // 최상위가 객체가 아니면 폼은 값을 건드리지 않고 JSON 탭으로 보낸다.
+  // 패널 셋은 항상 DOM에 있고 보이지 않는 쪽만 hidden이라(탭의 aria-controls가
+  // 실재해야 한다) 안내 문구는 패널 범위로 좁혀 찾는다.
+  await editor.getByRole('tab', { name: 'JSON' }).click();
+  await editor.getByLabel('settings.json 내용').fill('[1,2]');
+  await editor.getByRole('tab', { name: '일반' }).click();
+  const generalPanel = editor.locator('#cfg-panel-general');
+  await expect(generalPanel.getByText('폼으로 다룰 수 없습니다', { exact: false })).toBeVisible();
+  await expect(editor.getByLabel('모델')).toHaveCount(0);
+  // 안내 버튼은 포커스를 원문 편집기로 넘긴다(누른 버튼이 사라지므로)
+  await generalPanel.getByRole('button', { name: 'JSON 탭으로 이동' }).click();
+  await expect(editor.getByLabel('settings.json 내용')).toBeFocused();
+});
+
+test('Config 플러그인 탭 — 켬/끔과 항목 제거가 enabledPlugins에 반영된다', async ({ page }) => {
+  // 설치 목록에 없는 찌꺼기 항목을 하나 넣어 둔다(정리 경로 확인).
+  seedConfig('{"enabledPlugins":{"gone@old-market":true}}');
+  const editor = await openConfigEditor(page);
+  await editor.getByRole('tab', { name: '플러그인' }).click();
+
+  // 설치 목록(global-setup 픽스처) + 설정에만 남은 항목이 함께 보인다
+  await expect(editor.getByText('미설치')).toBeVisible();
+  // 스코프가 둘인 항목은 설치 배지를 각각 보여 준다
+  await expect(editor.getByText('사용자 v2.0.0')).toBeVisible();
+  await expect(editor.getByText('프로젝트 v1.9.0')).toBeVisible();
+
+  // 설정에 항목이 없는 행은 스위치 대신 켜기·끄기 중에서 고른다
+  // ("끔"과 "설정 없음"은 다르므로 스위치 하나로는 표현할 수 없다)
+  await editor.getByRole('button', { name: '켜기: e2e-alpha@e2e-market' }).click();
+  const alpha = editor.getByRole('switch', { name: '플러그인 사용: e2e-alpha@e2e-market' });
+  await expect(alpha).toHaveAttribute('aria-checked', 'true');
+
+  // 찌꺼기 항목은 ✕로 제거한다(끔과 다르다 — 키 자체가 사라진다)
+  await editor.getByRole('button', { name: '설정에서 항목 제거: gone@old-market' }).click();
+
+  await editor.getByRole('button', { name: '저장' }).click();
+  await expect(page.getByText('Claude Code 설정을 저장했습니다.', { exact: false })).toBeVisible();
+  expect(JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))).toEqual({
+    enabledPlugins: { 'e2e-alpha@e2e-market': true },
+  });
+});
+
+test('Config — 설치 목록 조회가 실패해도 나머지 편집은 막히지 않는다', async ({ page }) => {
+  seedConfig('{"model":"opus","enabledPlugins":{"kept@m":true}}');
+  // 목록 조회만 죽인다(설정 로드는 정상) — 두 요청이 서로 독립임을 보는 게 목적이다.
+  await page.route('**/api/claude-plugins', (route) =>
+    route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' }));
+  const editor = await openConfigEditor(page);
+
+  await editor.getByRole('tab', { name: '플러그인' }).click();
+  await expect(editor.getByText('설치 목록을 불러오지 못했습니다', { exact: false })).toBeVisible();
+  // 설정에 기록된 항목은 목록 없이도 계속 다룰 수 있다
+  await expect(editor.getByRole('switch', { name: /kept@m/ })).toHaveAttribute('aria-checked', 'true');
+
+  // 일반 탭도 평소대로 — 폼으로 고쳐 저장까지 된다
+  await editor.getByRole('tab', { name: '일반' }).click();
+  await editor.getByLabel('모델').fill('sonnet');
+  await editor.getByRole('button', { name: '저장' }).click();
+  await expect(page.getByText('Claude Code 설정을 저장했습니다.', { exact: false })).toBeVisible();
+  expect(JSON.parse(readFileSync(CONFIG_FILE, 'utf8')).model).toBe('sonnet');
 });

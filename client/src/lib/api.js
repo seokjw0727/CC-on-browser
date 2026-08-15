@@ -120,6 +120,16 @@ export const saveClaudeConfig = ({ content, expectedMtimeMs = null }) =>
   });
 
 /**
+ * 설치된 플러그인 목록(읽기 전용) — Config 편집기의 "플러그인" 탭이 켬/끔 목록을
+ * 그릴 때 쓴다. 켬/끔 상태 자체는 settings.json의 enabledPlugins에 있다.
+ * 파일이 없으면 exists=false + 빈 목록(정상), 손상 파일은 400.
+ * @returns {Promise<{path: string, exists: boolean, plugins: [{
+ *   key, name, marketplace, installs: [{scope, projectPath, version, lastUpdated}]
+ * }]}>}
+ */
+export const fetchClaudePlugins = () => get('/api/claude-plugins');
+
+/**
  * OS 클립보드에 담긴 파일들의 절대경로 — 탐색기에서 복사한 파일을 붙여넣을 때 사본이
  * 아니라 원본 경로를 그대로 쓰기 위한 조회다(파일 내용이 아니라 경로 목록만 읽는다).
  * 브라우저 paste에 파일이 실려 있을 때만 호출한다. 스크린샷 비트맵·비Windows는 빈 배열.

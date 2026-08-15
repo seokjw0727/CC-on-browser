@@ -16,3 +16,17 @@ export const MODE_CLASS = {
   plan: 'mode-plan',
   bypassPermissions: 'mode-trust',
 };
+
+// 셀렉트용 한 줄 설명 — pill(공간이 좁다)은 MODE_LABEL만 쓰고, 목록에서 고르는
+// 자리(새 세션 모달·설정 기본값·Config 편집기)는 이 설명까지 붙인 라벨을 쓴다.
+export const MODE_DESC = {
+  default: '매번 확인',
+  acceptEdits: '파일 편집 자동 허용',
+  plan: '계획만, 실행 안 함',
+  bypassPermissions: '확인 없이 전부 실행',
+};
+
+export const PERMISSION_MODES = MODES.map((value) => ({
+  value,
+  label: `${MODE_LABEL[value]} — ${MODE_DESC[value]}`,
+}));

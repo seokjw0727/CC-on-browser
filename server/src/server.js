@@ -12,6 +12,7 @@ import { listProjects, listSessions, loadTranscript, listRecentSessions, deleteS
 import { listDirs, pickDirectory, searchFiles } from './fs-api.js';
 import { aggregateDailyUsage, aggregateUsage, MAX_DAILY_DAYS } from './usage.js';
 import { defaultConfigPath, readClaudeConfig, writeClaudeConfig } from './claude-config.js';
+import { defaultPluginsDir, listInstalledPlugins } from './claude-plugins.js';
 import { fetchQuota } from './quota.js';
 import { canonicalCwdSync, createRemoteControl } from './remote-control.js';
 import { createPreviewApi, PREVIEW_PREFIX } from './preview-api.js';
@@ -75,6 +76,8 @@ export async function startServer({
   // 설정 편집 API가 다루는 유일한 파일. 기본은 사용자 전역 ~/.claude/settings.json이며,
   // 테스트는 임시 경로를 주입해 실제 홈 설정을 절대 건드리지 않는다.
   claudeConfigPath = defaultConfigPath(),
+  // 설치된 플러그인 목록을 읽는 디렉터리(읽기 전용). 기본은 ~/.claude/plugins.
+  claudePluginsDir = defaultPluginsDir(),
   previewApi, // 테스트 주입용 — 기본은 preview-api.js의 티켓 저장소(시계·TTL 실제값)
   // 테스트 주입용 — 기본은 attachments.js의 실제 구현. 주입하면 실제 OS 클립보드
   // (PowerShell)와 공용 tmp의 붙여넣기 폴더를 건드리지 않는다.
@@ -691,6 +694,17 @@ export async function startServer({
           json(res, 200, { ...local, quota });
           return;
         }
+        case '/api/claude-plugins':
+          // 설정 편집기의 "플러그인" 탭 재료 — 설치 목록만 읽는다(켬/끔은 settings.json).
+          // 오류 분류를 여기서 끝내는 이유는 claude-config GET과 같다(아래 공통 catch의
+          // "그 외 400"에 맡기면 권한·IO 오류가 클라이언트 잘못으로 보고된다).
+          try {
+            json(res, 200, await listInstalledPlugins(claudePluginsDir));
+          } catch (err) {
+            if (err?.code === 'EINVALIDPLUGINS') json(res, 400, { error: String(err.message) });
+            else json(res, 500, { error: String(err?.message ?? err) });
+          }
+          return;
         case '/api/claude-config':
           // 설정 편집기(설정 → Claude Code Config)의 로드. 경로는 서버가 정한
           // 하나뿐이고, content는 원문 그대로 준다(사용자 포매팅·주석 없는 JSON 보존).

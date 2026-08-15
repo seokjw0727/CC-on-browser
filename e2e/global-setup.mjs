@@ -18,6 +18,9 @@ const PROJECTS_ROOT = path.join(STATE_DIR, 'projects');
 // Claude Code 설정 편집기가 다룰 파일 — 반드시 격리한다. 서버 기본값은 사용자의
 // 실제 ~/.claude/settings.json이라, 저장을 다루는 테스트가 진짜 CLI 설정을 덮어쓴다.
 const CLAUDE_CONFIG = path.join(STATE_DIR, 'claude-config', 'settings.json');
+// 설치 플러그인 목록(읽기 전용)도 격리한다 — 개발자 머신에 무엇이 깔려 있느냐에
+// 따라 플러그인 탭의 행 수가 달라지면 테스트가 결정적이지 않다.
+const CLAUDE_PLUGINS_DIR = path.join(STATE_DIR, 'claude-plugins');
 // preview 시나리오가 **실제 파일**을 쓰는 작업 디렉터리 — 레포가 아니라 테스트 소유
 // 임시 디렉터리여야 한다(teardown이 .state를 통째로 지운다).
 const PREVIEW_CWD = path.join(STATE_DIR, 'preview-cwd');
@@ -52,6 +55,27 @@ function seedProjects() {
   }
 }
 
+// 설치 플러그인 픽스처 — 스코프가 둘인 항목을 하나 넣어, 행 하나에 설치 레코드
+// 여러 개가 보이는 경우까지 UI가 다루는지 확인할 수 있게 한다.
+function seedPlugins() {
+  mkdirSync(CLAUDE_PLUGINS_DIR, { recursive: true });
+  writeFileSync(
+    path.join(CLAUDE_PLUGINS_DIR, 'installed_plugins.json'),
+    JSON.stringify({
+      version: 2,
+      plugins: {
+        'e2e-alpha@e2e-market': [
+          { scope: 'user', version: '1.0.0', lastUpdated: '2026-01-01T00:00:00.000Z' },
+        ],
+        'e2e-beta@e2e-market': [
+          { scope: 'user', version: '2.0.0', lastUpdated: '2026-01-02T00:00:00.000Z' },
+          { scope: 'project', projectPath: '/tmp/p', version: '1.9.0', lastUpdated: '2026-01-03T00:00:00.000Z' },
+        ],
+      },
+    }, null, 2),
+  );
+}
+
 function startFakeServer(scenario) {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -68,6 +92,7 @@ function startFakeServer(scenario) {
           FAKE_PROJECTS_ROOT: PROJECTS_ROOT,
           // 설정 편집 테스트가 실제 ~/.claude/settings.json을 건드리지 않게 한다.
           FAKE_CLAUDE_CONFIG: CLAUDE_CONFIG,
+          FAKE_CLAUDE_PLUGINS_DIR: CLAUDE_PLUGINS_DIR,
           // bulk 시나리오의 한 턴 분량 — 채팅 윈도잉(기본 창 200)의 경계를 넘겨야
           // "창 상한 · 더 보기 · 모두 불러오기"를 관측할 수 있다.
           FAKE_BULK_COUNT: '500',
@@ -138,6 +163,7 @@ export default async function globalSetup() {
   rmSync(STATE_DIR, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   // 서버를 띄우기 전에 시딩 — 첫 요청부터 목록이 결정적이어야 한다.
   seedProjects();
+  seedPlugins();
   // preview 시나리오가 파일을 쓸 격리 cwd. 스펙이 이 경로를 cwd 입력란에 넣는다.
   mkdirSync(PREVIEW_CWD, { recursive: true });
   const started = [];

@@ -1,6 +1,7 @@
 node_modules/
 client/dist/
 *.local
+.claude/settings.local.json
 .DS_Store
 
 # 로컬 개발/테스트 산출물 (커밋 제외)

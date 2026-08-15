@@ -44,6 +44,10 @@ const handle = await startServer({
   // 미설정 시 실제 ~/.claude/settings.json. 이 파일은 CLI 전체의 설정이라, 편집
   // 테스트를 격리하지 않으면 사용자의 진짜 설정을 덮어쓴다(projectsRoot와 같은 이유).
   claudeConfigPath: process.env.FAKE_CLAUDE_CONFIG || undefined,
+  // FAKE_CLAUDE_PLUGINS_DIR: E2E 전용 — 설치 플러그인 목록을 읽을 디렉터리.
+  // 미설정 시 실제 ~/.claude/plugins(읽기 전용이라 위험하진 않지만, 개발자 머신의
+  // 설치 목록에 따라 테스트 결과가 달라지므로 격리한다).
+  claudePluginsDir: process.env.FAKE_CLAUDE_PLUGINS_DIR || undefined,
 });
 
 console.log(`[dev-fake] scenario=${process.env.FAKE_SCENARIO || 'echo'}`);

@@ -34,7 +34,7 @@ import {
 import { MAX_TITLE_LEN, saveTitle, titleFor } from '../lib/session-titles.js';
 import { fmtAgo, fmtBytes, fmtReset, fmtTok } from '../lib/format.js';
 import { buildHeatmap } from '../lib/usage-grid.js';
-import { MODE_LABEL, MODE_CLASS, MODES } from '../lib/permission-modes.js';
+import { MODE_CLASS, PERMISSION_MODES } from '../lib/permission-modes.js';
 import {
   DEFAULT_MODEL_KEY,
   DEFAULT_MODE_KEY,
@@ -45,6 +45,7 @@ import {
 import { Sparkle, Mascot } from './Brand.jsx';
 import SessionMenu from './SessionMenu.jsx';
 import ConfigEditorModal from './ConfigEditorModal.jsx';
+import TrustModeWarning from './TrustModeWarning.jsx';
 import { useFocusTrap } from '../lib/useFocusTrap.js';
 import { usePresence } from '../lib/usePresence.js';
 import './interact.css';
@@ -54,18 +55,6 @@ const PAST_LIMIT_DEFAULT = 20;
 const PAST_LIMIT_MAX = 50;
 // 재개 잠금 안전망 — 트랜스크립트 요청이 끝내 정착하지 않을 때 잠금을 회수한다.
 const RESUME_BUSY_TIMEOUT_MS = 15_000;
-
-// 모달용 상세 설명 — 표시 이름·색 클래스는 permission-modes.js와 공유
-const MODE_DESC = {
-  default: '매번 확인',
-  acceptEdits: '파일 편집 자동 허용',
-  plan: '계획만, 실행 안 함',
-  bypassPermissions: '확인 없이 전부 실행',
-};
-const PERMISSION_MODES = MODES.map((value) => ({
-  value,
-  label: `${MODE_LABEL[value]} — ${MODE_DESC[value]}`,
-}));
 
 function fmtTime(ms) {
   if (!ms) return '';
@@ -77,16 +66,6 @@ function fmtTime(ms) {
 }
 
 const rowKeyOf = (s) => `${s.dirName}\n${s.sessionId}`;
-
-// 신뢰모드 선택 시의 공통 경고 — 새 세션 모달과 설정(기본 모드)이 함께 쓴다.
-function TrustModeWarning() {
-  return (
-    <div className="mode-warning">
-      ⚠ 신뢰모드(bypassPermissions): 모든 도구가 확인 없이 실행됩니다. 파일
-      수정·명령 실행이 즉시 반영되므로 신뢰할 수 있는 작업에만 사용하세요.
-    </div>
-  );
-}
 
 // ----- 새 세션 모달 (cwd = 윈도우 파일 탐색기로 선택 + 지난 세션 재개·삭제) -----
 function NewSessionModal({
