@@ -21,28 +21,53 @@ import { createJsonlParser } from '../src/jsonl.js';
 // `claude remote-control` 분기 — stream-json 루프에 **들어가기 전에** 처리해야 한다.
 // 이 인자로 불렸는데 아래 루프로 내려가면 오지 않을 stdin을 무한정 기다려, 원격 제어
 // 실패 경로 e2e가 통과 대신 멈춰 버린다.
-// 출력은 실 CLI(v2.1.220) 캡처를 그대로 미러한다 — ANSI 재그리기 포함.
-// FAKE_RC=fail 이면 로그인 실패 문구를 내고 즉시 종료(실패 경로용, 기본값).
-// FAKE_RC=ok   이면 Ready + URL을 내고 살아 있는다.
+// 출력은 실 CLI(v2.1.220 / v2.1.233) 캡처를 그대로 미러한다 — ANSI 재그리기 포함.
+// FAKE_RC=fail      로그인 실패 문구를 내고 즉시 종료(실패 경로용, 기본값).
+// FAKE_RC=ok        Ready + URL을 내고 살아 있는다.
+// FAKE_RC=prompt-ok v2.1.233의 최초 1회 동의 프롬프트를 **개행 없이** 낸 뒤 stdin의
+//                   'y'를 기다렸다가 Ready로 간다. 답이 없으면(=stdin이 ignore면)
+//                   실 CLI처럼 EOF에서 exit 0으로 조용히 죽는다.
+// FAKE_RC=untrusted 워크스페이스 신뢰 오류를 stderr로 내고 exit 1.
 if (process.argv.includes('remote-control')) {
   const ESC = String.fromCharCode(27); // 소스에 리터럴 제어문자를 두지 않는다
   const nameIdx = process.argv.indexOf('--name');
   const name = nameIdx >= 0 ? process.argv[nameIdx + 1] : 'fake';
   const mode = process.env.FAKE_RC || 'fail';
+  const env = process.env.FAKE_RC_ENV || 'env_fake123';
+  const readySeq = () =>
+    'Remote Control v2.1.220\nSpawn mode: same-dir\n'
+    + `Environment ID: ${env}\n`
+    + `${ESC}[1A${ESC}[J·|· Connecting · ${name} · master\n`
+    + `${ESC}[1A${ESC}[J·✔· Ready · ${name} · master\n`
+    + '    Capacity: 0/32 · New sessions will be created in the current directory\n'
+    + `Code anywhere with the Claude mobile app or https://claude.ai/code?environment=${env}\n`;
+  // 죽이기 전까지 살아 있어야 한다. 미해결 top-level await만으로는 부족하다 —
+  // Node가 "버려진 await"를 감지해 exit 13으로 종료한다(codex 지적, 실측 확인).
+  // 이벤트 루프를 붙잡는 실제 핸들이 필요하다.
+  const stayAlive = () => setInterval(() => {}, 1 << 30);
   if (mode === 'ok') {
-    const env = process.env.FAKE_RC_ENV || 'env_fake123';
-    process.stdout.write(
-      'Remote Control v2.1.220\nSpawn mode: same-dir\n'
-      + `Environment ID: ${env}\n`
-      + `${ESC}[1A${ESC}[J·|· Connecting · ${name} · master\n`
-      + `${ESC}[1A${ESC}[J·✔· Ready · ${name} · master\n`
-      + '    Capacity: 0/32 · New sessions will be created in the current directory\n'
-      + `Code anywhere with the Claude mobile app or https://claude.ai/code?environment=${env}\n`,
+    process.stdout.write(readySeq());
+    stayAlive();
+  } else if (mode === 'prompt-ok') {
+    process.stdout.write('Enable Remote Control? (y/n) '); // 개행 없음(실측)
+    process.stdin.setEncoding('utf8');
+    let answered = false;
+    process.stdin.on('data', (chunk) => {
+      if (answered || !String(chunk).toLowerCase().includes('y')) return;
+      answered = true;
+      process.stdout.write(`\n${readySeq()}`);
+      stayAlive();
+    });
+    // 실 CLI 미러: 아무도 답하지 않으면(stdin ignore → 즉시 EOF) 조용히 종료.
+    process.stdin.on('end', () => {
+      if (!answered) process.exit(0);
+    });
+  } else if (mode === 'untrusted') {
+    process.stderr.write(
+      'Error: Workspace not trusted. Please run `claude` in this directory first'
+      + ' to review and accept the workspace trust dialog.\n',
+      () => process.exit(1),
     );
-    // 죽이기 전까지 살아 있어야 한다. 미해결 top-level await만으로는 부족하다 —
-    // Node가 "버려진 await"를 감지해 exit 13으로 종료한다(codex 지적, 실측 확인).
-    // 이벤트 루프를 붙잡는 실제 핸들이 필요하다.
-    setInterval(() => {}, 1 << 30);
   } else {
     // 쓰기가 flush된 뒤에 종료한다 — process.exit()를 바로 부르면 파이프에 실린
     // 실패 문구가 잘려 나가고, 서버는 사유 없는 "예기치 않은 종료"만 보게 된다.

@@ -22,7 +22,7 @@ import {
   pickDirectory,
 } from '../lib/api.js';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
-import { createSessionState } from '../lib/store-reducer.js';
+import { createSessionState, remoteControlByCwd, remoteControlFor } from '../lib/store-reducer.js';
 import { isQuestionRequest } from '../lib/ask-user-question.js';
 import { statusDotOf } from '../lib/session-status.js';
 import {
@@ -66,6 +66,16 @@ function fmtTime(ms) {
 }
 
 const rowKeyOf = (s) => `${s.dirName}\n${s.sessionId}`;
+
+// 우클릭 메뉴의 원격 제어 항목이 툴팁으로 보여 줄 현재 상태. 켜짐일 때만 쓴다
+// (꺼짐·불가 사유는 아래에서 따로 만든다). 표시 문구의 주 출처는 컴포저의 📱 pill이고
+// 여기 있는 것은 메뉴 폭에 맞춘 한 줄 요약이다.
+const RC_STATE_TIP = {
+  starting: '원격 연결 중… — 누르면 취소하고 끕니다',
+  ready: 'claude.ai·모바일 앱에서 이 레포를 조종할 수 있습니다',
+  stopping: '원격 제어를 끄는 중입니다',
+  error: '원격 제어가 실패한 상태입니다 — 끄면 정리됩니다',
+};
 
 // ----- 새 세션 모달 (cwd = 윈도우 파일 탐색기로 선택 + 지난 세션 재개·삭제) -----
 function NewSessionModal({
@@ -914,7 +924,9 @@ function FootModalPresence({ panel, ...rest }) {
 
 // ----- 사이드바 본체 -----
 export default function Sidebar({ onCollapse, theme, onSetTheme }) {
-  const { state, dispatch, startSession, stopSession, renameSession, notify } = useStore();
+  const {
+    state, dispatch, startSession, stopSession, renameSession, setRemoteControl, notify,
+  } = useStore();
   const modalOpen = state.newSessionOpen;
   const openModal = () => dispatch({ type: 'open-new-session' });
   const closeModal = () => dispatch({ type: 'close-new-session' });
@@ -1093,6 +1105,58 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
   };
 
   const closeMenu = useCallback(() => setMenu(null), []);
+
+  /**
+   * 우클릭 메뉴의 "원격 제어 켜기/끄기" 항목.
+   *
+   * 상태의 출처는 서버가 보내는 스냅샷 하나뿐이다(컴포저 pill과 같은 규율) — 낙관적
+   * 갱신을 하지 않으므로, 누른 직후의 피드백은 "전송했다"는 토스트로 준다. 실제 켜짐
+   * 여부는 remoteControl 방송이 돌아와야 알 수 있다.
+   *
+   * 조회는 세션 key 우선, 없으면 cwd 폴백이다 — 세션이 먼저 끝나도 원격 제어는 계속
+   * 돌 수 있고 그때도 끌 수 있어야 한다(판정 근거는 store-reducer 주석 참조).
+   */
+  const remoteMenuItem = (rowKey) => {
+    const sess = state.sessions.get(rowKey);
+    const byKey = remoteControlFor(state, rowKey);
+    const rc = byKey ?? remoteControlByCwd(state, sess?.cwd ?? null);
+    // stopped는 "꺼짐"과 같다 — 껐다는 사실을 메뉴에 남길 이유가 없다.
+    const active = !!rc && rc.state !== 'stopped';
+    const offline = state.conn !== 'open';
+    // 켜기는 서버가 라이브 세션에서만 받아 준다(종료된 세션의 key로는 cwd를 못 찾는다).
+    // 눌러도 오류 토스트만 돌아오는 항목을 활성으로 두지 않는다.
+    const cannotStart = !active && sess?.status === 'exited';
+    const disabled = offline || rc?.state === 'stopping' || cannotStart;
+
+    let tip;
+    if (offline) tip = 'WebSocket이 연결되어 있지 않습니다';
+    else if (cannotStart) tip = '종료된 세션에서는 켤 수 없습니다';
+    else if (active) tip = RC_STATE_TIP[rc.state] ?? '';
+    else tip = 'claude.ai·모바일 앱에서 이 레포를 조종할 수 있게 켭니다';
+
+    const failed = () => notify('WebSocket이 연결되어 있지 않습니다.', 'error');
+    return {
+      key: 'remote',
+      icon: '📱',
+      label: active ? '원격 제어 끄기' : '원격 제어 켜기',
+      disabled,
+      tip,
+      onSelect: () => {
+        if (!active) {
+          if (setRemoteControl(rowKey, 'start')) notify('원격 제어를 켜는 중입니다…');
+          else failed();
+          return;
+        }
+        // 서버는 자기가 이미 알려 준 항목의 cwd만 받아들인다 — 임의 경로를 여는
+        // 권한이 아니라, 이미 도는 것 중에서 고르는 것이다.
+        const sent = byKey
+          ? setRemoteControl(rowKey, 'stop')
+          : setRemoteControl(null, 'stop', { cwd: rc.cwd });
+        if (sent) notify('원격 제어를 끕니다');
+        else failed();
+      },
+    };
+  };
 
   // 메뉴가 열려 있는 사이 세션이 사라지면(종료 유예 만료·재시작 대체) 조용히 닫는다.
   useEffect(() => {
@@ -1306,6 +1370,9 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
                 setRenaming({ rowKey: menu.rowKey, value: sess?.customTitle ?? '' });
               },
             },
+            // 원격 제어 ON/OFF — 컴포저 pill은 활성 세션만 다루므로, 다른 프로젝트의
+            // 라이브 세션까지 여기서 켜고 끌 수 있게 한다.
+            remoteMenuItem(menu.rowKey),
             // 실행 중이면 CLI 프로세스를 정지하고, 이미 끝난 세션이면 목록에서 치운다.
             // 같은 자리에서 다른 일을 하므로 라벨도 다르게 — "닫기"가 무엇을 하는지
             // 사용자가 눌러 보기 전에 알 수 있어야 한다.

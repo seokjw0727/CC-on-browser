@@ -309,6 +309,31 @@ test('한 cwd를 여러 세션이 공유하면 모두 같은 원격 제어를 �
   assert.equal(remoteControlFor(s, 's_9').cwd, '/other');
 });
 
+test('remoteControlByCwd는 서버가 묶어 준 cwds로 찾는다 (세션이 먼저 끝난 경우의 폴백)', async () => {
+  const { remoteControlByCwd } = await import('../src/lib/store-reducer.js');
+  let s = createInitialState();
+  s = reducer(s, serverMsg({
+    type: 'remoteControl',
+    // 세션이 끝나 keys는 비었지만 원격 제어는 계속 돈다. cwds에는 그 세션이 쓴
+    // 원본 철자(대소문자·심링크가 다를 수 있다)가 서버의 realpath 판정으로 담겨 온다.
+    states: [rcState({ keys: [], cwds: ['C:/Repo', 'C:/repo-link'] })],
+  }));
+  assert.equal(remoteControlByCwd(s, 'C:/Repo').cwd, '/repo');
+  assert.equal(remoteControlByCwd(s, 'C:/repo-link').cwd, '/repo', '같은 항목의 다른 철자');
+  // canonical cwd(r.cwd)는 매칭 근거가 아니다 — 클라이언트는 정규화를 할 수 없다
+  assert.equal(remoteControlByCwd(s, '/repo'), null);
+  assert.equal(remoteControlByCwd(s, 'C:/other'), null);
+  assert.equal(remoteControlByCwd(s, null), null);
+});
+
+test('remoteControlByCwd는 cwds가 없는 항목에서도 터지지 않는다', async () => {
+  const { remoteControlByCwd } = await import('../src/lib/store-reducer.js');
+  let s = createInitialState();
+  s = reducer(s, serverMsg({ type: 'remoteControl', states: [rcState()] })); // cwds 없음
+  assert.equal(remoteControlByCwd(s, 'C:/repo'), null);
+  assert.equal(remoteControlByCwd(createInitialState(), 'C:/repo'), null);
+});
+
 test('rename-session: 사용자 지정 이름을 설정·해제하고 없는 키는 무시한다', () => {
   let s = stateWithSession('a');
   assert.equal(s.sessions.get('a').customTitle, '');

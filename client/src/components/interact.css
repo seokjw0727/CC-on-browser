@@ -161,6 +161,17 @@
 .ctx-item.danger:focus-visible {
   color: var(--danger);
 }
+/* 지금은 고를 수 없는 항목(예: WS 끊김 중의 원격 제어) — 숨기지 않고 흐리게 남긴다.
+   숨기면 메뉴 항목이 상황에 따라 사라져 위치를 기억할 수 없다.
+   포커스는 받되(ARIA 메뉴 패턴) hover 강조는 주지 않는다 — 누를 수 있어 보이면 안 된다. */
+.ctx-item[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.ctx-item[aria-disabled='true']:hover {
+  color: var(--text-dim);
+  background: none;
+}
 .ctx-ico {
   flex: none;
   width: 14px;

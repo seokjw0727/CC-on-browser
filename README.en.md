@@ -118,9 +118,11 @@ Already running (v1.8.0) on port 8787 — opened a new browser tab.
 - **Remote Control** — the `📱 원격 제어` pill above the input starts
   `claude remote-control` for the open repository, so you can drive it from
   claude.ai/code and the Claude mobile app. The popover holds the connect link, a
-  copy button and a stop button. **While it is on, closing the browser does not
-  shut the app down** (that is the whole point) — turn it off when you are done.
-  Read [SECURITY.md](SECURITY.md) for what it exposes.
+  copy button and a stop button. **Right-clicking a session row in the sidebar**
+  (Shift+F10 from the keyboard) toggles it too, which also reaches sessions in
+  projects you are not currently looking at. **While it is on, closing the browser
+  does not shut the app down** (that is the whole point) — turn it off when you are
+  done. Read [SECURITY.md](SECURITY.md) for what it exposes.
 - **Running-work dock** — background shells, background agents and in-flight tools
   are listed *below* the input; click one to jump to its card in the transcript.
   The list comes from the CLI's own running-task snapshot, so it shows exactly
@@ -170,6 +172,7 @@ Already running (v1.8.0) on port 8787 — opened a new browser tab.
 | --- | --- |
 | `WARNING: claude CLI not found` | CLI not installed or not on PATH. [Install it](https://claude.com/claude-code), check `claude` runs in a terminal, or set `CLAUDE_WEB_CLI_PATH` to its absolute path. |
 | Sessions fail to start | CLI not logged in — run `claude`, then `/login`. |
+| Remote control fails with `Workspace not trusted` | You have not accepted that folder's trust dialog yet. Run `claude` once in that directory and accept it, then turn remote control back on (the app will not accept it for you — that is a security decision). |
 | A console window flashes on launch | That window comes from npm's `.cmd` shim. Use the shortcut created by `cc-on-browser --shortcut` and no console appears ([see above](#launching-without-a-console-window-windows)). |
 | `Port 8787 is already in use` | Another program owns that port, or one of our own instances is there but **could not be recognized** (older version, missing or corrupt instance file). When it is recognized you get a new tab instead of an error — otherwise pick another port: `cc-on-browser --port 9000`. |
 | 401 / blank page | You opened a URL without the token — use the full printed `#token=` URL. |

@@ -8,6 +8,43 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.9.3] - 2026-08-17
+
+> 원격 제어가 켜지지 않던 문제를 고쳤습니다 — CLI가 새로 묻는 동의 프롬프트에
+> 앱이 답을 주지 못해 연결 전에 조용히 종료되고 있었습니다. 이제 사이드바 세션
+> 행을 우클릭해서도 원격 제어를 켜고 끌 수 있습니다.
+> (Fixes remote control never starting — the CLI's new consent prompt went
+> unanswered, so it exited silently before connecting. You can now toggle remote
+> control by right-clicking a session row in the sidebar, too.)
+
+### Fixed
+- **Remote control starts again — the CLI's consent prompt no longer kills it
+  silently.** Since CLI v2.1.233 `claude remote-control` asks
+  `Enable Remote Control? (y/n)` on stdout, without a trailing newline, and waits
+  for stdin. The app spawned it with `stdin: 'ignore'`, so the CLI hit EOF and
+  exited 0 before connecting — leaving only "원격 제어가 예기치 않게 종료되었습니다
+  (exit code 0)". Because the CLI records that consent globally
+  (`remoteDialogSeen`), it worked on machines where the prompt had already been
+  answered in a terminal and always failed elsewhere, which is why it looked
+  intermittent. The manager now keeps stdin open and answers the prompt once —
+  pressing "원격 제어 켜기" in the UI *is* the consent — detecting it in the
+  unterminated buffer so a redraw or a chunk boundary cannot hide it.
+- **Workspace-trust failures now say what to do.** That error arrives on stderr,
+  where error markers were not being matched, so it was buried in a generic
+  "unexpected exit" message. The CLI's own instruction (run `claude` in that
+  directory once and accept the trust dialog) is surfaced verbatim instead. Late
+  stderr arriving while you are turning remote control *off* no longer flips the
+  result to a failure.
+
+### Added
+- **Turn remote control on/off from the sidebar.** Right-clicking a session row
+  (Shift+F10 for keyboards) now offers `📱 원격 제어 켜기/끄기` between "이름 변경"
+  and "세션 종료", so sessions in *other* projects can be controlled too — the
+  composer pill only ever covered the active one. The item reflects the server
+  snapshot (never an optimistic guess), keeps working through the cwd fallback
+  when the session ended but remote control is still running, and greys out with
+  the reason when the socket is down or the session has exited.
+
 ## [1.9.1] - 2026-08-11
 
 > 탐색기에서 복사한 파일이나 방금 찍은 스크린샷을 입력창에 그대로 붙여넣으면

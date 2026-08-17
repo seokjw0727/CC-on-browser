@@ -4,6 +4,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   createRemoteControl,
   parseRemoteControlLine,
@@ -101,6 +105,14 @@ class FakeChild extends EventEmitter {
     this.stdout.setEncoding = () => {};
     this.stderr = new EventEmitter();
     this.stderr.setEncoding = () => {};
+    // stdin에 쓰인 것을 그대로 모은다 — 동의 프롬프트 응답을 검사하기 위해.
+    // 실제 자식처럼 EventEmitter이기도 하다(관리자가 'error'를 구독한다).
+    this.stdinWrites = [];
+    this.stdin = new EventEmitter();
+    this.stdin.write = (s) => {
+      this.stdinWrites.push(String(s));
+      return true;
+    };
   }
 
   /** 자식이 스스로 종료한 것으로 만든다. */
@@ -487,6 +499,154 @@ test("'Ready'라는 이름의 브랜치가 거짓 ready를 만들지 않는다",
 
 test('포트가 붙은 claude.ai는 거부한다', () => {
   assert.equal(parseRemoteUrl('https://claude.ai:444/code?environment=env_a'), null);
+});
+
+// ---------- v2.1.233 동의 프롬프트 / stderr 오류 (2026-08-17 실측) ----------
+
+test('stdin을 연 채로 띄운다 (ignore면 동의 프롬프트에서 즉시 EOF로 죽는다)', async () => {
+  const { rc, spawned } = harness();
+  await rc.start('C:/repo');
+  assert.deepEqual(spawned[0].opts.stdio, ['pipe', 'pipe', 'pipe']);
+});
+
+test('개행 없는 동의 프롬프트에 y로 답하고 이후 Ready까지 간다', async () => {
+  const { rc, spawned } = harness();
+  await rc.start('C:/repo');
+  const { child } = spawned[0];
+  // 실측 캡처 그대로 — 안내문은 개행으로 끝나지만 프롬프트 줄은 개행이 없다.
+  child.stdout.emit('data', '\nTake this session with you …\n\n');
+  child.stdout.emit('data', 'Enable Remote Control? (y/n) ');
+  assert.deepEqual(child.stdinWrites, ['y\n'], '개행을 기다리면 영원히 못 답한다');
+  child.stdout.emit('data', '\n·|· Connecting · CC-on-browser · master\n');
+  assert.equal(rc.snapshot()[0].state, 'starting');
+  child.stdout.emit('data', `${ESC}[1A${ESC}[J·✔︎· Ready · CC-on-browser · master\n`);
+  assert.equal(rc.snapshot()[0].state, 'ready');
+});
+
+test('프롬프트가 재그리기로 여러 번 와도 응답은 한 번뿐이다', async () => {
+  const { rc, spawned } = harness();
+  await rc.start('C:/repo');
+  const { child } = spawned[0];
+  child.stdout.emit('data', 'Enable Remote Control? (y/n) ');
+  child.stdout.emit('data', `${ESC}[1A${ESC}[JEnable Remote Control? (y/n) `);
+  // 두 번째 'y'는 런타임 단축키(space·w 같은)로 해석될 수 있다 — 반드시 1회.
+  assert.deepEqual(child.stdinWrites, ['y\n']);
+});
+
+test('청크 경계로 프롬프트가 쪼개져도 답한다', async () => {
+  const { rc, spawned } = harness();
+  await rc.start('C:/repo');
+  const { child } = spawned[0];
+  child.stdout.emit('data', 'Enable Remote ');
+  assert.deepEqual(child.stdinWrites, []);
+  child.stdout.emit('data', 'Control? (y/n) ');
+  assert.deepEqual(child.stdinWrites, ['y\n']);
+});
+
+test('stdin write가 던져도 시작 절차가 깨지지 않는다', async () => {
+  const { rc, spawned } = harness();
+  await rc.start('C:/repo');
+  const { child } = spawned[0];
+  child.stdin.write = () => { throw new Error('EPIPE'); };
+  child.stdout.emit('data', 'Enable Remote Control? (y/n) ');
+  child.stdout.emit('data', '\n·✔︎· Ready · CC-on-browser · master\n');
+  assert.equal(rc.snapshot()[0].state, 'ready');
+});
+
+test('stderr의 workspace 신뢰 오류가 구체적 사유로 올라온다', async () => {
+  const { rc, spawned } = harness();
+  await rc.start('C:/repo');
+  const { child } = spawned[0];
+  child.stderr.emit(
+    'data',
+    'Error: Workspace not trusted. Please run `claude` in C:/repo first to review'
+      + ' and accept the workspace trust dialog.\n',
+  );
+  const [st] = rc.snapshot();
+  assert.equal(st.state, 'error');
+  assert.match(st.error, /Workspace not trusted/);
+  assert.match(st.error, /accept the workspace trust dialog/, '사용자가 할 일이 문구에 남아야 한다');
+  // 뒤이은 종료가 이 구체적 사유를 일반 문구로 덮지 않는다
+  child.die(1);
+  assert.match(rc.snapshot()[0].error, /Workspace not trusted/);
+  assert.doesNotMatch(rc.snapshot()[0].error, /exit code/);
+});
+
+// 아래 두 개만 **진짜 프로세스**를 띄운다. 주입 harness는 우리가 만든 FakeChild를
+// 상대하므로 stdio 옵션이 틀려도 통과한다 — 이 회귀(stdin: 'ignore')는 실제 spawn으로만
+// 잡힌다. CLI 자리에는 실 출력을 미러하는 fake-cli.mjs를 세운다.
+const fakeCliPath = fileURLToPath(new URL('./fake-cli.mjs', import.meta.url));
+
+/** 조건이 참이 될 때까지 실제 시간으로 폴링(상한 있음). */
+async function waitUntil(pred, label, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (pred()) return;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  assert.fail(`조건이 성립하지 않았습니다: ${label}`);
+}
+
+/** fake-cli를 실제로 띄우는 관리자 + 일회용 cwd. */
+async function realHarness(fakeRcMode) {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'ccob-rc-'));
+  const rc = createRemoteControl({
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    // 자식이 환경을 물려받는다 — 모드는 env로 넘긴다(fake-cli 계약).
+    stopGraceMs: 2_000,
+  });
+  const prev = process.env.FAKE_RC;
+  process.env.FAKE_RC = fakeRcMode;
+  const cleanup = async () => {
+    await rc.closeAll();
+    if (prev === undefined) delete process.env.FAKE_RC;
+    else process.env.FAKE_RC = prev;
+    await fsp.rm(dir, { recursive: true, force: true });
+  };
+  return { rc, dir, cleanup };
+}
+
+test('실 프로세스: 동의 프롬프트를 넘어 ready·URL까지 간다 (stdio 회귀 방지)', async () => {
+  const { rc, dir, cleanup } = await realHarness('prompt-ok');
+  try {
+    await rc.start(dir, { name: 'rc real' });
+    // stdin이 ignore면 fake-cli가 EOF에서 exit 0으로 죽어 여기서 error로 굳는다.
+    await waitUntil(() => rc.snapshot()[0]?.state === 'ready', 'ready 도달');
+    const [st] = rc.snapshot();
+    assert.equal(st.error, null);
+    assert.equal(st.environmentId, 'env_fake123');
+    assert.match(st.url, /^https:\/\/claude\.ai\/code\?environment=env_fake123$/);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('실 프로세스: stderr로만 오는 신뢰 오류가 사유와 함께 표면화된다', async () => {
+  const { rc, dir, cleanup } = await realHarness('untrusted');
+  try {
+    await rc.start(dir);
+    await waitUntil(() => rc.snapshot()[0]?.state === 'error', 'error 도달');
+    const [st] = rc.snapshot();
+    assert.match(st.error, /Workspace not trusted/);
+    assert.match(st.error, /accept the workspace trust dialog/);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('중지 중 도착한 stderr 오류가 최종 상태를 가로채지 않는다', async () => {
+  const { rc, spawned } = harness({ autoKill: false });
+  await rc.start('C:/repo');
+  const { child } = spawned[0];
+  const stopping = rc.stop('C:/repo');
+  await until(() => rc.snapshot()[0].state === 'stopping', 'stopping 진입');
+  child.stderr.emit('data', 'Error: Workspace not trusted.\n');
+  child.die(1);
+  await stopping;
+  const [st] = rc.snapshot();
+  assert.equal(st.state, 'stopped', '사용자가 끈 것이다 — 실패로 보이면 안 된다');
+  assert.equal(st.error, null);
 });
 
 test('나중에 온 Environment ID 줄이 URL에서 얻은 id를 덮지 않는다', async () => {

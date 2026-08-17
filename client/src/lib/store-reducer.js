@@ -120,6 +120,20 @@ export function remoteControlFor(state, key) {
   return (state.remoteControls ?? []).find((r) => r.keys?.includes(key)) ?? null;
 }
 
+/**
+ * 세션 cwd로 찾는 폴백 — 세션이 먼저 끝나면 서버의 keys에서 빠지지만 원격 제어는
+ * 계속 돌 수 있고, 그때도 끌 수 있어야 한다.
+ *
+ * 판정 근거는 서버가 realpath로 묶어 내려준 `cwds` 목록이다. raw cwd 문자열을
+ * `r.cwd`와 직접 비교하면 심링크·junction·대소문자·끝 구분자에서 어긋난다 —
+ * 정규화는 서버만 할 수 있다. RemotePill과 사이드바 메뉴가 같은 판정을 쓰도록
+ * 여기 한 곳에 둔다.
+ */
+export function remoteControlByCwd(state, cwd) {
+  if (!cwd) return null;
+  return (state.remoteControls ?? []).find((r) => (r.cwds ?? []).includes(cwd)) ?? null;
+}
+
 function updateSession(state, key, fn) {
   const cur = state.sessions.get(key);
   if (!cur) return state;

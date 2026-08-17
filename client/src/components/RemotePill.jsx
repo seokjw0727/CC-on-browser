@@ -5,7 +5,7 @@
 // 조회 키가 cwd가 아니라 세션 key인 이유는 store-reducer의 remoteControlFor 주석 참조.
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../lib/store.jsx';
-import { remoteControlFor } from '../lib/store-reducer.js';
+import { remoteControlByCwd, remoteControlFor } from '../lib/store-reducer.js';
 
 const LABEL = {
   starting: '원격 연결 중…',
@@ -32,17 +32,10 @@ export default function RemotePill({ session }) {
   const wrapRef = useRef(null);
 
   const byKey = remoteControlFor(state, session?.key ?? null);
-  // 세션이 먼저 끝나면 서버의 keys에서 빠지지만 원격 제어는 계속 돌 수 있다. 그때도
-  // 끌 수 있어야 하므로, key로 못 찾으면 이 세션의 cwd와 정확히 같은 항목을 폴백으로
-  // 쓴다(표시·중지 전용). 중지는 그 항목의 cwd를 그대로 되돌려 보낸다 — 서버는 자기가
-  // 이미 알려 준 항목만 받아들이므로 임의 경로를 여는 권한이 되지 않는다.
-  // 매칭 근거는 서버가 realpath로 묶어 내려준 cwds 목록이다. 여기서 raw session.cwd를
-  // r.cwd와 직접 비교하면 심링크·junction·대소문자·끝 구분자에서 어긋난다(codex 지적).
-  const byCwd = byKey
-    ? null
-    : (state.remoteControls ?? []).find(
-      (r) => session?.cwd && (r.cwds ?? []).includes(session.cwd),
-    ) ?? null;
+  // key로 못 찾으면 cwd 폴백(표시·중지 전용) — 세션이 먼저 끝난 원격 제어를 끄는 경로.
+  // 중지는 그 항목의 cwd를 그대로 되돌려 보낸다 — 서버는 자기가 이미 알려 준 항목만
+  // 받아들이므로 임의 경로를 여는 권한이 되지 않는다. 판정 근거는 store-reducer 주석 참조.
+  const byCwd = byKey ? null : remoteControlByCwd(state, session?.cwd ?? null);
   const rc = byKey ?? byCwd;
   // stopped는 "꺼짐"과 같다 — 껐다는 사실을 pill에 남길 이유가 없다.
   const active = !!rc && rc.state !== 'stopped';

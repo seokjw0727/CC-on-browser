@@ -1,10 +1,12 @@
 // remote-control.js — `claude remote-control` 자식 프로세스 관리 + 그 출력 파서.
 // claude-session.js와 같은 규율: 미문서 CLI 표면 지식은 이 파일 하나에 격리한다.
 //
-// 이 파일의 모든 형식 지식은 추측이 아니라 실측이다(2026-07-30, CLI v2.1.220, win32).
+// 이 파일의 모든 형식 지식은 추측이 아니라 실측이다(2026-07-30, CLI v2.1.220, win32;
+// 2026-08-17에 v2.1.233으로 재실측).
 // 근거와 원시 캡처: .certify/design/2026-07-30-remote-control-running-dock-timestamps.html §3.1.2
+//                  .certify/design/2026-08-17-remote-control-sidebar-toggle.html §2
 //
-// 실측에서 나온 세 가지 설계 제약:
+// 실측에서 나온 다섯 가지 설계 제약:
 //  1) `Environment ID:` 줄은 -v일 때만 나온다. URL 줄은 항상 나온다 →
 //     환경 ID의 단일 진실은 URL이다(우리가 -v를 주더라도).
 //  2) CLI는 같은 디렉터리의 2중 실행을 막아 주지 않는다(둘 다 Ready까지 간다) →
@@ -12,6 +14,13 @@
 //     CLI까지 막을 수는 없다.
 //  3) 출력은 ESC[<N>A ESC[J 로 직전 N줄을 지우고 다시 그린다 → 같은 줄이 여러 번 온다.
 //     그래서 파서는 멱등해야 하고, "알 수 없는 줄"은 아무 전이도 만들지 않아야 한다.
+//  4) v2.1.233부터 최초 1회 동의 프롬프트 `Enable Remote Control? (y/n) `가 stdout에
+//     **개행 없이** 나오고 stdin 응답을 기다린다. stdin을 ignore로 주면 즉시 EOF →
+//     CLI가 exit 0으로 조용히 종료한다("가끔 안 켜지던" 문제의 정체. 동의 여부는
+//     ~/.claude.json의 전역 remoteDialogSeen에 저장되므로, 터미널에서 한 번 동의한
+//     환경에서만 우연히 동작했다) → stdin을 열고 프롬프트에 우리가 답한다.
+//  5) 워크스페이스 신뢰 미승인 폴더에서는 오류가 **stderr**로 나온다 →
+//     오류 마커 매칭을 stdout 전용으로 두면 구체 사유를 잃는다.
 //
 // 동시성 규율: start/stop/closeAll은 **하나의 직렬 큐**를 통과한다. 원격 제어 조작은
 // 사용자가 버튼을 누를 때만 일어나는 희귀 이벤트라, 전역 직렬화의 비용은 없는 것과
@@ -70,7 +79,19 @@ const ERROR_MARKERS = [
   'is already running in this directory',
   'Remote Control session expired.',
   'Remote Control Failed',
+  // v2.1.233 실측: stderr로 나온다. 사용자가 직접 해야 할 일(해당 폴더에서 `claude`를
+  // 한 번 실행해 신뢰 대화상자 승인)이 문구에 들어 있으므로 그대로 올려 준다.
+  'Workspace not trusted',
 ];
+
+/**
+ * 동의 프롬프트 문구(v2.1.233 실측). **개행 없이** 나오고 stdin을 기다리므로,
+ * 완성 줄이 아니라 아직 개행을 못 만난 잔여 버퍼에서도 찾아야 한다.
+ * 문구가 바뀌어도 오작동하지 않는다 — 못 찾으면 그냥 예전처럼 대기하다 종료될 뿐이다.
+ */
+export const CONSENT_PROMPT = 'Enable Remote Control?';
+/** 프롬프트에 보낼 응답. 사용자가 UI에서 "켜기"를 누른 행위가 곧 동의다. */
+const CONSENT_ANSWER = 'y\n';
 
 /**
  * CSI 시퀀스와 고립 ESC 제거. 실측상 CR은 없었지만 방어적으로 함께 지운다.
@@ -115,6 +136,22 @@ export function parseRemoteUrl(line) {
 }
 
 /**
+ * 알려진 실패 문구가 들어 있으면 그 줄을 오류 사유로 돌려준다(부분 일치, 없으면 null).
+ *
+ * 실측된 상태 줄은 전부 '·'로 칸이 나뉘고, 실측된 오류 줄은 전부 평문이다.
+ * 오류 문구를 상태 줄에서 찾지 않음으로써 레포/브랜치 이름이 거짓 오류를 만드는 길을 막는다.
+ * stdout(파서)과 stderr(feedErr)가 **같은 판정**을 쓰도록 여기로 뽑아 두었다.
+ */
+export function matchErrorMarker(rawLine) {
+  const line = stripAnsi(rawLine).trim();
+  if (!line || line.includes('·')) return null;
+  for (const marker of ERROR_MARKERS) {
+    if (line.includes(marker)) return line;
+  }
+  return null;
+}
+
+/**
  * 출력 한 줄 → 부분 상태 패치. 모르는 줄이면 null(= 전이 없음).
  * 순수 함수 — node --test로 고정한다.
  * @returns {null | {state?, environmentId?, url?, capacity?, error?, idFromUrl?}}
@@ -123,13 +160,8 @@ export function parseRemoteControlLine(rawLine) {
   const line = stripAnsi(rawLine).trim();
   if (!line) return null;
 
-  // 실측된 상태 줄은 전부 '·'로 칸이 나뉘고, 실측된 오류 줄은 전부 평문이다.
-  // 오류 문구를 상태 줄에서 찾지 않음으로써 레포/브랜치 이름이 거짓 오류를 만드는 길을 막는다.
-  if (!line.includes('·')) {
-    for (const marker of ERROR_MARKERS) {
-      if (line.includes(marker)) return { error: line };
-    }
-  }
+  const marked = matchErrorMarker(line);
+  if (marked) return { error: marked };
 
   const patch = {};
 
@@ -272,6 +304,9 @@ export function createRemoteControl({
       if (k === 'error') {
         // 구체적으로 파싱된 오류가 먼저다 — 나중의 일반적 종료 사유가 덮지 않는다.
         if (entry.error != null) continue;
+        // 중지 중에는 죽어 가는 자식의 마지막 출력이 최종 상태를 정하지 못한다 —
+        // 그 판정은 stop()의 대기자 몫이다(state 가드와 같은 규율).
+        if (entry.state === 'stopping') continue;
         entry.error = v;
         entry.state = 'error';
         changed = true;
@@ -299,9 +334,33 @@ export function createRemoteControl({
     return changed;
   };
 
+  /**
+   * 동의 프롬프트가 보이면 한 번만 답한다.
+   *
+   * 판정 입력은 "이번 청크 + 아직 개행을 못 만난 잔여"다 — 프롬프트가 개행 없이
+   * 끝나므로 완성 줄만 보면 영원히 못 찾는다. 재그리기로 같은 문구가 여러 번 와도
+   * entry.consentAnswered가 응답을 1회로 묶는다(두 번 쓰면 두 번째 'y'가 런타임
+   * 키 입력으로 해석될 수 있다 — 실측상 space/w가 런타임 단축키다).
+   */
+  const maybeAnswerConsent = (entry) => {
+    // 답한 뒤에는 남은 수명 내내 스트립 비용조차 치르지 않는다(가드가 먼저다).
+    if (entry.consentAnswered) return;
+    if (!stripAnsi(entry.buf).includes(CONSENT_PROMPT)) return;
+    entry.consentAnswered = true;
+    // stdin이 이미 닫혔거나(자식 종료 경합) EPIPE여도 시작 절차를 깨뜨리지 않는다.
+    try {
+      entry.child?.stdin?.write(CONSENT_ANSWER);
+    } catch {
+      /* 자식이 이미 사라짐 — close 핸들러가 사유를 보고한다 */
+    }
+  };
+
   /** 완성된 줄만 파싱하고, 남은 조각은 그 뒤에 상한을 건다(선-파싱 후-절단). */
   const feed = (entry, chunk) => {
     entry.buf += chunk;
+    // 절단·소비 전에 본다 — 프롬프트는 개행이 없어 아래 루프가 소비하지 못하고,
+    // MAX_LINE_LEN 절단만 남으면 문구가 잘려 나갈 수 있다.
+    maybeAnswerConsent(entry);
     let changed = false;
     let idx;
     while ((idx = entry.buf.indexOf('\n')) >= 0) {
@@ -326,27 +385,37 @@ export function createRemoteControl({
     return patch ? apply(entry, patch) : false;
   };
 
+  /**
+   * stderr 한 줄 — 꼬리에 쌓고, 알려진 실패 문구면 **구체적 오류로 승격**한다.
+   * @returns {boolean} 오류로 승격돼 상태가 바뀌었으면 true
+   */
+  const takeErrLine = (entry, line) => {
+    if (!line) return false;
+    entry.stderrTail = [...entry.stderrTail, line.slice(0, STDERR_TAIL_LINE_LEN)]
+      .slice(-STDERR_TAIL_LINES);
+    // 워크스페이스 신뢰 미승인처럼 사용자가 조치할 수 있는 사유는 stderr로 온다
+    // (실측 v2.1.233). 꼬리로만 두면 "예기치 않게 종료(exit code 1)"에 파묻힌다.
+    const marked = matchErrorMarker(line);
+    return marked ? apply(entry, { error: marked }) : false;
+  };
+
   const feedErr = (entry, chunk) => {
     entry.errBuf += chunk;
+    let changed = false;
     let idx;
     while ((idx = entry.errBuf.indexOf('\n')) >= 0) {
       const line = stripAnsi(entry.errBuf.slice(0, idx)).trim();
       entry.errBuf = entry.errBuf.slice(idx + 1);
-      if (line) {
-        entry.stderrTail = [...entry.stderrTail, line.slice(0, STDERR_TAIL_LINE_LEN)]
-          .slice(-STDERR_TAIL_LINES);
-      }
+      if (takeErrLine(entry, line)) changed = true;
     }
     if (entry.errBuf.length > MAX_LINE_LEN) entry.errBuf = entry.errBuf.slice(-MAX_LINE_LEN);
+    if (changed) emitChange();
   };
 
   const flushErr = (entry) => {
     const rest = stripAnsi(entry.errBuf).trim();
     entry.errBuf = '';
-    if (rest) {
-      entry.stderrTail = [...entry.stderrTail, rest.slice(0, STDERR_TAIL_LINE_LEN)]
-        .slice(-STDERR_TAIL_LINES);
-    }
+    return takeErrLine(entry, rest);
   };
 
   const onChildClose = (entry, generation, code, signal) => {
@@ -374,7 +443,9 @@ export function createRemoteControl({
     const args = [...cliArgsPrefix, 'remote-control', '--name', entry.name, '-v'];
     const child = spawnFn(cliPath, args, {
       cwd: entry.cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      // stdin을 **연다**. ignore로 두면 최초 1회 동의 프롬프트에서 CLI가 즉시 EOF를
+      // 받고 exit 0으로 조용히 종료한다(파일 머리 실측 ④).
+      stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       // POSIX에서만 자기 프로세스 그룹을 준다 — stop()이 그룹 전체를 시그널하기 위해.
       // win32는 taskkill /T가 트리를 처리하므로 detached가 필요 없다.
@@ -382,6 +453,10 @@ export function createRemoteControl({
     });
     entry.child = child;
     const { generation } = entry;
+
+    // 자식이 stdin을 닫은 뒤 우리가 쓰면 EPIPE가 'error'로 올라온다 — 핸들러가
+    // 없으면 그게 데몬 전체를 죽인다. 삼키고, 사유 보고는 close 경로에 맡긴다.
+    child.stdin?.on('error', () => {});
 
     child.stdout?.setEncoding('utf8');
     child.stdout?.on('data', (c) => {
@@ -542,6 +617,8 @@ export function createRemoteControl({
       generation: (existing?.generation ?? 0) + 1,
       child: null,
       closedSeen: false,
+      // 동의 프롬프트에 이미 답했는가 — 재그리기로 문구가 여러 번 와도 응답은 1회.
+      consentAnswered: false,
       stderrTail: [],
       buf: '',
       errBuf: '',

@@ -140,7 +140,16 @@ export default function SessionMenu({ anchor, label, items, onClose, restoreRef 
           type="button"
           role="menuitem"
           className={`ctx-item${it.danger ? ' danger' : ''}`}
+          // 진짜 disabled가 아니라 aria-disabled다. 두 가지 이유가 같은 곳을 가리킨다:
+          // ① ARIA 메뉴 패턴은 비활성 항목도 포커스 가능하게 두라고 한다(보조기술
+          //    사용자가 "지금은 못 쓴다"는 사실 자체를 알 수 있어야 한다).
+          // ② 툴팁 레이어는 document의 mouseover 위임으로 [data-tip]을 찾는데,
+          //    진짜 disabled 버튼은 마우스 이벤트를 내지 않는다 — 왜 못 누르는지
+          //    설명하는 툴팁이 정작 필요한 순간에만 뜨지 않는다.
+          aria-disabled={it.disabled || undefined}
+          data-tip={it.tip || undefined}
           onClick={() => {
+            if (it.disabled) return; // 눌러도 아무 일도 없다(메뉴는 열린 채)
             onClose();
             it.onSelect();
           }}

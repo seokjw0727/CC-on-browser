@@ -453,6 +453,54 @@ test('원격 제어 pill — 실패 경로가 사유와 함께 팝오버에 뜬�
   await expect(pop).toBeHidden();
 });
 
+test('사이드바 우클릭 — 원격 제어를 켜고 끌 수 있다', async ({ page }) => {
+  // 가짜 CLI는 FAKE_RC 기본값(fail)이라 켜기는 곧바로 실패로 끝난다. 여기서 보는 것은
+  // "메뉴 항목이 실제로 서버까지 명령을 보내고, 돌아온 상태로 라벨이 뒤집히는가"다 —
+  // 실제 claude.ai 연결은 e2e에서 만들지 않는다(pill 테스트와 같은 규율).
+  await startSession(page, servers.echo.url);
+  const row = page.locator('.sess-row.live').first();
+  const menu = page.getByRole('menu', { name: '세션 메뉴' });
+  const pill = page.locator('.remote-pill');
+
+  // 원격 제어 상태는 **서버가** 들고 있어 페이지를 새로 열어도 남는다 — 앞선
+  // 테스트(pill 실패 경로)가 켜 둔 채 끝났을 수 있으므로 먼저 꺼짐으로 맞춘다.
+  await row.click({ button: 'right' });
+  const turnOff = menu.getByRole('menuitem', { name: '원격 제어 끄기' });
+  if (await turnOff.count()) {
+    await turnOff.click();
+    await expect(pill).not.toContainText('원격 실패', { timeout: 15_000 });
+  } else {
+    await page.keyboard.press('Escape');
+  }
+  await expect(menu).toHaveCount(0);
+
+  // 꺼진 상태에서는 "켜기"
+  await row.click({ button: 'right' });
+  const turnOn = menu.getByRole('menuitem', { name: '원격 제어 켜기' });
+  await expect(turnOn).toBeEnabled();
+  await turnOn.click();
+  await expect(menu).toHaveCount(0);
+  // 낙관적 갱신을 하지 않으므로, 즉시 보이는 피드백은 "보냈다"는 토스트뿐이다.
+  // (정리 단계의 '끕니다' 토스트가 아직 떠 있을 수 있어 문구로 특정한다.)
+  await expect(
+    page.locator('.toast-text').filter({ hasText: '원격 제어를 켜는 중입니다' }),
+  ).toBeVisible();
+  // 명령이 서버까지 갔다는 증거 — 컴포저 pill이 같은 스냅샷을 받아 상태를 바꾼다
+  await expect(pill).toContainText('원격 실패', { timeout: 15_000 });
+
+  // 켜진(=실패로 붙잡힌) 상태에서는 같은 자리가 "끄기"로 뒤집힌다
+  await row.click({ button: 'right' });
+  await expect(menu.getByRole('menuitem', { name: '원격 제어 켜기' })).toHaveCount(0);
+  await menu.getByRole('menuitem', { name: '원격 제어 끄기' }).click();
+  // 끄면 실패 상태까지 정리된다 — pill이 꺼짐 문구로 돌아온다
+  await expect(pill).toContainText('원격 제어', { timeout: 15_000 });
+  await expect(pill).not.toContainText('원격 실패');
+
+  // 그리고 메뉴도 다시 "켜기"로 돌아와 있다(막다른 길이 없다)
+  await row.click({ button: 'right' });
+  await expect(menu.getByRole('menuitem', { name: '원격 제어 켜기' })).toBeVisible();
+});
+
 test('메시지 타임스탬프 — 사용자 메시지와 답변에 HH:MM이 붙는다', async ({ page }) => {
   await startSession(page, servers.echo.url);
   const input = page.getByLabel('메시지 입력');
@@ -562,7 +610,12 @@ test('세션 우클릭 메뉴 — 키보드로 다룰 수 있다(첫 항목 포�
   // 전부 먹지 않는다(메뉴가 아직 숨겨진 동안 focus()가 실패하던 회귀 방지).
   await expect(menu.getByRole('menuitem', { name: '이름 변경' })).toBeFocused();
   await page.keyboard.press('ArrowDown');
+  // 원격 제어 항목의 라벨은 서버 상태에 따라 켜기/끄기로 뒤집힌다(앞선 테스트가
+  // 같은 서버에 켜 둔 채 끝날 수 있다) — 여기서 보는 것은 순서·포커스뿐이다.
+  await expect(menu.getByRole('menuitem', { name: /^원격 제어/ })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
   await expect(menu.getByRole('menuitem', { name: '세션 종료' })).toBeFocused();
+  await page.keyboard.press('ArrowUp');
   await page.keyboard.press('ArrowUp');
   await expect(menu.getByRole('menuitem', { name: '이름 변경' })).toBeFocused();
   // Esc로 닫히고, 포커스는 메뉴를 연 행으로 돌아온다
