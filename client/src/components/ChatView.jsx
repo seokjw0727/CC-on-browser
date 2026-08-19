@@ -4,11 +4,11 @@
 // 목록은 **윈도잉**해서 그린다(lib/chat-window.js): 대화 전체를 DOM에 두면 힙의 72%가
 // DOM이 되고 그 임계를 넘으면 GC 스래싱으로 스트리밍 중 메인스레드가 초 단위로 멈춘다
 // (실측 2026-07-27: 메시지 1920개·도구 결과 20KB에서 총 블로킹 3851ms → 윈도잉 후 0ms).
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore, useActiveSession } from '../lib/store.jsx';
 import Message, { debugEnabled } from './Message.jsx';
 import Icon from './Icon.jsx';
-import { WINDOW_SIZE, expandStart, windowStartFor } from '../lib/chat-window.js';
+import { WINDOW_SIZE, expandStart, windowFloorFor, windowStartFor } from '../lib/chat-window.js';
 import { Sparkle } from './Brand.jsx';
 import './chat.css';
 
@@ -115,12 +115,18 @@ export default function ChatView() {
   const curExpand = sessionChanged ? null : expand;
   const curRead = sessionChanged ? null : readStart;
   const sticky = curExpand != null;
+  // /clear·/compact 경계 — 그 위는 기본 창에서 숨긴다(화면이 CLI의 실제 컨텍스트와 같은
+  // 것을 보여주게). messages는 append-only라 참조가 바뀐 커밋에서만 다시 재면 되고, 계산
+  // 자체도 뒤 WINDOW_SIZE개로 묶여 있어 스트리밍 중 매 이벤트마다 돌아도 대화 길이에
+  // 비례하지 않는다.
+  const floor = useMemo(() => windowFloorFor(allMsgs), [allMsgs]);
   const winStart = windowStartFor({
     total,
     start: sticky ? curExpand : (curRead ?? 0),
     sticky,
     // 확장도 동결도 아니면 꼬리를 따라간다(= 기본 창, 성능·RAM 이득이 나오는 상태).
     pinned: sticky || curRead == null,
+    floor,
   });
   const shown = winStart > 0 ? allMsgs.slice(winStart) : allMsgs;
   // raw 이벤트 표시 여부는 여기서 확정해 prop으로 내린다 — Message가 memo라
@@ -352,6 +358,10 @@ export default function ChatView() {
 
   const empty = !session || session.messages.length === 0;
   const busy = session && (session.status === 'thinking' || session.status === 'tool');
+  // 접기 버튼 문구는 **접었을 때 실제로 남는 것**을 말해야 한다 — 경계가 꼬리보다
+  // 최근이면 결과가 "최근 200개"가 아니라 "마지막 /clear·/compact 이후"다.
+  const collapseLabel =
+    floor > Math.max(0, total - WINDOW_SIZE) ? '최근 대화만 보기' : `최근 ${WINDOW_SIZE}개만 보기`;
 
   return (
     <div className="chat-view">
@@ -416,7 +426,7 @@ export default function ChatView() {
           접으려고 일부러 위로 스크롤해야 한다(codex 지적). */}
       {(!pinned || sticky) && (
         <button type="button" className="jump-latest" onClick={jumpToLatest}>
-          {pinned ? `최근 ${WINDOW_SIZE}개만 보기` : <><Icon name="arrow-down" /> 최신으로</>}
+          {pinned ? collapseLabel : <><Icon name="arrow-down" /> 최신으로</>}
         </button>
       )}
     </div>

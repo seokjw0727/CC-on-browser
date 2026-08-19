@@ -296,6 +296,46 @@ test('윈도잉 — "모두 불러오기"는 하단으로 돌아와도 유지되
   await expect(winItems(page)).toHaveCount(200);
 });
 
+test('윈도잉 — /clear는 이전 대화를 위로 숨기고, "모두 불러오기"로 되살아난다', async ({ page }) => {
+  await startBulkSession(page);
+  await expect(bulkMsgs(page).first()).toHaveText('bulk-301'); // 타자기 출력 종료 대기
+  // 턴이 끝나기 전에는 컴포저가 전송을 거부한다(idle 불변식) — 상태 점이 대기가 될 때까지.
+  await expect(page.locator('.sess-dot.st-idle').first()).toHaveAttribute('aria-label', '상태: 대기');
+
+  const input = page.getByLabel('메시지 입력');
+  // 후행 공백으로 커맨드 드롭다운을 닫는다 — 열려 있으면 Enter가 "항목 선택"으로 삼켜진다.
+  await input.fill('/clear ');
+  await input.press('Enter');
+
+  // 초기화 구분선이 창의 **첫 아이템**이 된다 = 그 위 502개가 전부 숨었다.
+  const divider = page.locator('.msg-cleared');
+  await expect(divider).toBeVisible();
+  await expect(winItems(page).first()).toHaveClass(/msg-cleared/);
+  await expect(bulkMsgs(page)).toHaveCount(0); // 이전 대화는 DOM에 남지 않는다
+  // 숨긴 것이지 지운 게 아니다 — 기존 버튼이 그 개수를 그대로 안내한다.
+  await expect(page.locator('.load-earlier-btn').first()).toContainText('502');
+
+  // "모두 불러오기" — 숨었던 기록이 그대로 되살아난다.
+  await page.locator('.load-earlier-btn.subtle').click();
+  await expect(bulkMsgs(page).first()).toHaveText('bulk-0');
+  await expect(bulkMsgs(page)).toHaveCount(500);
+  await expect(divider).toBeVisible(); // 구분선은 제자리(과거와 현재 사이)
+
+  // 하단으로 돌아와도 펼친 상태는 유지되고, 접기 버튼 문구는 **접었을 때 남는 것**을
+  // 말한다 — 경계가 있으므로 "최근 200개"가 아니라 "최근 대화".
+  await page.evaluate(() => {
+    const el = document.querySelector('.chat-scroll');
+    el.scrollTop = el.scrollHeight;
+  });
+  await expect(bulkMsgs(page)).toHaveCount(500);
+  await expect(page.locator('.jump-latest')).toHaveText('최근 대화만 보기');
+
+  // 접으면 다시 경계 아래로.
+  await page.locator('.jump-latest').click();
+  await expect(bulkMsgs(page)).toHaveCount(0);
+  await expect(winItems(page).first()).toHaveClass(/msg-cleared/);
+});
+
 test('윈도잉 — raw 디버그 토글이 memo에 삼켜지지 않는다', async ({ page }) => {
   // Message가 memo라 store의 debugRaw 변화가 prop으로 내려가지 않으면 기존 메시지가
   // 다시 그려지지 않는다. 토글 → 즉시 반영이 계약이다.

@@ -8,6 +8,20 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+### Changed
+- **`/clear`·`/compact` 다음에는 그 위의 대화가 화면에서 접힙니다.** 두 명령은 CLI의
+  컨텍스트를 비우는데 화면에는 지나간 대화가 그대로 남아 있어, 보이는 것과 모델이 실제로
+  기억하는 것이 어긋났습니다. 이제 초기화 구분선·압축 카드가 채팅 창의 시작점이 되어
+  대화가 새로 시작한 것처럼 보입니다. **숨긴 것이지 지운 것이 아닙니다** — 상단의
+  "이전 메시지 N개 더 보기"/"모두 불러오기"(기존 버튼 그대로)로 언제든 되살아나고,
+  위로 읽는 중이거나 이미 펼쳐 둔 창은 경계가 생겨도 접히지 않습니다. `/compact`는
+  **압축이 끝나는 순간** 접습니다 — 진행 중에 접으면 컨텍스트가 아직 그대로인데 화면만
+  비고, 중단(Esc) 시 접혔던 대화가 한꺼번에 되살아납니다.
+  (Conversation history above a `/clear` divider or a completed `/compact` card is
+  now folded out of the chat window, matching what the CLI actually remembers.
+  Nothing is deleted: the existing "load earlier"/"load all" buttons bring it back,
+  and an expanded or scrolled-up window is never collapsed underneath you.)
+
 ## [1.9.5] - 2026-08-19
 
 > 원격 제어를 켜고 끄는 자리를 사이드바 세션 행 우클릭 한 곳으로 모으고, 업그레이드

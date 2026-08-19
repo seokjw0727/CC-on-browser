@@ -210,6 +210,9 @@ function handle(msg) {
             commands: [
               { name: 'help', description: 'Show help' },
               { name: 'goal', description: 'Set the session goal' },
+              // clear: /clear 낙관 렌더(초기화 구분선)를 태워야 창 경계(chat-window의
+              // floor) 계약을 e2e로 관측할 수 있다.
+              { name: 'clear', description: 'Clear conversation history' },
             ],
             models: MODELS,
             account: { email: 'fake@example.com', subscriptionType: 'pro' },
@@ -596,6 +599,13 @@ function handle(msg) {
       // 계약을 e2e로 검증하려면 한 번의 전송으로 수백 개의 정상 이벤트가 CLI→서버→
       // WS→리듀서 경로를 그대로 통과해야 한다. 사용자 프롬프트마다 FAKE_BULK_COUNT개의
       // assistant 텍스트 메시지를 순서대로 뱉는다(각 메시지에 순번을 실어 창 경계를 단언).
+      // /clear는 모델을 부르지 않는다(실 CLI도 assistant 본문 없이 끝난다) — 여기서
+      // 대량 메시지를 또 뱉으면 방금 생긴 초기화 경계가 그대로 창 밖으로 밀려나
+      // 경계 계약을 관측할 수 없다.
+      if (extractText(msg).trim().startsWith('/clear')) {
+        emitResult('cleared', {}, turn);
+        return;
+      }
       const n = Number(process.env.FAKE_BULK_COUNT) || 500;
       for (let i = 0; i < n; i++) {
         out({
