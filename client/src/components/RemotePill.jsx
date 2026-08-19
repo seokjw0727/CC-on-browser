@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../lib/store.jsx';
 import { remoteControlByCwd, remoteControlFor } from '../lib/store-reducer.js';
+import Icon from './Icon.jsx';
 
 const LABEL = {
   starting: '원격 연결 중…',
@@ -105,7 +106,7 @@ export default function RemotePill({ session }) {
         data-tip={summarize(rc)}
         onClick={() => (active ? setOpen((v) => !v) : start())}
       >
-        <span className="pill-ico" aria-hidden="true">📱</span>
+        <Icon name="phone" className="pill-ico" />
         <span className="truncate">{active ? LABEL[rc.state] ?? '원격' : '원격 제어'}</span>
       </button>
 
@@ -124,7 +125,7 @@ export default function RemotePill({ session }) {
           {rc.url ? (
             <>
               <a className="rp-link" href={rc.url} target="_blank" rel="noreferrer noopener">
-                claude.ai/code 에서 열기 ↗
+                claude.ai/code 에서 열기 <Icon name="external" />
               </a>
               <div className="rp-url dim" title={rc.url}>{rc.url}</div>
             </>

@@ -1,0 +1,29 @@
+/* Icon.jsx 전용 규칙. 색·정렬만 담당하고, 크기는 <Icon size={n}/>이 정한다
+   (설계도 2026-08-19-frontend-emoji-to-icon-set §3-3). */
+
+/* 기본을 display:block으로 두지 않는다 — 토큰 화살표처럼 문장 속에 섞이는 아이콘이
+   줄에서 떨어져 나간다. inline-block은 flex 컨테이너 안에서도 무해하다.
+   vertical-align은 글자 baseline에 광학적으로 맞춘 값. */
+.ico {
+  display: inline-block;
+  vertical-align: -0.125em;
+  flex: none;
+}
+
+/* 색 규칙 B(포인트 최소) — 이 세 클래스에 없으면 currentColor(주변 글자색)를 상속한다.
+   테마(다크·라이트) 전환은 CSS 변수가 알아서 따라간다. */
+.ico-danger {
+  color: var(--danger);
+}
+.ico-warn {
+  color: var(--warning);
+}
+.ico-accent {
+  color: var(--accent);
+}
+
+/* 숫자·짧은 라벨 옆에 바짝 붙는 12px 아이콘(토큰 화살표·커맨드 칩) 전용 —
+   본문보다 작은 아이콘은 기본 -0.125em보다 살짝 얕게 걸쳐야 광학적으로 맞는다. */
+.ico-inline {
+  vertical-align: -0.1em;
+}

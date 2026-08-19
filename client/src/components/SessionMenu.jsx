@@ -8,6 +8,7 @@
 // 여기서는 마운트 직후 실제 크기를 재서 한 번 반영한다(첫 페인트 전 useLayoutEffect).
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { computeMenuPosition } from '../lib/menu-position.js';
+import Icon from './Icon.jsx';
 
 export default function SessionMenu({ anchor, label, items, onClose, restoreRef }) {
   const ref = useRef(null);
@@ -154,7 +155,7 @@ export default function SessionMenu({ anchor, label, items, onClose, restoreRef 
             it.onSelect();
           }}
         >
-          {it.icon && <span className="ctx-ico" aria-hidden="true">{it.icon}</span>}
+          {it.icon && <Icon name={it.icon} size={14} className="ctx-ico" />}
           <span className="truncate">{it.label}</span>
         </button>
       ))}

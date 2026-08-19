@@ -173,9 +173,6 @@
   background: none;
 }
 .ctx-ico {
-  flex: none;
-  width: 14px;
-  text-align: center;
   opacity: 0.8;
 }
 
@@ -277,14 +274,12 @@
   position: relative;
   display: inline-flex;
 }
-.pill-select-wrap::after {
-  content: '▾';
+.pill-select-caret {
   position: absolute;
   right: 10px;
   top: 50%;
   transform: translateY(-50%);
   pointer-events: none;
-  font-size: 10px;
   color: var(--text-faint);
 }
 .pill-select {
@@ -341,8 +336,6 @@ select.mode-trust:focus {
   background: var(--accent);
   color: var(--accent-contrast);
   border: none;
-  font-size: 16px;
-  font-weight: 700;
   line-height: 1;
 }
 .send-btn:hover:not(:disabled) {
@@ -356,7 +349,6 @@ select.mode-trust:focus {
   background: transparent;
   color: var(--danger);
   border: 1px solid var(--danger);
-  font-size: 11px;
 }
 .send-btn.interrupt:hover {
   background: var(--danger-soft);
@@ -442,7 +434,6 @@ select.mode-trust:focus {
   cursor: default;
 }
 .mm-caret {
-  font-size: 9px;
   color: var(--text-faint);
 }
 .mm-ver {
@@ -501,14 +492,13 @@ select.mode-trust:focus {
 }
 .mm-check {
   color: var(--accent);
-  font-weight: 600;
 }
 .mm-divider {
   height: 1px;
   background: var(--border-soft);
   margin: 4px 6px;
 }
-/* 노력 수준 — progress bar (트리거 미니 바 + 팝오버 트랙) */
+/* 노력 수준 — 트리거 미니 바 + 팝오버 드래그 슬라이더 */
 .effort-bar {
   display: inline-flex;
   gap: 2px;
@@ -524,64 +514,145 @@ select.mode-trust:focus {
   background: var(--accent);
 }
 .effort-menu {
-  min-width: 240px;
+  min-width: 264px;
+  padding: 10px 12px 8px;
 }
-.effort-track {
+.effort-head {
   display: flex;
-  gap: 3px;
-  padding: 8px 10px 4px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
-.effort-seg {
-  flex: 1;
-  height: 12px;
-  border: none;
-  border-radius: 3px;
-  background: var(--surface-3);
-  cursor: pointer;
+.effort-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.effort-title.ultra {
+  color: color-mix(in srgb, #b06bff 55%, var(--text));
+}
+/* (?) 도움말 — 클릭 동작은 없고 hover/포커스로 툴팁만 띄우는 안내 어포던스 */
+.effort-help {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  background: none;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: help;
   padding: 0;
 }
-.effort-seg.fill {
-  background: var(--accent);
+.effort-help:hover,
+.effort-help:focus-visible {
+  color: var(--text);
+  border-color: var(--text-dim);
 }
-.effort-seg:hover {
-  outline: 1px solid var(--border-strong);
+.effort-ends {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--text-dim);
 }
-.effort-seg:focus-visible {
+/* 트랙 — 안쪽 여백(핸들 반폭)만큼 rail을 좁혀 양끝 핸들이 트랙을 넘지 않게 한다 */
+.effort-slider {
+  height: 26px;
+  margin-top: 6px;
+  padding: 0 13px;
+  border-radius: 13px;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none; /* 드래그가 스크롤/줌 제스처로 가로채이지 않게 */
+}
+.effort-slider:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.effort-labels {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 2px 10px 0;
-  font-size: 11px;
+.effort-slider[aria-disabled='true'] {
+  cursor: default;
+  opacity: 0.55;
 }
-.effort-cur {
-  color: var(--text);
-  font-weight: 600;
-  font-size: 11.5px;
+.effort-rail {
+  position: relative;
+  flex: 1;
+  height: 100%;
+}
+/* 채움 — 트랙 왼쪽 끝부터 핸들까지. rail 기준이라 안쪽 여백만큼 살짝 넓힌다 */
+.effort-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -13px;
+  border-radius: 13px 0 0 13px;
+  background: var(--surface-3);
+  pointer-events: none;
+}
+.effort-dot {
+  position: absolute;
+  top: 50%;
+  /* 5px 도트에 26px 히트/hover 영역 — 툴팁을 띄울 만한 표적 크기 확보 */
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.effort-dot::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+.effort-dot.fill::after {
+  background: var(--text-dim);
+}
+.effort-dot.ultra::after {
+  width: 6px;
+  height: 6px;
+  background: #b06bff;
+  box-shadow: 0 0 5px color-mix(in srgb, #b06bff 70%, transparent);
+}
+.effort-thumb {
+  position: absolute;
+  top: 50%;
+  width: 22px;
+  height: 30px;
+  transform: translate(-50%, -50%);
+  border-radius: 11px;
+  background: var(--text-dim);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  transition: left 90ms ease-out;
+}
+.effort-slider.ultra .effort-thumb {
+  background: linear-gradient(135deg, var(--text-dim), #b06bff);
+}
+@media (prefers-reduced-motion: reduce) {
+  .effort-thumb {
+    transition: none;
+  }
 }
 .effort-note {
-  padding: 6px 10px 4px;
+  padding: 8px 0 2px;
+  line-height: 1.45;
 }
-/* 울트라코드 — UI 최상위 의사 티어(spawn 시 max로 매핑). 플래그십 강조색. */
+/* 울트라코드 — UI 최상위 티어(xhigh + ultracode 플래그). 플래그십 강조색. */
 .effort-seg-vis.ultra.fill {
   background: linear-gradient(135deg, var(--accent), #b06bff);
-}
-.effort-seg.ultra.fill {
-  background: linear-gradient(135deg, var(--accent), #b06bff);
-}
-.effort-seg.ultra {
-  outline: 1px solid color-mix(in srgb, #b06bff 55%, transparent);
 }
 .model-menu-btn.effort-ultra {
   border-color: color-mix(in srgb, #b06bff 55%, var(--border-soft));
   color: color-mix(in srgb, #b06bff 45%, var(--text));
   font-weight: 600;
-}
-.effort-cur.ultra {
-  color: color-mix(in srgb, #b06bff 55%, var(--text));
 }
 
 /* ----- 구동 중인 기능 배지 (ActiveModes) — 현재 GOAL 하나뿐 ----- */
@@ -706,7 +777,6 @@ select.mode-trust:focus {
 }
 .interrupt-recover .ir-ico {
   color: var(--danger);
-  font-weight: 700;
 }
 .interrupt-recover .ir-text {
   font-weight: 600;
@@ -2089,7 +2159,6 @@ select.mode-trust:focus {
 }
 .dock-ico {
   flex: none;
-  font-size: 0.8rem;
 }
 .dock-label {
   flex: 1 1 auto;

@@ -13,8 +13,18 @@ import { openSubagents } from '../lib/subagents.js';
 import { fmtTok, fmtReset, shortPath, contextWindowFor, hasDisplayableCtx } from '../lib/format.js';
 import { MODES, MODE_LABEL, MODE_CLASS } from '../lib/permission-modes.js';
 import { familyOf, buildModelOptions } from '../lib/model-catalog.js';
-import { EFFORT_LEVELS, DEFAULT_EFFORT, effortLabel, isUiEffort } from '../lib/effort.js';
+import {
+  EFFORT_LEVELS,
+  DEFAULT_EFFORT,
+  EFFORT_HELP,
+  effortLabel,
+  isUiEffort,
+  effortIndexFromRatio,
+  effortRatioFromIndex,
+  nextEffortIndex,
+} from '../lib/effort.js';
 import ActiveModes from './ActiveModes.jsx';
+import Icon from './Icon.jsx';
 import RunningWork from './RunningWork.jsx';
 import RemotePill from './RemotePill.jsx';
 import Clawd from './Clawd.jsx';
@@ -85,10 +95,21 @@ function usePopover() {
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
-    wrapRef.current?.querySelector('[aria-checked="true"]')?.focus();
+    // 선택된 항목(메뉴형) 또는 슬라이더(노력 수준형)로 포커스를 옮긴다.
+    const opener = document.activeElement;
+    wrapRef.current?.querySelector('[aria-checked="true"], [role="slider"]')?.focus();
     return () => {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
+      // 팝오버 안에 포커스를 둔 채로 닫혔다면(Esc·선택) 열기 전 위치로 되돌린다 —
+      // 키보드 사용자가 포커스를 잃고 문서 처음으로 튕기지 않도록.
+      if (
+        opener instanceof HTMLElement
+        && opener.isConnected
+        && wrapRef.current?.contains(document.activeElement)
+      ) {
+        opener.focus();
+      }
     };
   }, [open]);
   return { open, setOpen, wrapRef };
@@ -98,7 +119,7 @@ function usePopover() {
 function menuArrowNav(e) {
   if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
   e.preventDefault();
-  const items = [...e.currentTarget.querySelectorAll('.mm-item, .effort-seg')];
+  const items = [...e.currentTarget.querySelectorAll('.mm-item')];
   const idx = items.indexOf(document.activeElement);
   const next = e.key === 'ArrowDown'
     ? items[Math.min(idx + 1, items.length - 1)]
@@ -127,7 +148,7 @@ function ModelPicker({ session, options, disabled, onSelect }) {
         onClick={() => setOpen((o) => !o)}
       >
         <span className="truncate">{label}</span>
-        <span className="mm-caret" aria-hidden="true">▾</span>
+        <Icon name="chevron-down" size={10} className="mm-caret" />
       </button>
       {open && (
         <div className="mm-menu" role="menu" aria-label="모델 선택" onKeyDown={menuArrowNav}>
@@ -152,7 +173,7 @@ function ModelPicker({ session, options, disabled, onSelect }) {
                   </span>
                   <span className="mm-desc dim">{o.desc}</span>
                 </span>
-                {sel && <span className="mm-check" aria-hidden="true">✓</span>}
+                {sel && <Icon name="check" className="mm-check" />}
               </button>
             );
           })}
@@ -162,8 +183,14 @@ function ModelPicker({ session, options, disabled, onSelect }) {
   );
 }
 
-// ----- 노력 수준 피커 — progress bar 형태 (--effort는 spawn 전용 → 변경 시 --resume 재시작) -----
-// EFFORT_LEVELS/DEFAULT_EFFORT/effortLabel은 lib/effort.js가 단일 출처(spawn 매핑과 공유).
+// ----- 노력 수준 피커 — 드래그 슬라이더 (변경은 런타임 채널로 즉시 적용) -----
+// EFFORT_LEVELS/DEFAULT_EFFORT/effortLabel/desc·좌표 헬퍼는 lib/effort.js가 단일 출처.
+// 좌표계: 트랙 안쪽의 .effort-rail이 0~100% 공간이고 도트·핸들·채움이 모두 그 비율을
+// 쓴다(포인터 → 인덱스 환산도 rail 사각형 기준 — 양끝 핸들이 트랙을 넘지 않게).
+
+// 키 반복(누른 채 유지)이나 연속 드래그가 매번 CLI 왕복을 만들지 않도록 커밋을 모은다.
+// 폴백(구버전 CLI = 세션 재시작) 경로에서는 이 합침이 특히 중요하다.
+const EFFORT_COMMIT_DEBOUNCE_MS = 180;
 
 function EffortPicker({ session, options, disabled, onSelect }) {
   const { open, setOpen, wrapRef } = usePopover();
@@ -171,17 +198,104 @@ function EffortPicker({ session, options, disabled, onSelect }) {
   const opt = fam ? options.find((o) => o.family === fam.family) : null;
   // CLI 항목이 supportsEffort를 명시하지 않은 모델(예: Haiku)은 비활성; 정보가 없으면 허용
   const supports = opt?.cliEntry ? !!opt.cliEntry.supportsEffort : true;
-  // 모델이 지원 목록을 보고하면 그걸로 거르되, UI 전용 의사 티어(ultracode)는 CLI
-  // 목록에 없어도 항상 남긴다 — spawn 시 max로 매핑되므로 실제 지원과 무관하다.
-  const levels = opt?.cliEntry?.supportedEffortLevels?.length
-    ? EFFORT_LEVELS.filter(
-        (l) => isUiEffort(l.value) || opt.cliEntry.supportedEffortLevels.includes(l.value),
-      )
+  // 모델이 지원 목록을 보고하면 그걸로 거른다. UI 티어(ultracode)는 목록에 없지만
+  // xhigh + 플래그로 나가므로, 그 모델이 xhigh를 지원할 때만 노출한다 — 지원하지 않는
+  // 수준을 보내지 않기 위한 조건이다(codex 지적). 목록 자체를 보고하지 않는 모델은
+  // 판단 근거가 없으니 전부 노출한다(기존 동작).
+  const reported = opt?.cliEntry?.supportedEffortLevels;
+  const levels = reported?.length
+    ? EFFORT_LEVELS.filter((l) => (isUiEffort(l.value)
+      ? reported.includes('xhigh')
+      : reported.includes(l.value)))
     : EFFORT_LEVELS;
   const cur = session.effort ?? DEFAULT_EFFORT;
   const curIdx = Math.max(0, levels.findIndex((l) => l.value === cur));
-  const curLabel = levels[curIdx]?.label ?? cur;
-  const ultraActive = isUiEffort(cur);
+  // 조작 중(그리고 커밋 결과가 돌아오기 전까지)의 표시값 — 성공하면 cur가 따라오고,
+  // 실패하면 onSelect가 끝나는 시점에 놓아 실제값으로 되돌아간다.
+  const [previewIdx, setPreviewIdx] = useState(null);
+  const shownIdx = previewIdx == null ? curIdx : Math.min(previewIdx, levels.length - 1);
+  const shown = levels[shownIdx] ?? levels[curIdx];
+  const shownLabel = shown?.label ?? cur;
+  const ultraActive = !!shown?.ultra;
+  const railRef = useRef(null);
+  const commitTimerRef = useRef(null);
+  // 커밋 세대 — 겹친 커밋 중 **마지막** 것만 미리보기를 놓는다. 세지 않으면 먼저 끝난
+  // 요청이 뒤이은 선택의 표시를 걷어내 잘못된 값이 잠시 보인다(codex 지적).
+  const commitSeqRef = useRef(0);
+  const locked = disabled || !supports;
+
+  useEffect(() => () => clearTimeout(commitTimerRef.current), []);
+
+  // 세션 탭이 바뀌면 이전 세션을 향한 대기 커밋과 미리보기를 버린다 — 안 그러면 옛 탭의
+  // 선택이 새 탭에 보이거나, 디바운스 타이머가 옛 세션에 적용된다(codex 지적).
+  useEffect(() => {
+    clearTimeout(commitTimerRef.current);
+    commitTimerRef.current = null;
+    commitSeqRef.current += 1;
+    setPreviewIdx(null);
+  }, [session.key]);
+
+  const commit = (idx, { immediate = false } = {}) => {
+    const value = levels[idx]?.value;
+    if (!value) return;
+    setPreviewIdx(idx);
+    clearTimeout(commitTimerRef.current);
+    const seq = ++commitSeqRef.current;
+    const run = async () => {
+      commitTimerRef.current = null;
+      if (value === (session.effort ?? DEFAULT_EFFORT)) {
+        if (seq === commitSeqRef.current) setPreviewIdx(null);
+        return;
+      }
+      await onSelect(value);
+      // 그 사이 더 최신 커밋이 시작됐다면 그쪽이 표시의 주인이다.
+      if (seq === commitSeqRef.current) setPreviewIdx(null);
+    };
+    if (immediate) run();
+    else commitTimerRef.current = setTimeout(run, EFFORT_COMMIT_DEBOUNCE_MS);
+  };
+
+  const idxFromPointer = (e) => {
+    const rect = railRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return null;
+    return effortIndexFromRatio((e.clientX - rect.left) / rect.width, levels.length);
+  };
+
+  const onPointerDown = (e) => {
+    if (locked || e.button !== 0) return;
+    const idx = idxFromPointer(e);
+    if (idx == null) return;
+    // 포인터를 캡처해 트랙을 벗어난 드래그도 계속 따라온다.
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    e.currentTarget.focus();
+    setPreviewIdx(idx);
+  };
+  const onPointerMove = (e) => {
+    if (locked || !e.currentTarget.hasPointerCapture?.(e.pointerId)) return;
+    const idx = idxFromPointer(e);
+    if (idx != null) setPreviewIdx(idx);
+  };
+  const onPointerUp = (e) => {
+    if (locked || !e.currentTarget.hasPointerCapture?.(e.pointerId)) return;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    const idx = idxFromPointer(e) ?? previewIdx;
+    // 놓는 순간 확정 — 드래그 중에는 보내지 않는다(중간값마다 왕복하지 않도록).
+    if (idx != null) commit(idx, { immediate: true });
+  };
+  // 취소된 제스처(터치/펜 이탈, 브라우저 개입)는 확정하지 않고 실제값으로 되돌린다 —
+  // 없으면 미리보기가 커밋되지 않은 값으로 남아 붙는다(codex 지적).
+  const onPointerCancel = (e) => {
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    commitSeqRef.current += 1;
+    setPreviewIdx(null);
+  };
+  const onKeyDown = (e) => {
+    if (locked) return;
+    const next = nextEffortIndex(e.key, shownIdx, levels.length);
+    if (next == null) return;
+    e.preventDefault();
+    if (next !== shownIdx) commit(next);
+  };
 
   return (
     <span className="model-menu-wrap" ref={wrapRef}>
@@ -189,12 +303,12 @@ function EffortPicker({ session, options, disabled, onSelect }) {
       <button
         type="button"
         className={`pill model-menu-btn${ultraActive ? ' effort-ultra' : ''}`}
-        aria-disabled={disabled || !supports}
-        aria-haspopup="menu"
+        aria-disabled={locked}
+        aria-haspopup="dialog"
         aria-expanded={open}
-        data-tip={supports ? '노력 수준 (변경 시 같은 대화로 재시작)' : '이 모델은 노력 수준을 지원하지 않습니다'}
+        data-tip={supports ? '노력 수준 (변경 즉시 적용)' : '이 모델은 노력 수준을 지원하지 않습니다'}
         onClick={() => {
-          if (disabled || !supports) return;
+          if (locked) return;
           setOpen((o) => !o);
         }}
       >
@@ -202,45 +316,72 @@ function EffortPicker({ session, options, disabled, onSelect }) {
           {levels.map((l, i) => (
             <span
               key={l.value}
-              className={`effort-seg-vis${i <= curIdx ? ' fill' : ''}${l.ultra ? ' ultra' : ''}`}
+              className={`effort-seg-vis${i <= shownIdx ? ' fill' : ''}${l.ultra ? ' ultra' : ''}`}
             />
           ))}
         </span>
-        <span className="truncate">{ultraActive ? `⚡ ${curLabel}` : `노력 ${curLabel}`}</span>
-        <span className="mm-caret" aria-hidden="true">▾</span>
+        <span className="truncate">
+          {ultraActive ? <><Icon name="bolt" className="ico-accent" /> {shownLabel}</> : `노력 ${shownLabel}`}
+        </span>
+        <Icon name="chevron-down" size={10} className="mm-caret" />
       </button>
       {open && (
-        <div className="mm-menu effort-menu" role="menu" aria-label="노력 수준" onKeyDown={menuArrowNav}>
-          <div className="mm-section">노력 수준</div>
-          <div className="effort-track" role="group" aria-label="노력 수준 선택">
-            {levels.map((l, i) => (
-              <button
-                key={l.value}
-                type="button"
-                role="menuitemradio"
-                aria-checked={l.value === cur}
-                aria-label={l.ultra ? `${l.label} (최대 노력 + 플래그십 모드)` : l.label}
-                className={`effort-seg${i <= curIdx ? ' fill' : ''}${l.ultra ? ' ultra' : ''}`}
-                data-tip={l.ultra ? '울트라코드 — 최대 노력으로 재시작(플래그십 모드)' : l.label}
-                onClick={() => {
-                  if (l.value !== cur) onSelect(l.value);
-                  setOpen(false);
-                }}
-              />
-            ))}
-          </div>
-          <div className="effort-labels">
-            <span className="dim">{levels[0]?.label}</span>
-            <span className={`effort-cur${ultraActive ? ' ultra' : ''}`}>
-              {ultraActive ? `⚡ ${curLabel}` : curLabel}
+        <div className="mm-menu effort-menu" role="dialog" aria-label="노력 수준">
+          <div className="effort-head">
+            <span className={`effort-title${ultraActive ? ' ultra' : ''}`}>
+              {ultraActive ? <><Icon name="bolt" className="ico-accent" /> {shownLabel}</> : `노력 ${shownLabel}`}
             </span>
-            <span className="dim">{levels[levels.length - 1]?.label}</span>
+            {/* 도움말 — 전역 [data-tip] 툴팁 레이어가 hover/포커스에 띄운다 */}
+            <button
+              type="button"
+              className="effort-help"
+              data-tip={EFFORT_HELP}
+              aria-label={`노력 수준 도움말 — ${EFFORT_HELP}`}
+            >
+              ?
+            </button>
           </div>
-          <div className="mm-desc dim effort-note">
-            {ultraActive
-              ? '울트라코드는 최대 노력으로 세션을 재시작합니다(브라우저 CLI엔 별도 워크플로 채널이 없어 실효는 max 노력).'
-              : '변경하면 같은 대화로 세션을 재시작합니다 (--effort는 시작 시에만 적용).'}
+          <div className="effort-ends" aria-hidden="true">
+            <span>더 빠르게</span>
+            <span>더 스마트하게</span>
           </div>
+          <div
+            className={`effort-slider${ultraActive ? ' ultra' : ''}`}
+            role="slider"
+            tabIndex={locked ? -1 : 0}
+            aria-label="노력 수준"
+            aria-orientation="horizontal"
+            aria-valuemin={0}
+            aria-valuemax={levels.length - 1}
+            aria-valuenow={shownIdx}
+            aria-valuetext={shownLabel}
+            aria-disabled={locked || undefined}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerCancel}
+            onKeyDown={onKeyDown}
+          >
+            <span className="effort-rail" ref={railRef}>
+              <span
+                className="effort-fill"
+                style={{ width: `${effortRatioFromIndex(shownIdx, levels.length) * 100}%` }}
+              />
+              {levels.map((l, i) => (
+                <span
+                  key={l.value}
+                  className={`effort-dot${i <= shownIdx ? ' fill' : ''}${l.ultra ? ' ultra' : ''}`}
+                  style={{ left: `${effortRatioFromIndex(i, levels.length) * 100}%` }}
+                  data-tip={`${l.label} — ${l.desc}`}
+                />
+              ))}
+              <span
+                className="effort-thumb"
+                style={{ left: `${effortRatioFromIndex(shownIdx, levels.length) * 100}%` }}
+              />
+            </span>
+          </div>
+          <div className="mm-desc dim effort-note">{shown?.desc}</div>
         </div>
       )}
     </span>
@@ -292,7 +433,9 @@ function readAsBase64(file) {
 }
 
 export default function Composer() {
-  const { state, dispatch, send, startSession, stopSession, notify, jumpTo } = useStore();
+  const {
+    state, dispatch, send, startSession, stopSession, setEffort, getState, notify, jumpTo,
+  } = useStore();
   const session = useActiveSession();
   const [text, setText] = useState('');
   const [caret, setCaret] = useState(0);
@@ -645,56 +788,79 @@ export default function Composer() {
     dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, permissionMode: mode }) });
     notify(`권한 모드 변경: ${MODE_LABEL[mode] ?? mode}`);
   };
-  // effort(--effort)는 spawn 전용 — 런타임 변경 채널이 없어(바이너리 실측) 같은
-  // 대화로 재시작한다: 기존 프로세스 정지 → --effort 재스폰, 메시지는 메모리에서
-  // 이월(preloadMessages), 새 탭이 옛 탭을 대체(replaceKey).
+  // effort 변경은 **런타임 채널이 우선**이다 — CLI v2.1.233 실측: apply_flag_settings
+  // 제어 요청으로 실행 중 세션의 노력 수준을 바꿀 수 있어(store.setEffort → 서버
+  // setEffort) 재시작이 필요 없다. 표시 갱신은 서버의 effortSet 방송이 한다.
+  // 이 채널을 모르는 구버전 CLI에서는 요청이 거부되거나 응답이 없으므로, 그때만
+  // 예전 방식(같은 대화로 재시작)으로 폴백한다 — restartWithEffort 참조.
+  const changeEffort = async (effort) => {
+    if (!session || state.conn !== 'open') return;
+    const label = effortLabel(effort);
+    const applied = await setEffort(session.key, effort);
+    if (applied) {
+      notify(`노력 수준 변경: ${label}`);
+      return;
+    }
+    restartWithEffort(effort, label);
+  };
+  // 폴백: 기존 프로세스 정지 → --effort 재스폰, 메시지는 메모리에서 이월
+  // (preloadMessages), 새 탭이 옛 탭을 대체(replaceKey).
   // --resume은 트랜스크립트가 실제로 존재할 때만 붙인다: 완결 턴 ≥1 또는 재개로
   // 시작한 세션. 무턴 세션은 jsonl이 없어 --resume이 "No conversation found"로
   // 실패한다(실 CLI v2.1.206 실측) — 이때는 그냥 새로 시작해도 잃을 서버측 맥락이 없다.
-  const changeEffort = (effort) => {
-    // 트리거 disabled와 동일한 불변식을 여기서도 강제한다 — 팝오버가 열린 채로
-    // 상태가 바뀌면(턴 시작·세션 전환) 버튼 잠금만으로는 못 막는다.
-    // 연타(pendingStarts) 가드는 고아 세션 방지.
-    if (
-      !session ||
-      state.conn !== 'open' ||
-      state.pendingStarts.size > 0 ||
-      session.status !== 'idle'
-    ) return;
-    const resumeId = session.sessionId ?? session.resumeSourceId;
-    const canResume = session.hasCompletedTurn && resumeId != null;
-    stopSession(session.key);
+  const restartWithEffort = (effort, label) => {
+    // ack를 기다린 뒤라 이 컴포넌트 클로저의 state·session은 낡았을 수 있다 —
+    // 재시작은 메시지를 통째로 이월하므로 반드시 **현재** 스냅샷으로 판단·이월한다
+    // (낡은 사본으로 하면 대기 중에 온 응답이 사라진다).
+    const now = getState();
+    const cur = now.sessions.get(session.key);
+    if (!cur || now.conn !== 'open') return;
+    // 늦은 성공 레이스: 서버의 제어 요청 한도(30s)가 우리 ack 대기(5s)보다 길어,
+    // 타임아웃 뒤에 성공 방송이 도착할 수 있다. 이미 반영됐다면 재시작하지 않는다.
+    if ((cur.effort ?? DEFAULT_EFFORT) === effort) return;
+    // 재시작은 진행 중인 턴을 파괴하므로 idle에서만. 연타(pendingStarts) 가드는
+    // 고아 세션 방지. 런타임 변경이 되는 CLI에서는 이 제약이 아예 걸리지 않는다.
+    if (cur.status !== 'idle' || now.pendingStarts.size > 0) {
+      notify(
+        `노력 수준을 바꾸지 못했습니다: 이 CLI 버전은 세션 재시작이 필요합니다`
+        + ` — 진행 중인 턴이 끝난 뒤 다시 시도해 주세요`,
+        'error',
+      );
+      return;
+    }
+    const resumeId = cur.sessionId ?? cur.resumeSourceId;
+    const canResume = cur.hasCompletedTurn && resumeId != null;
+    stopSession(cur.key);
     startSession({
-      cwd: session.cwd,
+      cwd: cur.cwd,
       // 스폰 --model은 검증된 계보(spawnModel: 시작 인자·set_model 성공값)만 —
       // session.model엔 init/assistant가 보고한 해석 id(구식·[1m] 접미사 탈락 가능)도
       // 들어오는데, 그걸 스폰 인자로 넘기면 1M 세션의 무언 다운그레이드나 스폰 실패가
       // 된다(Sidebar 재개와 동일 불변식). null이면 --model 생략(CLI가 결정 — 재개는
       // 트랜스크립트의 모델로 이어진다). 표시는 preloadModel로 잇는다.
-      model: session.spawnModel,
-      preloadModel: session.model,
-      permissionMode: session.permissionMode,
+      model: cur.spawnModel,
+      preloadModel: cur.model,
+      permissionMode: cur.permissionMode,
       effort,
       resumeSessionId: canResume ? resumeId : null,
-      preloadMessages: session.messages,
+      preloadMessages: cur.messages,
       // 같은 대화로 이어가는 경우(resume)에만 usage·컨텍스트 계보를 이월한다 —
       // 새 대화로 시작하면 서버측 컨텍스트가 비어 있으므로 옛 CTX%는 오표시.
       preloadSessionId: canResume ? resumeId : null,
-      preloadUsage: canResume ? session.usage : null,
-      preloadCtxFromCalls: canResume ? session.ctxFromCalls : false,
+      preloadUsage: canResume ? cur.usage : null,
+      preloadCtxFromCalls: canResume ? cur.ctxFromCalls : false,
       // 사용자가 붙여 둔 세션 이름은 재시작 이유(노력 수준 변경)와 무관하게 이어진다 —
       // 같은 탭을 대체하는 재시작이라 이름이 사라지면 사용자에겐 세션이 바뀐 것처럼 보인다.
-      preloadCustomTitle: session.customTitle,
+      preloadCustomTitle: cur.customTitle,
       // 열려 있던 미리보기도 이월한다 — 메시지가 그대로 넘어오므로 산출물 목록은
       // 저절로 복원되는데, 선택만 잃으면 패널이 혼자 닫혀 재시작이 티가 난다.
-      preloadPreview: session.preview,
-      replaceKey: session.key,
+      preloadPreview: cur.preview,
+      replaceKey: cur.key,
     });
-    const label = effortLabel(effort);
     // 문구는 실제 동작과 일치시킨다 — resume이 아닐 때 "같은 대화"라고 말하지 않는다.
     notify(
       canResume
-        ? `노력 수준 변경: ${label} — 같은 대화로 세션을 재시작합니다`
+        ? `노력 수준 변경: ${label} — 이 CLI는 런타임 변경을 지원하지 않아 같은 대화로 재시작합니다`
         : `노력 수준 변경: ${label} — 완결된 턴이 없어 새 세션으로 시작합니다`,
     );
   };
@@ -827,7 +993,7 @@ export default function Composer() {
         {/* 인터럽트된 턴 복구 바 — 재시도 / 수정 후 재전송 */}
         {interrupted && (
           <div className="interrupt-recover" role="status">
-            <span className="ir-ico" aria-hidden="true">↺</span>
+            <Icon name="undo" className="ir-ico" />
             <span className="ir-text">직전 턴이 중단되었습니다.</span>
             <span className="ir-preview dim" data-tip={session.lastUserText}>
               “{session.lastUserText.length > 40
@@ -842,7 +1008,7 @@ export default function Composer() {
               disabled={!live || state.conn !== 'open' || session.status !== 'idle'}
               data-tip="같은 프롬프트를 그대로 다시 보냅니다"
             >
-              ↻ 재시도
+              <Icon name="retry" /> 재시도
             </button>
             <button
               type="button"
@@ -850,7 +1016,7 @@ export default function Composer() {
               onClick={editInterrupted}
               data-tip="프롬프트를 입력창으로 불러와 고쳐서 보냅니다"
             >
-              ✎ 수정
+              <Icon name="edit" /> 수정
             </button>
             <button
               type="button"
@@ -859,7 +1025,7 @@ export default function Composer() {
               data-tip="복구 바 닫기"
               aria-label="복구 바 닫기"
             >
-              ✕
+              <Icon name="close" />
             </button>
           </div>
         )}
@@ -872,7 +1038,7 @@ export default function Composer() {
             onClick={() => dispatch({ type: 'open-new-session' })}
             data-tip={session?.cwd || '새 세션 / 레포 선택'}
           >
-            <span className="pill-ico" aria-hidden="true">☁</span>
+            <Icon name="cloud" className="pill-ico" />
             <span className="truncate">{repoLabel}</span>
           </button>
 
@@ -899,6 +1065,7 @@ export default function Composer() {
                   </option>
                 ))}
               </select>
+              <Icon name="chevron-down" size={10} className="pill-select-caret" />
             </span>
           )}
 
@@ -947,10 +1114,10 @@ export default function Composer() {
                 <EffortPicker
                   session={session}
                   options={modelOptions}
-                  // 진행 중 턴이 있으면 잠근다 — effort 변경은 재시작이라 진행분을 파괴한다.
-                  // (첫 턴 전에는 --resume 없이 새로 시작하므로 sessionId 잠금은 불필요 —
-                  // changeEffort의 resume 게이트 주석 참조)
-                  disabled={!live || state.conn !== 'open' || session.status !== 'idle'}
+                  // 진행 중 턴에도 열어 둔다 — 변경이 런타임 채널로 나가 재시작이 없으므로
+                  // 진행분을 파괴하지 않는다. 재시작이 필요한 구버전 CLI에서만
+                  // restartWithEffort가 idle을 요구하며 거절한다.
+                  disabled={!live || state.conn !== 'open'}
                   onSelect={changeEffort}
                 />
               </>
@@ -967,7 +1134,7 @@ export default function Composer() {
               data-tip="현재 턴 중단 (Esc)"
               aria-label="중단"
             >
-              ■
+              <Icon name="stop" size={15} />
             </button>
           ) : (
             <button
@@ -978,7 +1145,7 @@ export default function Composer() {
               data-tip="전송 (Enter)"
               aria-label="전송"
             >
-              ↑
+              <Icon name="arrow-up" size={15} />
             </button>
           )}
         </div>

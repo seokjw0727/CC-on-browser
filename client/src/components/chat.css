@@ -574,7 +574,6 @@ details.collapse > pre {
 }
 .cmd-chip-ico {
   color: var(--accent);
-  font-size: 12px;
 }
 .cmd-chip-name {
   font-family: var(--font-mono);

@@ -39,8 +39,10 @@ test('백그라운드 스냅샷이 그대로 항목이 된다 (셸·에이전트
   assert.equal(work.length, 2);
   assert.equal(work[0].label, 'sleep 40');
   assert.equal(work[0].detail, '백그라운드 셸');
+  assert.equal(work[0].icon, 'command', '셸은 command 아이콘');
   assert.equal(work[1].label, '리팩터 조사');
   assert.equal(work[1].detail, '백그라운드 에이전트');
+  assert.equal(work[1].icon, 'bot', '에이전트는 bot 아이콘');
 });
 
 test('스냅샷이 비면 목록도 비워진다 (해제 휴리스틱 없음)', () => {
@@ -89,6 +91,7 @@ test('전경 Bash는 결과가 오기 전까지만 실행 중', () => {
   assert.equal(work.length, 1);
   assert.equal(work[0].kind, 'shell');
   assert.equal(work[0].label, 'npm test');
+  assert.equal(work[0].icon, 'command', '전경 셸도 command 아이콘');
 
   s = feed(s, {
     type: 'user',
@@ -110,6 +113,7 @@ test('전경 서브에이전트도 함께 나온다', () => {
   assert.equal(work[0].kind, 'subagent');
   assert.equal(work[0].label, '조사');
   assert.equal(work[0].detail, 'Explore');
+  assert.equal(work[0].icon, 'bot', '서브에이전트도 bot 아이콘');
   assert.ok(work[0].uid, '서브에이전트도 점프 대상이 있어야 한다');
 });
 

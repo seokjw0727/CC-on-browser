@@ -291,7 +291,7 @@ test('윈도잉 — "모두 불러오기"는 하단으로 돌아와도 유지되
 
   // 위로 읽는 중에는 같은 버튼이 "최신으로" 역할을 한다.
   await page.evaluate(() => { document.querySelector('.chat-scroll').scrollTop = 0; });
-  await expect(page.locator('.jump-latest')).toHaveText('↓ 최신으로');
+  await expect(page.locator('.jump-latest')).toContainText('최신으로');
   await page.locator('.jump-latest').click();
   await expect(winItems(page)).toHaveCount(200);
 });
@@ -373,13 +373,18 @@ test('컴포저 배지 — 울트라코드·신뢰모드 배지 없음, 목표�
   await startSession(page, servers.echo.url, { permissionMode: 'bypassPermissions' });
   await expect(page.getByLabel('권한 모드')).toHaveValue('bypassPermissions');
 
-  // 노력 수준을 울트라코드로 — 같은 대화로 세션이 재시작된다.
+  // 노력 수준을 울트라코드로 — 슬라이더를 최상위로 밀면 **재시작 없이** 즉시 적용된다
+  // (End 키 = ARIA slider 규약. 팝오버가 열리면 슬라이더로 포커스가 간다).
   await page.locator('.model-menu-btn').nth(1).click();
-  await page.getByRole('menuitemradio', { name: /울트라코드/ }).click();
+  const slider = page.getByRole('slider', { name: '노력 수준' });
+  await expect(slider).toBeFocused();
+  await slider.press('End');
+  await expect(slider).toHaveAttribute('aria-valuetext', '울트라코드');
   await expect(page.getByLabel('메시지 입력')).toBeEnabled();
   await expect(page.locator('.model-menu-btn').nth(1)).toContainText('울트라코드');
-  // 재시작이 권한 모드 계보를 이월한다 — 신뢰모드가 여전히 활성이어야 단언이 유효하다.
+  // 런타임 적용이라 세션이 그대로 이어진다 — 신뢰모드도 당연히 유지된다.
   await expect(page.getByLabel('권한 모드')).toHaveValue('bypassPermissions');
+  await page.keyboard.press('Escape'); // 팝오버 닫기(다음 단계의 입력 조작과 겹치지 않게)
 
   // 목표 설정 — 인자가 붙으면 `/` 드롭다운이 닫히므로 Enter가 그대로 전송된다.
   const input = page.getByLabel('메시지 입력');
@@ -724,11 +729,13 @@ test('설정 → Claude Code Config(JSON 탭) — 편집·저장이 파일에 �
   const configFile = CONFIG_FILE;
   expect(readFileSync(configFile, 'utf8')).toBe('{ "model": "opus" }');
 
-  // 저장 뒤 기준선이 갱신돼 연속 저장이 자기 자신과 충돌하지 않는다
+  // 저장 뒤 기준선이 갱신돼 연속 저장이 자기 자신과 충돌하지 않는다.
+  // 두 번째 저장은 토스트로 기다릴 수 없다 — 첫 저장의 토스트가 아직 떠 있으면
+  // .first()가 그 옛 토스트에 즉시 매칭돼, 쓰기가 끝나기 전에 파일을 읽는다.
+  // "저장됐다"의 정의 자체인 파일 내용으로 직접 기다린다.
   await area.fill('{ "model": "sonnet" }');
   await editor.getByRole('button', { name: '저장' }).click();
-  await expect(page.getByText('Claude Code 설정을 저장했습니다.', { exact: false }).first()).toBeVisible();
-  expect(readFileSync(configFile, 'utf8')).toBe('{ "model": "sonnet" }');
+  await expect.poll(() => readFileSync(configFile, 'utf8')).toBe('{ "model": "sonnet" }');
 
   // 외부에서 파일이 바뀌면(다른 편집기·CLI) 덮어쓰지 않고 409로 막는다
   writeFileSync(configFile, '{ "changed": "outside" }');

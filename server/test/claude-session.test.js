@@ -237,6 +237,111 @@ test('(h) effort 옵션이 spawn argv에 --effort로 전달된다', async () => 
   }
 });
 
+test('(h2) setEffort: apply_flag_settings 제어 요청으로 런타임 변경 — 재시작 없음', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const session = new ClaudeSession({
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    cwd: process.cwd(),
+    effort: 'low',
+  });
+  const exit = trackExit(session);
+  try {
+    await session.start();
+    assert.equal(session.effort, 'low');
+    assert.equal(session.ultracode, false);
+    await session.setEffort('max');
+    // 프로세스는 살아 있다 — 변경이 재시작이 아니라는 계약의 핵심
+    assert.equal(exit.exited, false);
+    assert.equal(session.effort, 'max');
+
+    await session.setEffort('xhigh', { ultracode: true });
+    assert.equal(session.effort, 'xhigh');
+    assert.equal(session.ultracode, true);
+    // null = CLI 기본으로 되돌리기
+    await session.setEffort(null);
+    assert.equal(session.effort, undefined);
+    assert.equal(session.ultracode, false);
+  } finally {
+    await shutdown(session, exit);
+  }
+});
+
+test('(h3) setEffort 와이어 형상 — settings에 effortLevel·ultracode가 실린다', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const session = new ClaudeSession({
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    cwd: process.cwd(),
+  });
+  const exit = trackExit(session);
+  try {
+    await session.start();
+    // 픽스처가 되돌려주는 진단 필드로 실제 전송 형상을 단언한다 — 실 CLI v2.1.233의
+    // /effort와 동일한 채널·필드(subtype/settings.effortLevel/settings.ultracode)를 쓴다.
+    const res = await session.setEffort('xhigh', { ultracode: true });
+    assert.equal(res.echo_request.subtype, 'apply_flag_settings');
+    assert.deepEqual(res.echo_request.settings, { effortLevel: 'xhigh', ultracode: true });
+    // settings는 shallow merge라 픽스처의 누적 상태로도 확인된다
+    assert.deepEqual(res.flag_settings, { effortLevel: 'xhigh', ultracode: true });
+    const res2 = await session.setEffort('low');
+    assert.deepEqual(res2.echo_request.settings, { effortLevel: 'low', ultracode: false });
+  } finally {
+    await shutdown(session, exit);
+  }
+});
+
+test('(h4) ultracode 세션: --effort는 xhigh로 스폰하고 플래그는 initialize 뒤에 얹는다', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const session = new ClaudeSession({
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    cwd: process.cwd(),
+    effort: 'xhigh',
+    ultracode: true,
+  });
+  const exit = trackExit(session);
+  try {
+    const initInfo = await session.start();
+    const argv = initInfo.argv;
+    // 스폰 인자에는 'ultracode'가 아니라 CLI가 받는 xhigh만 나간다
+    assert.equal(argv[argv.indexOf('--effort') + 1], 'xhigh');
+    assert.equal(argv.includes('ultracode'), false);
+    // start()가 반환될 때 플래그가 이미 적용돼 있다(핸드셰이크 뒤 순차 적용)
+    assert.equal(session.ultracode, true);
+    assert.equal(session.effort, 'xhigh');
+  } finally {
+    await shutdown(session, exit);
+  }
+});
+
+test('(h5) ultracode 적용 실패는 세션 시작을 죽이지 않고 상태만 정직하게 남는다', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  process.env.FAKE_NO_FLAG_SETTINGS = '1'; // apply_flag_settings를 모르는 구버전 CLI 흉내
+  const session = new ClaudeSession({
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    cwd: process.cwd(),
+    effort: 'xhigh',
+    ultracode: true,
+  });
+  const exit = trackExit(session);
+  try {
+    const initInfo = await session.start(); // 거부되지 않는다
+    assert.ok(Array.isArray(initInfo.models));
+    // effortLevel은 --effort로 이미 걸렸고, 얹지 못한 플래그만 false로 남는다
+    assert.equal(session.effort, 'xhigh');
+    assert.equal(session.ultracode, false);
+    // 런타임 변경도 실패를 그대로 알린다(클라이언트의 재시작 폴백 트리거)
+    await assert.rejects(() => session.setEffort('max'), /apply_flag_settings/);
+    // 실패한 값은 기억하지 않는다 — 이후 재시작 스폰 인자가 어긋나지 않도록
+    assert.equal(session.effort, 'xhigh');
+  } finally {
+    delete process.env.FAKE_NO_FLAG_SETTINGS;
+    await shutdown(session, exit);
+  }
+});
+
 test('(i) start-fail: initialize 전에 죽으면 start()가 stderr 원인을 담아 거부한다', async () => {
   const session = makeSession('start-fail');
   const exit = trackExit(session);

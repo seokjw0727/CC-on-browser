@@ -10,6 +10,7 @@ import { sessionDisplayTitle } from './lib/sessionTree.js';
 import { artifactsOf, findArtifact } from './lib/artifacts.js';
 import ChatView from './components/ChatView.jsx';
 import Composer from './components/Composer.jsx';
+import Icon from './components/Icon.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import PermissionDialog from './components/PermissionDialog.jsx';
 import PreviewPanel from './components/PreviewPanel.jsx';
@@ -82,7 +83,7 @@ function Shell() {
 
   // ----- 결과물 미리보기 -----
   // 산출물 목록은 상태가 아니라 대화 메시지에서 파생한다(lib/artifacts.js) —
-  // 재개·effort 재시작이 메시지를 이월하므로 목록도 따라온다.
+  // 재개·노력 수준 재시작(구버전 CLI 폴백)이 메시지를 이월하므로 목록도 따라온다.
   const caseInsensitive = state.initInfo?.platform === 'win32'
     || (typeof navigator !== 'undefined' && /win/i.test(navigator.platform || ''));
   const artifacts = useMemo(
@@ -180,7 +181,7 @@ function Shell() {
             aria-label="사이드바 열기"
             data-tip="사이드바 열기"
           >
-            ☰
+            <Icon name="menu" />
           </button>
         )}
         {/* 사이드바가 접히면 세션 목록이 안 보이므로 우측 상단에 현재 세션 이름을 띄운다.

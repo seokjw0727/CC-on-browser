@@ -3,6 +3,7 @@
 // 클릭하면 즉시 닫힌다. 오류는 role="alert"로 스크린리더에 즉시 전달.
 import { useEffect } from 'react';
 import { useStore } from '../lib/store.jsx';
+import Icon from './Icon.jsx';
 import './interact.css';
 
 const TOAST_MS = { info: 3_000, error: 6_000 };
@@ -22,9 +23,10 @@ function Toast({ toast, onDone }) {
       data-tip="클릭하여 닫기"
       onClick={onDone}
     >
-      <span className="toast-ico" aria-hidden="true">
-        {toast.kind === 'error' ? '⚠' : 'ℹ'}
-      </span>
+      <Icon
+        name={toast.kind === 'error' ? 'warning' : 'info'}
+        className={`toast-ico${toast.kind === 'error' ? ' ico-danger' : ''}`}
+      />
       <span className="toast-text">{toast.text}</span>
     </button>
   );

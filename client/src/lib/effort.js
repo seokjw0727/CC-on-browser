@@ -1,29 +1,53 @@
-// 노력 수준 정의 + spawn 매핑.
+// 노력 수준 정의 + CLI 매핑 + 슬라이더 순수 헬퍼.
 //
-// 'ultracode'는 CC-on-browser 전용 최상위 "의사(pseudo) 티어"다 — 실제 claude CLI의
-// --effort는 low|medium|high|xhigh|max만 받는다(claude --help v2.1.x 실측). 그래서
-// ultracode는 UI/표시에서만 별도 모드로 구분하고, 서버/CLI로 나갈 때는 spawnEffort()가
-// 실제 CLI 값(max)으로 매핑한다. 즉 ultracode = "최대 노력 + 강조 표시된 플래그십 모드"이며,
-// 브라우저가 스폰하는 평범한 CLI 세션에는 별도 워크플로 채널이 없으므로 실효는 max 노력이다.
+// 'ultracode'는 UI 최상위 티어다 — 실제 claude CLI의 --effort는 low|medium|high|
+// xhigh|max만 받는다(claude --help 실측). CLI 자신의 `/effort ultracode`는 이를
+// **effortLevel 'xhigh' + ultracode 플래그**로 보내므로(v2.1.233 바이너리 실측),
+// 우리도 같은 의미로 매핑한다: effortSettings()가 그 단일 출처다.
+// ultracode는 워크플로 지원 계정·xhigh 지원 모델을 요구하므로, 미지원 환경에서는
+// 실효가 '매우 높음'(xhigh)에 머문다.
+// desc는 도트 hover 툴팁에서 `<라벨> — <desc>` 형태로 쓰이므로, 문구를 대시로 시작하지
+// 않는다(대시가 겹쳐 보인다).
 export const EFFORT_LEVELS = [
-  { value: 'low', label: '낮음' },
-  { value: 'medium', label: '중간' },
-  { value: 'high', label: '높음' },
-  { value: 'xhigh', label: '매우 높음' },
-  { value: 'max', label: '최대' },
-  { value: 'ultracode', label: '울트라코드', ultra: true },
+  { value: 'low', label: '낮음', desc: '가장 빠른 응답. 간단한 편집·질문에 적합합니다.' },
+  { value: 'medium', label: '중간', desc: '속도와 정확도의 균형. 가벼운 작업에 적합합니다.' },
+  { value: 'high', label: '높음', desc: 'CLI 기본값. 대부분의 코딩 작업에 권장됩니다.' },
+  { value: 'xhigh', label: '매우 높음', desc: '더 깊게 추론합니다. 까다로운 버그·설계에 적합합니다.' },
+  { value: 'max', label: '최대', desc: 'CLI가 지원하는 최고 노력. 가장 느리지만 가장 깊게 생각합니다.' },
+  {
+    value: 'ultracode',
+    label: '울트라코드',
+    ultra: true,
+    desc: '매우 높음 + 멀티에이전트 워크플로(플래그십). 미지원 환경에서는 매우 높음과 같습니다.',
+  },
 ];
 
 export const DEFAULT_EFFORT = 'high'; // CLI 기본값 (claude --help 실측: defaults to high)
 
-// UI 전용 의사 티어(실제 CLI 플래그가 아님) — supportedEffortLevels 필터에서 제외되지
-// 않도록, 모델별 지원 목록과 무관하게 항상 UI에 노출한다.
+// 팝오버 (?) 아이콘의 전체 도움말 — 슬라이더 헤더와 같은 곳에서만 쓰지만 문구는
+// 여기 정의를 단일 출처로 둔다(레벨별 desc와 짝).
+export const EFFORT_HELP =
+  '노력 수준은 모델이 답하기 전에 얼마나 깊게 생각할지를 정합니다. '
+  + '높이면 더 정확하지만 느려지고 토큰도 더 씁니다. '
+  + '변경은 실행 중인 세션에 즉시 적용됩니다(진행 중인 턴은 다음 턴부터).';
+
+// UI 전용 최상위 티어 — 모델이 보고하는 supportedEffortLevels 목록에는 없으므로
+// 그 필터에서 제외되지 않도록 항상 UI에 노출한다.
 const UI_ONLY = new Set(['ultracode']);
 
-// UI 의사 티어 → 실제 CLI --effort 값. 서버(EFFORT_LEVELS 검증)·spawn으로 나가는
-// effort 값은 반드시 이 함수를 거친다. ultracode는 CLI 최고 노력인 max로 낮춰 보낸다.
-export function spawnEffort(effort) {
-  if (effort === 'ultracode') return 'max';
+/**
+ * UI 티어 → 서버로 보내는 페이로드 {effort, ultracode}. start·setEffort로 나가는
+ * 노력 수준은 반드시 이 함수를 거친다. ultracode는 CLI와 동일하게 xhigh + 플래그로
+ * 분해된다(서버 검증은 low..max만 통과시키므로 'ultracode' 문자열은 나가지 않는다).
+ */
+export function effortPayload(effort) {
+  if (effort === 'ultracode') return { effort: 'xhigh', ultracode: true };
+  return { effort: effort ?? null, ultracode: false };
+}
+
+/** effortPayload의 역함수 — 서버 effortSet 방송을 UI 티어로 되돌린다. */
+export function uiEffort({ effort = null, ultracode = false } = {}) {
+  if (ultracode) return 'ultracode';
   return effort ?? null;
 }
 
@@ -33,4 +57,53 @@ export function isUiEffort(effort) {
 
 export function effortLabel(effort) {
   return EFFORT_LEVELS.find((l) => l.value === effort)?.label ?? effort;
+}
+
+export function effortDesc(effort) {
+  return EFFORT_LEVELS.find((l) => l.value === effort)?.desc ?? '';
+}
+
+// ----- 슬라이더 순수 헬퍼 (DOM 없이 단위 테스트되는 부분) -----
+
+/** 트랙 위 비율(0~1) → 가장 가까운 레벨 인덱스. 범위를 벗어난 값도 양끝으로 붙인다. */
+export function effortIndexFromRatio(ratio, count) {
+  if (!Number.isFinite(ratio) || !Number.isFinite(count) || count <= 0) return 0;
+  const clamped = Math.min(1, Math.max(0, ratio));
+  return Math.min(count - 1, Math.max(0, Math.round(clamped * (count - 1))));
+}
+
+/** 레벨 인덱스 → 트랙 위 비율(0~1). 도트·핸들·채움의 공통 좌표. */
+export function effortRatioFromIndex(index, count) {
+  if (!Number.isFinite(index) || !Number.isFinite(count) || count <= 1) return 0;
+  const clamped = Math.min(count - 1, Math.max(0, index));
+  return clamped / (count - 1);
+}
+
+/**
+ * ARIA slider 키보드 규약 → 다음 인덱스. 처리하지 않는 키는 null을 돌려주므로
+ * 호출측이 기본 동작을 막을지(preventDefault) 판단할 수 있다.
+ * 오름차순 트랙이라 ArrowUp/Right가 증가, ArrowDown/Left가 감소한다.
+ */
+export function nextEffortIndex(key, index, count) {
+  if (!Number.isFinite(count) || count <= 0) return null;
+  const cur = Math.min(count - 1, Math.max(0, Number.isFinite(index) ? index : 0));
+  const clamp = (i) => Math.min(count - 1, Math.max(0, i));
+  switch (key) {
+    case 'ArrowRight':
+    case 'ArrowUp':
+      return clamp(cur + 1);
+    case 'ArrowLeft':
+    case 'ArrowDown':
+      return clamp(cur - 1);
+    case 'Home':
+      return 0;
+    case 'End':
+      return count - 1;
+    case 'PageUp':
+      return clamp(cur + 2);
+    case 'PageDown':
+      return clamp(cur - 2);
+    default:
+      return null;
+  }
 }

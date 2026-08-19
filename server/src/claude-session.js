@@ -15,6 +15,10 @@ export class ClaudeSession extends EventEmitter {
   #model;
   #permissionMode;
   #effort;
+  // 요청(스폰 인자)과 실제 적용 상태를 분리해 둔다 — 얹기에 실패한 플래그를 적용된
+  // 것처럼 기억하면 UI가 CLI 상태를 잘못 광고한다.
+  #ultracodeRequested;
+  #ultracode = false;
   #resumeSessionId;
   #proc = null;
   #exited = false;
@@ -29,7 +33,9 @@ export class ClaudeSession extends EventEmitter {
 
   sessionId = null;
 
-  constructor({ cliPath, cliArgsPrefix = [], cwd, model, permissionMode, effort, resumeSessionId } = {}) {
+  constructor({
+    cliPath, cliArgsPrefix = [], cwd, model, permissionMode, effort, ultracode = false, resumeSessionId,
+  } = {}) {
     super();
     if (!cliPath) throw new TypeError('cliPath is required');
     if (!cwd) throw new TypeError('cwd is required');
@@ -38,9 +44,13 @@ export class ClaudeSession extends EventEmitter {
     this.#cwd = cwd;
     this.#model = model;
     this.#permissionMode = permissionMode;
-    // effort(low|medium|high|xhigh|max)는 spawn 전용 플래그 — 런타임 변경 채널이 없음을
-    // v2.1.205 바이너리에서 확인("can't change server effort"). 변경은 --resume 재시작으로.
+    // effort(low|medium|high|xhigh|max)는 시작 시 --effort로 전달하고, 이후에는
+    // setEffort()의 런타임 채널로 바꾼다(재시작 불필요 — v2.1.233 실측, setEffort 주석 참조).
     this.#effort = effort;
+    // ultracode는 --effort 값이 아니라 별개의 플래그 설정이다(CLI의 /effort ultracode는
+    // effortLevel 'xhigh' + ultracode true를 함께 보낸다 — v2.1.233 바이너리 실측).
+    // 스폰 인자로는 전달할 수 없어 initialize 직후 setEffort로 얹는다(start() 참조).
+    this.#ultracodeRequested = ultracode === true;
     this.#resumeSessionId = resumeSessionId;
   }
 
@@ -94,7 +104,18 @@ export class ClaudeSession extends EventEmitter {
     });
     this.#proc.on('close', (code) => this.#handleExit(code));
 
-    return this.#sendControlRequest({ subtype: 'initialize' }, INIT_TIMEOUT_MS);
+    const initInfo = await this.#sendControlRequest({ subtype: 'initialize' }, INIT_TIMEOUT_MS);
+    // ultracode는 스폰 플래그가 없으므로 initialize가 끝난 뒤에 얹는다 — 핸드셰이크와
+    // 경쟁시키지 않으려 반드시 응답 이후다. 실패해도 세션 시작 자체는 살린다:
+    // effortLevel은 이미 --effort로 적용됐고 ultracode는 그 위의 부가 모드일 뿐이다.
+    if (this.#ultracodeRequested) {
+      try {
+        await this.setEffort(this.#effort ?? null, { ultracode: true });
+      } catch (err) {
+        this.emit('raw', `ultracode 적용 실패 (노력 수준은 유지): ${err?.message ?? err}`);
+      }
+    }
+    return initInfo;
   }
 
   sendUserText(text) {
@@ -134,6 +155,42 @@ export class ClaudeSession extends EventEmitter {
       throw new Error('신뢰모드는 세션 시작 시에만 설정할 수 있습니다');
     }
     await this.#sendControlRequest({ subtype: 'set_permission_mode', mode });
+  }
+
+  /** 현재 노력 수준 — 스폰 인자 또는 마지막 setEffort 성공값 (미지정이면 undefined = CLI 기본) */
+  get effort() {
+    return this.#effort;
+  }
+
+  /** ultracode 플래그가 **실제로 적용됐는가** — 요청만 하고 실패한 경우는 false. */
+  get ultracode() {
+    return this.#ultracode;
+  }
+
+  /**
+   * 노력 수준 런타임 변경 — 세션 재시작 없이 실행 중 프로세스에 적용한다.
+   * CLI v2.1.233 실측: 우리와 동일한 stream-json 스폰에서 apply_flag_settings 제어
+   * 요청이 success를 돌려준다(바이너리 설명: "Shallow-merge flag-settings patch —
+   * same shape as SDKControlApplyFlagSettingsRequest.settings"). CLI 자신의 /effort도
+   * 같은 채널·같은 필드를 쓴다. settings는 shallow merge라 바꿀 키만 싣는다.
+   *
+   * 주의: 이 채널은 값을 검증하지 않는다 — effortLevel:'bogus-level'도 success다(실측).
+   * 즉 success는 "요청 수용"이지 "유효값 적용"이 아니므로, 허용값 검증은 호출측
+   * (server.js EFFORT_LEVELS)이 책임진다. 그 검증이 유일한 방어선이다.
+   *
+   * 구버전 CLI(이 subtype 미지원)는 error를 돌려주므로, 호출측은 그 실패를 보고
+   * 예전 방식(--resume 재시작)으로 폴백할 수 있다.
+   */
+  async setEffort(effortLevel, { ultracode = false } = {}) {
+    const res = await this.#sendControlRequest({
+      subtype: 'apply_flag_settings',
+      settings: { effortLevel: effortLevel ?? null, ultracode: ultracode === true },
+    });
+    // 성공한 뒤에만 기억한다 — 실패한 값이 남으면 이후 재시작 스폰 인자가 실제 CLI
+    // 상태와 어긋난다.
+    this.#effort = effortLevel ?? undefined;
+    this.#ultracode = ultracode === true;
+    return res;
   }
 
   /**

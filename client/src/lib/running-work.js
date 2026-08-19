@@ -65,7 +65,7 @@ export function openWork(session) {
     out.push({
       key: `bg-${t.task_id}`,
       kind: 'background',
-      icon: t.task_type === 'local_agent' ? '🤖' : '⌘',
+      icon: t.task_type === 'local_agent' ? 'bot' : 'command',
       label: String(t.description ?? '').trim() || t.task_id,
       detail: TASK_KIND_LABEL[t.task_type] ?? '백그라운드 작업',
       uid: toolUseId != null ? uidByToolUseId.get(toolUseId) ?? null : null,
@@ -81,7 +81,7 @@ export function openWork(session) {
     out.push({
       key: s.key,
       kind: 'subagent',
-      icon: '🤖',
+      icon: 'bot',
       label: s.label,
       detail: s.subagentType || '서브에이전트',
       uid: s.uid ?? null,
@@ -99,7 +99,7 @@ export function openWork(session) {
     out.push({
       key: `fg-${m.uid ?? m.toolUseId}`,
       kind: 'shell',
-      icon: '⌘',
+      icon: 'command',
       label: shellLabel(m),
       detail: '실행 중',
       uid: m.uid ?? null,

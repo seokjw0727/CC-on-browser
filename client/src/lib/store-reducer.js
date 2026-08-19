@@ -2,6 +2,7 @@
 // (store.jsx가 이 리듀서를 useReducer에 연결하고 WS/컨텍스트를 소유한다.)
 import { reduceCliEvent, finalizeCompactionCards, deriveGoalFromMessages } from './reduce-cli-event.js';
 import { autoPreviewPath } from './artifacts.js';
+import { uiEffort } from './effort.js';
 
 export function createSessionState(partial = {}) {
   const s = {
@@ -22,7 +23,10 @@ export function createSessionState(partial = {}) {
     // 달리 불변이며 신뢰모드 UI 노출 자격 판정에 쓴다(spawnModel 패턴과 동일).
     spawnPermissionMode: 'default',
     maxThinkingTokens: null, // 사고 예산 — 서버 setThinking 채널용으로 유지(현재 UI 미노출)
-    effort: null, // 노력 수준(low|medium|high|xhigh|max) — null=CLI 기본(high), spawn 전용
+    // 노력 수준 — **UI 티어** 값(low|medium|high|xhigh|max|ultracode). null=CLI 기본(high).
+    // 실행 중 변경은 재시작이 아니라 런타임 채널(setEffort)로 하고, 화면 반영은 서버의
+    // effortSet 방송이 담당한다(와이어의 {effort, ultracode} → uiEffort로 되돌림).
+    effort: null,
     // --resume 게이트: 완결 턴 ≥1(result 관측) 또는 재개로 시작한 세션만 트랜스크립트가
     // 디스크에 존재한다(무턴 세션은 jsonl 미생성 — 실 CLI v2.1.206 실측).
     hasCompletedTurn: false,
@@ -93,7 +97,9 @@ export function createInitialState() {
     // startId -> {cwd, model, permissionMode, effort, resumeSessionId,
     //             preloadMessages?, preloadSessionId?, preloadUsage?,
     //             preloadCtxFromCalls?, preloadModel?, replaceKey?}
-    // replaceKey: effort 재시작처럼 기존 탭을 대체하는 시작 — started 도착 시 옛 세션 탭 제거
+    // replaceKey: 기존 탭을 대체하는 시작 — started 도착 시 옛 세션 탭 제거.
+    // 노력 수준 변경은 이제 런타임 채널로 적용되므로(재시작 없음) 이 경로는 그 채널을
+    // 지원하지 않는 구버전 CLI의 폴백에서만 쓰인다.
     pendingStarts: new Map(),
     toasts: [], // [{id, kind: 'info'|'error', text}] — 설정 변경·오류의 일시 알림(자동 소멸)
     newSessionOpen: false, // 새 세션(레포 선택) 모달 표시 여부 — Sidebar/Composer 공용
@@ -162,7 +168,7 @@ function handleServerMessage(state, msg) {
       const pendingStarts = new Map(state.pendingStarts);
       pendingStarts.delete(msg.startId);
       const sessions = new Map(state.sessions);
-      // effort 재시작: 새 탭이 옛 탭을 대체한다 — 성공(started)했을 때만 제거하므로
+      // 탭 대체 시작(노력 수준 폴백·재개): 새 탭이 옛 탭을 대체한다 — 성공(started)했을 때만 제거하므로
       // 시작 실패 시에는 옛 exited 탭이 남아 대화가 보존된다.
       if (opts.replaceKey && opts.replaceKey !== msg.key) sessions.delete(opts.replaceKey);
       sessions.set(
@@ -320,6 +326,16 @@ function handleServerMessage(state, msg) {
         // 비우지 않으면 세션 탭이 목록에서 사라지기까지(3초) 죽은 작업이 "실행 중"으로
         // 맥동한다 — result 없이 끝난 종료에서 실제로 재현된다(codex 지적).
         backgroundTasks: [],
+      }));
+
+    case 'effortSet':
+      // 노력 수준이 실행 중 세션에 적용됐다(재시작 없음). 서버가 전 소켓에 방송하므로
+      // 같은 세션을 열어 둔 다른 탭의 표시도 이 한 경로로 맞춰진다.
+      // 와이어는 CLI 형상({effort, ultracode})이고 화면은 UI 티어를 쓴다 —
+      // uiEffort가 그 둘을 잇는다(ultracode:true → 'ultracode').
+      return updateSession(state, msg.key, (s) => ({
+        ...s,
+        effort: uiEffort({ effort: msg.effort ?? null, ultracode: msg.ultracode === true }),
       }));
 
     case 'error': {

@@ -191,7 +191,7 @@ export const KNOWN_FIELDS = [
     path: ['skipDangerousModePermissionPrompt'],
     kind: 'boolean',
     label: '신뢰모드 진입 확인 건너뛰기',
-    hint: '⚠ 켜면 확인 없이 전부 실행하는 모드로 바로 들어갑니다.',
+    hint: '켜면 확인 없이 전부 실행하는 모드로 바로 들어갑니다.',
   },
   {
     id: 'inputNeededNotifEnabled',

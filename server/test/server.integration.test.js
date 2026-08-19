@@ -439,6 +439,83 @@ test('start: effort 검증 — 무효값은 spawn 전에 거부, 유효값은 �
   client.close();
 });
 
+test('setEffort: 런타임 변경 — 검증·reqId 상관·전 소켓 방송, 세션은 살아 있다', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
+  // 두 번째 탭 — 성공 방송이 요청 소켓만이 아니라 모두에게 가는지 본다
+  const other = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
+  client.send({ type: 'start', startId: 'cl_ef', cwd: tmpRoot, effort: 'low' });
+  const started = await client.next((m) => m.type === 'started' && m.startId === 'cl_ef');
+  const key = started.key;
+  // 시작 직후 실효 노력 수준이 같은 창구로 방송된다(요청대로 걸렸는지의 권위)
+  const initial = await client.next((m) => m.type === 'effortSet' && m.key === key);
+  assert.equal(initial.effort, 'low');
+  assert.equal(initial.ultracode, false);
+
+  // 무효값은 CLI에 닿기 전에 거부 — CLI는 이 채널의 값을 검증하지 않으므로(v2.1.233
+  // 실측) 서버 검증이 유일한 방어선이다. reqId는 실패 응답에도 실려야 한다.
+  for (const bad of [{ effort: 'ultracode' }, { effort: 'ultra' }, { effort: 'max', ultracode: 'yes' }]) {
+    client.send({ type: 'setEffort', key, reqId: 'r_bad', ...bad });
+    const err = await client.next((m) => m.type === 'error' && m.reqId === 'r_bad');
+    assert.match(err.message, /invalid (effort|ultracode)/);
+  }
+
+  // 유효값 — 성공 방송이 reqId를 그대로 되돌려준다(클라이언트의 ack 짝짓기 근거)
+  client.send({ type: 'setEffort', key, reqId: 'r_ok', effort: 'xhigh', ultracode: true });
+  const ack = await client.next((m) => m.type === 'effortSet' && m.reqId === 'r_ok');
+  assert.equal(ack.key, key);
+  assert.equal(ack.effort, 'xhigh');
+  assert.equal(ack.ultracode, true);
+  const echoed = await other.next((m) => m.type === 'effortSet' && m.reqId === 'r_ok');
+  assert.equal(echoed.effort, 'xhigh');
+
+  // 세션은 재시작되지 않았다 — 같은 key로 대화가 계속된다
+  client.send({ type: 'send', key, text: 'after effort change' });
+  const result = await client.next(
+    (m) => m.type === 'event' && m.key === key && m.payload?.type === 'result',
+  );
+  assert.equal(result.payload.is_error, false);
+  assert.equal(client.messages.some((m) => m.type === 'exit' && m.key === key), false);
+  client.send({ type: 'stop', key });
+  client.close();
+  other.close();
+});
+
+test('setEffort: 구버전 CLI(제어 요청 거부)는 reqId를 실은 error로 알려 폴백을 트리거한다', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  process.env.FAKE_NO_FLAG_SETTINGS = '1';
+  try {
+    const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
+    client.send({ type: 'start', startId: 'cl_ef_old', cwd: tmpRoot });
+    const started = await client.next((m) => m.type === 'started' && m.startId === 'cl_ef_old');
+    const key = started.key;
+    client.send({ type: 'setEffort', key, reqId: 'r_old', effort: 'max' });
+    const err = await client.next((m) => m.type === 'error' && m.reqId === 'r_old');
+    assert.equal(err.key, key);
+    assert.match(err.message, /apply_flag_settings/);
+    // 실패해도 세션은 그대로 — 폴백(재시작)은 클라이언트가 결정한다
+    assert.equal(client.messages.some((m) => m.type === 'exit' && m.key === key), false);
+    client.send({ type: 'stop', key });
+    client.close();
+  } finally {
+    delete process.env.FAKE_NO_FLAG_SETTINGS;
+  }
+});
+
+test('start: ultracode 세션은 --effort xhigh로 스폰되고 플래그는 시작 후 방송된다', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
+  client.send({ type: 'start', startId: 'cl_ultra', cwd: tmpRoot, effort: 'xhigh', ultracode: true });
+  const started = await client.next((m) => m.type === 'started' && m.startId === 'cl_ultra');
+  const argv = started.initInfo.argv;
+  assert.equal(argv[argv.indexOf('--effort') + 1], 'xhigh');
+  const eff = await client.next((m) => m.type === 'effortSet' && m.key === started.key);
+  assert.equal(eff.effort, 'xhigh');
+  assert.equal(eff.ultracode, true);
+  client.send({ type: 'stop', key: started.key });
+  client.close();
+});
+
 test('setThinking: 엄격 검증 — 강제변환성 무효 입력은 error, 유효 입력은 CLI 왕복', async () => {
   process.env.FAKE_SCENARIO = 'echo';
   const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);

@@ -37,6 +37,7 @@ import {
 } from '../lib/claude-settings-form.js';
 import { MODE_CLASS } from '../lib/permission-modes.js';
 import TrustModeWarning from './TrustModeWarning.jsx';
+import Icon from './Icon.jsx';
 import { useFocusTrap } from '../lib/useFocusTrap.js';
 
 const TABS = [
@@ -204,7 +205,7 @@ function EnvEditor({ rows, error, disabled, blocked, onChange }) {
                 if (i === rows.length - 1) addRef.current?.focus?.();
               }}
             >
-              ✕
+              <Icon name="close" />
             </button>
           </div>
         ))}
@@ -323,7 +324,7 @@ function PluginRow({ row, disabled, onToggle, onRemove }) {
             data-tip="설정에서 이 항목을 제거(켬/끔 기록 삭제)"
             onClick={() => onRemove(key)}
           >
-            ✕
+            <Icon name="close" />
           </button>
         </>
       )}
@@ -653,7 +654,7 @@ export default function ConfigEditorModal({ presenceStatus, restoreRef, onClose,
             aria-label="닫기"
             data-tip="닫기"
           >
-            ✕
+            <Icon name="close" />
           </button>
         </div>
 
@@ -663,7 +664,7 @@ export default function ConfigEditorModal({ presenceStatus, restoreRef, onClose,
           </div>
 
           <div className="mode-warning">
-            ⚠ 이 파일은 Claude Code CLI 전체의 설정입니다. 저장한 내용은 이 앱 밖에서
+            <Icon name="warning" className="ico-warn" /> 이 파일은 Claude Code CLI 전체의 설정입니다. 저장한 내용은 이 앱 밖에서
             시작되는 세션에도 적용되며, 이미 실행 중인 세션에는 반영되지 않습니다.
             폼에 없는 항목은 그대로 보존되지만, 값이 잘못됐거나 권한을 넓히는 설정은 걸러지지 않습니다.
           </div>

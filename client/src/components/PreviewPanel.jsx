@@ -20,6 +20,7 @@ import { baseName } from '../lib/artifacts.js';
 // 확장자 분류는 lib/preview-kind.js가 유일한 출처다 — 턴 종료 자동 열기의 주 산출물
 // 우선순위도 같은 분류를 쓰므로, 여기에 사본을 두면 둘이 조용히 어긋난다.
 import { extOf, previewKind } from '../lib/preview-kind.js';
+import Icon from './Icon.jsx';
 import './preview.css';
 
 // 하이라이트/마크다운 파싱에 넣을 텍스트 상한. 서버 바이트 상한(10MB)과 별개로,
@@ -198,7 +199,7 @@ export default function PreviewPanel({
           data-tip="새로고침"
           aria-label="새로고침"
         >
-          ↻
+          <Icon name="retry" />
         </button>
         <button
           type="button"
@@ -208,7 +209,7 @@ export default function PreviewPanel({
           data-tip="새 탭으로 열기"
           aria-label="새 탭으로 열기"
         >
-          ↗
+          <Icon name="external" />
         </button>
         <button
           type="button"
@@ -217,7 +218,7 @@ export default function PreviewPanel({
           data-tip="미리보기 닫기"
           aria-label="미리보기 닫기"
         >
-          ✕
+          <Icon name="close" />
         </button>
       </header>
 

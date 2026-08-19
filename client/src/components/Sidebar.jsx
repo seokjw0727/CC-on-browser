@@ -43,6 +43,7 @@ import {
   writePref,
 } from '../lib/preferences.js';
 import { Sparkle, Mascot } from './Brand.jsx';
+import Icon from './Icon.jsx';
 import SessionMenu from './SessionMenu.jsx';
 import ConfigEditorModal from './ConfigEditorModal.jsx';
 import TrustModeWarning from './TrustModeWarning.jsx';
@@ -210,7 +211,7 @@ function NewSessionModal({
     if (resuming) return;
     const trimmed = cwd.trim();
     if (!trimmed) {
-      setError('작업 디렉터리를 선택하세요 (📂 폴더 선택).');
+      setError('작업 디렉터리를 선택하세요 (폴더 선택).');
       return;
     }
     onStart({
@@ -325,7 +326,7 @@ function NewSessionModal({
             setConfirmDel(s);
           }}
         >
-          🗑
+          <Icon name="trash" className="ico-danger" />
         </button>
       </div>
     );
@@ -358,7 +359,7 @@ function NewSessionModal({
               aria-label="닫기"
               data-tip="닫기"
             >
-              ✕
+              <Icon name="close" />
             </button>
           </div>
 
@@ -373,7 +374,11 @@ function NewSessionModal({
                   aria-disabled={browsing || platform !== 'win32'}
                   data-tip={platform === 'win32' ? '윈도우 파일 탐색기로 폴더 선택' : '네이티브 폴더 선택은 Windows에서만 지원됩니다'}
                 >
-                  {browsing ? '탐색기 여는 중…' : '📂 폴더 선택 (파일 탐색기)'}
+                  {browsing ? '탐색기 여는 중…' : (
+                    <>
+                      <Icon name="folder-open" /> 폴더 선택 (파일 탐색기)
+                    </>
+                  )}
                 </button>
               </div>
               {/* 선택된 경로 표시 — Windows가 아니면 직접 입력 폴백. */}
@@ -740,7 +745,7 @@ function SettingsPanel({ theme, onSetTheme, onEditConfig }) {
             aria-pressed={theme === 'light'}
             onClick={() => onSetTheme('light')}
           >
-            ☀ 라이트
+            <Icon name="sun" /> 라이트
           </button>
           <button
             type="button"
@@ -748,7 +753,7 @@ function SettingsPanel({ theme, onSetTheme, onEditConfig }) {
             aria-pressed={theme === 'dark'}
             onClick={() => onSetTheme('dark')}
           >
-            ☾ 다크
+            <Icon name="moon" /> 다크
           </button>
         </div>
       </div>
@@ -894,7 +899,7 @@ function FootModal({ panel, presenceStatus, onClose, theme, onSetTheme, onEditCo
           <span id={`sidebar-${panel}-title`}>{title}</span>
           <span className="spacer" />
           <button type="button" className="icon-btn" onClick={onClose} aria-label="닫기">
-            ✕
+            <Icon name="close" />
           </button>
         </div>
         <div className="modal-body foot-body">
@@ -1137,7 +1142,7 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
     const failed = () => notify('WebSocket이 연결되어 있지 않습니다.', 'error');
     return {
       key: 'remote',
-      icon: '📱',
+      icon: 'phone',
       label: active ? '원격 제어 끄기' : '원격 제어 켜기',
       disabled,
       tip,
@@ -1269,7 +1274,7 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
   const dirGroup = (node) => (
     <div key={node.key} className={`dir-group${node.active ? ' active-dir' : ''}`}>
       <div className="dir-head static" data-tip={node.cwd || node.label}>
-        <span className="dir-ico" aria-hidden="true">📁</span>
+        <Icon name="folder" size={14} className="dir-ico" />
         <span className="truncate">{node.label}</span>
         <span className="badge">{node.live.length}</span>
       </div>
@@ -1293,7 +1298,7 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
           data-tip="사이드바 접기"
           aria-label="사이드바 접기"
         >
-          ⟨
+          <Icon name="chevron-left" />
         </button>
       </div>
 
@@ -1361,7 +1366,7 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
           items={[
             {
               key: 'rename',
-              icon: '✎',
+              icon: 'edit',
               label: '이름 변경',
               onSelect: () => {
                 const sess = state.sessions.get(menu.rowKey);
@@ -1382,7 +1387,7 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
             state.sessions.get(menu.rowKey)?.status === 'exited'
               ? {
                 key: 'close',
-                icon: '✕',
+                icon: 'close',
                 label: '목록에서 제거',
                 onSelect: () => {
                   dispatch({ type: 'remove-session', key: menu.rowKey });
@@ -1393,7 +1398,7 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
               }
               : {
                 key: 'close',
-                icon: '✕',
+                icon: 'close',
                 label: '세션 종료 (CLI 정지)',
                 danger: true,
                 onSelect: () => stopSession(menu.rowKey),
@@ -1467,7 +1472,7 @@ function ConfirmDeleteModal({ target, presenceStatus, busy, restoreRef, onConfir
             aria-label="닫기"
             data-tip="닫기"
           >
-            ✕
+            <Icon name="close" />
           </button>
         </div>
         <div className="modal-body">

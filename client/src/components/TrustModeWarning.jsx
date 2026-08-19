@@ -4,10 +4,12 @@
 // permissions.defaultMode. Sidebar.jsx 안에 두면 ConfigEditorModal이 Sidebar를
 // 거꾸로 import해야 해서(Sidebar → ConfigEditorModal이 이미 있다) 순환이 된다 —
 // 그래서 독립 파일이다.
+import Icon from './Icon.jsx';
+
 export default function TrustModeWarning() {
   return (
     <div className="mode-warning">
-      ⚠ 신뢰모드(bypassPermissions): 모든 도구가 확인 없이 실행됩니다. 파일
+      <Icon name="warning" className="ico-danger" /> 신뢰모드(bypassPermissions): 모든 도구가 확인 없이 실행됩니다. 파일
       수정·명령 실행이 즉시 반영되므로 신뢰할 수 있는 작업에만 사용하세요.
     </div>
   );

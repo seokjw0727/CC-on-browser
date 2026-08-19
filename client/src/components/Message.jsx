@@ -7,6 +7,7 @@ import { fmtTok, fmtClock } from '../lib/format.js';
 import { nextShown } from '../lib/stream-pace.js';
 import ToolCard from './ToolCard.jsx';
 import ThinkingBlock from './ThinkingBlock.jsx';
+import Icon from './Icon.jsx';
 
 // 메시지 꼬리표 시각. item.at이 없으면(옛 프리로드 등) 아무것도 렌더하지 않는다.
 // dateTime에는 ISO 전체를, title에는 로케일 전체 시각을 실어 hover로 날짜까지 볼 수 있게 한다.
@@ -125,9 +126,7 @@ function CompactionCard({ item }) {
   return (
     <div className={`compaction-card${stateCls}`}>
       <div className="compaction-head">
-        <span className="compaction-ico" aria-hidden="true">
-          {running ? '🗜' : canceled ? '⊘' : '✓'}
-        </span>
+        <Icon name={running ? 'compress' : canceled ? 'blocked' : 'check'} className="compaction-ico" />
         <span className="compaction-title">
           {running ? '컨텍스트 압축 중…' : canceled ? '컨텍스트 압축 중단됨' : '컨텍스트 압축 완료'}
         </span>
@@ -170,7 +169,7 @@ function CompactionCard({ item }) {
 function CompactionSummary({ item }) {
   return (
     <details className="compaction-summary">
-      <summary className="dim">📄 이전 대화 압축 요약 — 펼치기</summary>
+      <summary className="dim"><Icon name="document" /> 이전 대화 압축 요약 — 펼치기</summary>
       <pre className="compaction-summary-body">{item.text}</pre>
     </details>
   );
@@ -216,7 +215,7 @@ function MessageBody({ item, isNew, debug = false, onPreview }) {
       return (
         <div className={`msg msg-command${enter}`}>
           <span className="cmd-chip">
-            <span className="cmd-chip-ico" aria-hidden="true">⌘</span>
+            <Icon name="command" size={12} className="ico-inline cmd-chip-ico" />
             <span className="cmd-chip-name">/{item.name}</span>
             {item.args ? <span className="cmd-chip-args">{item.args}</span> : null}
           </span>
@@ -245,7 +244,7 @@ function MessageBody({ item, isNew, debug = false, onPreview }) {
           aria-label="대화 컨텍스트가 초기화되었습니다 (/clear)"
         >
           <span className="cleared-line" aria-hidden="true" />
-          <span className="cleared-label">🧹 대화 컨텍스트가 초기화되었습니다 · /clear</span>
+          <span className="cleared-label"><Icon name="broom" /> 대화 컨텍스트가 초기화되었습니다 · /clear</span>
           <span className="cleared-line" aria-hidden="true" />
         </div>
       );
@@ -256,7 +255,8 @@ function MessageBody({ item, isNew, debug = false, onPreview }) {
     case 'usage':
       return (
         <div className={`msg msg-usage${enter}`}>
-          ↑ {fmtTok(item.inTok)} ↓ {fmtTok(item.outTok)} tok
+          <Icon name="arrow-up" size={12} className="ico-inline" /> {fmtTok(item.inTok)}{' '}
+          <Icon name="arrow-down" size={12} className="ico-inline" /> {fmtTok(item.outTok)} tok
           {typeof item.durationMs === 'number'
             ? ` · ${(item.durationMs / 1000).toFixed(1)}s`
             : ''}

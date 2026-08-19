@@ -1,5 +1,6 @@
 // 신규 기능 단위 테스트:
-//  - lib/effort.js: ultracode(UI 의사 티어) → spawn max 매핑, 라벨/판별
+//  - lib/effort.js: ultracode(UI 최상위 티어) ↔ CLI 페이로드 매핑, 라벨/설명/판별,
+//    슬라이더 좌표·키보드 헬퍼
 //  - reduce-cli-event: /goal 추적(커맨드 에코·stdout), stdout 노이즈 억제,
 //    lastUserText(인터럽트 복구용), 순수성(입력 불변)
 import { test } from 'node:test';
@@ -9,9 +10,14 @@ import { createSessionState } from '../src/lib/store-reducer.js';
 import {
   EFFORT_LEVELS,
   DEFAULT_EFFORT,
-  spawnEffort,
   isUiEffort,
   effortLabel,
+  effortDesc,
+  effortPayload,
+  uiEffort,
+  effortIndexFromRatio,
+  effortRatioFromIndex,
+  nextEffortIndex,
 } from '../src/lib/effort.js';
 
 const cmdEcho = (name, args = '') => ({
@@ -31,12 +37,26 @@ const userText = (text) => ({
   message: { role: 'user', content: [{ type: 'text', text }] },
 });
 
-test('effort: ultracode는 UI 의사 티어 — spawn 시 max로 매핑, 나머지는 그대로', () => {
-  assert.equal(spawnEffort('ultracode'), 'max');
-  assert.equal(spawnEffort('max'), 'max');
-  assert.equal(spawnEffort('low'), 'low');
-  assert.equal(spawnEffort(null), null);
-  assert.equal(spawnEffort(undefined), null);
+test('effort: ultracode는 CLI와 같은 의미로 분해된다 — xhigh + ultracode 플래그', () => {
+  // 실 CLI v2.1.233의 /effort ultracode와 동일: effortLevel 'xhigh' + ultracode true.
+  assert.deepEqual(effortPayload('ultracode'), { effort: 'xhigh', ultracode: true });
+  assert.deepEqual(effortPayload('max'), { effort: 'max', ultracode: false });
+  assert.deepEqual(effortPayload('low'), { effort: 'low', ultracode: false });
+  assert.deepEqual(effortPayload(null), { effort: null, ultracode: false });
+  assert.deepEqual(effortPayload(undefined), { effort: null, ultracode: false });
+  // 서버 검증(low..max)을 통과하는 값만 나간다 — 'ultracode' 문자열은 절대 전송되지 않는다
+  for (const level of EFFORT_LEVELS) {
+    assert.notEqual(effortPayload(level.value).effort, 'ultracode', level.value);
+  }
+  // 역매핑(서버 effortSet 방송 → UI 티어)이 왕복에서 원값을 되돌린다
+  for (const level of EFFORT_LEVELS) {
+    assert.equal(uiEffort(effortPayload(level.value)), level.value, level.value);
+  }
+  assert.equal(uiEffort({ effort: 'xhigh', ultracode: false }), 'xhigh');
+  assert.equal(uiEffort({ effort: null, ultracode: false }), null);
+  assert.equal(uiEffort({}), null);
+  assert.equal(uiEffort(), null);
+
   assert.equal(isUiEffort('ultracode'), true);
   assert.equal(isUiEffort('max'), false);
   assert.equal(effortLabel('ultracode'), '울트라코드');
@@ -44,6 +64,58 @@ test('effort: ultracode는 UI 의사 티어 — spawn 시 max로 매핑, 나머�
   // ultracode는 목록의 최상위이자 유일한 ultra 티어
   assert.equal(EFFORT_LEVELS[EFFORT_LEVELS.length - 1].value, 'ultracode');
   assert.equal(EFFORT_LEVELS.filter((l) => l.ultra).length, 1);
+  // 레벨마다 hover 도움말 문구가 있다(툴팁·팝오버 설명의 단일 출처)
+  for (const level of EFFORT_LEVELS) {
+    assert.ok(effortDesc(level.value).length > 0, `${level.value} desc`);
+  }
+  assert.equal(effortDesc('nope'), '');
+});
+
+test('effort 슬라이더: 비율 ↔ 인덱스 환산은 양끝으로 붙고 범위를 넘지 않는다', () => {
+  const n = 6; // EFFORT_LEVELS 기본 개수
+  assert.equal(effortIndexFromRatio(0, n), 0);
+  assert.equal(effortIndexFromRatio(1, n), n - 1);
+  // 트랙 밖 드래그(포인터 캡처)도 양끝으로 클램프
+  assert.equal(effortIndexFromRatio(-0.4, n), 0);
+  assert.equal(effortIndexFromRatio(4, n), n - 1);
+  // 가장 가까운 도트로 스냅
+  assert.equal(effortIndexFromRatio(0.19, n), 1);
+  assert.equal(effortIndexFromRatio(0.5, n), 3);
+  assert.equal(effortIndexFromRatio(0.42, n), 2);
+  // 비정상 입력은 0으로(NaN이 style/aria로 새지 않게)
+  assert.equal(effortIndexFromRatio(NaN, n), 0);
+  assert.equal(effortIndexFromRatio(0.5, 0), 0);
+
+  assert.equal(effortRatioFromIndex(0, n), 0);
+  assert.equal(effortRatioFromIndex(n - 1, n), 1);
+  assert.equal(effortRatioFromIndex(3, n), 0.6);
+  // 모델 변경으로 레벨 수가 줄어든 뒤의 낡은 인덱스도 트랙을 넘지 않는다
+  assert.equal(effortRatioFromIndex(9, n), 1);
+  assert.equal(effortRatioFromIndex(-2, n), 0);
+  assert.equal(effortRatioFromIndex(0, 1), 0);
+  // 왕복: 인덱스 → 비율 → 인덱스는 자기 자신
+  for (let i = 0; i < n; i++) assert.equal(effortIndexFromRatio(effortRatioFromIndex(i, n), n), i);
+});
+
+test('effort 슬라이더: ARIA 키보드 규약 — 처리하지 않는 키는 null(기본 동작 보존)', () => {
+  const n = 6;
+  assert.equal(nextEffortIndex('ArrowRight', 2, n), 3);
+  assert.equal(nextEffortIndex('ArrowUp', 2, n), 3);
+  assert.equal(nextEffortIndex('ArrowLeft', 2, n), 1);
+  assert.equal(nextEffortIndex('ArrowDown', 2, n), 1);
+  assert.equal(nextEffortIndex('Home', 4, n), 0);
+  assert.equal(nextEffortIndex('End', 1, n), n - 1);
+  assert.equal(nextEffortIndex('PageUp', 1, n), 3);
+  assert.equal(nextEffortIndex('PageDown', 4, n), 2);
+  // 양끝에서 더 밀어도 머문다
+  assert.equal(nextEffortIndex('ArrowRight', n - 1, n), n - 1);
+  assert.equal(nextEffortIndex('ArrowLeft', 0, n), 0);
+  assert.equal(nextEffortIndex('PageDown', 1, n), 0);
+  // Tab·Enter·Escape 등은 슬라이더가 삼키지 않는다(팝오버 닫기·포커스 이동 보존)
+  for (const key of ['Tab', 'Enter', ' ', 'Escape', 'a']) {
+    assert.equal(nextEffortIndex(key, 2, n), null, key);
+  }
+  assert.equal(nextEffortIndex('ArrowRight', 0, 0), null);
 });
 
 test('goal: /goal <텍스트>는 목표 설정, /goal clear는 해제, 인자없는 /goal은 불변', () => {

@@ -26,8 +26,29 @@ const USAGE_CACHE_MS = 30_000;
 const QUOTA_CACHE_MS = 60_000;
 // 일별 집계(돌아보기 잔디)는 최대 1년치 스캔이라 5h/7d보다 캐시를 길게 둔다
 const DAILY_CACHE_MS = 5 * 60_000;
-// --effort 허용값 (spawn 전용 — claude --help 실측)
+// --effort 허용값 (claude --help 실측)
 const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+
+/**
+ * 노력 수준 인자 검증 — start(스폰)와 setEffort(런타임) 공용.
+ * 반환: {error} 또는 {effort, ultracode}.
+ *
+ * 이 검증이 유일한 방어선이다(v2.1.233 실측): CLI는 런타임 채널
+ * (apply_flag_settings)의 effortLevel을 전혀 검증하지 않고 무효값에도 success를
+ * 돌려주며, 스폰 --effort 무효값은 경고만 내고 조용히 기본 노력으로 대체한다.
+ * ultracode는 엄격 boolean만 받는다 — 'false' 같은 문자열이 truthy로 새지 않도록.
+ */
+function readEffortArgs(msg) {
+  const effort = msg.effort ?? null;
+  if (effort !== null && !EFFORT_LEVELS.has(effort)) {
+    return { error: `invalid effort: ${JSON.stringify(msg.effort)}` };
+  }
+  const raw = msg.ultracode;
+  if (raw != null && typeof raw !== 'boolean') {
+    return { error: `invalid ultracode: ${JSON.stringify(raw)}` };
+  }
+  return { effort, ultracode: raw === true };
+}
 // 'bye'(의도적 탭 닫힘 신호) 수신 후 이 시간 내에 소켓이 닫혀야 bye-close로 인정.
 // 절전 등으로 close가 한참 뒤에 도착한 경우를 의도적 닫힘으로 오분류하지 않기 위한 TTL.
 export const BYE_MARK_TTL_MS = 15_000;
@@ -239,8 +260,9 @@ export async function startServer({
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
   };
 
-  const sendError = (ws, { key = null, startId = null, message }) => {
-    sendTo(ws, { type: 'error', key, startId, message: String(message) });
+  // reqId: 요청-응답을 짝지어야 하는 창구(setEffort)의 상관자 — 없으면 null.
+  const sendError = (ws, { key = null, startId = null, reqId = null, message }) => {
+    sendTo(ws, { type: 'error', key, startId, reqId, message: String(message) });
   };
 
   async function handleWsMessage(ws, data) {
@@ -269,20 +291,28 @@ export async function startServer({
           return;
         case 'start': {
           const startId = msg.startId ?? null;
-          const effort = msg.effort ?? null;
-          if (effort !== null && !EFFORT_LEVELS.has(effort)) {
-            sendError(ws, { startId, message: `invalid effort: ${JSON.stringify(msg.effort)}` });
+          const args = readEffortArgs(msg);
+          if (args.error) {
+            sendError(ws, { startId, message: args.error });
             return;
           }
           try {
-            const { key: newKey, initInfo } = await hub.startSession({
+            const { key: newKey, initInfo, effort, ultracode } = await hub.startSession({
               cwd: msg.cwd,
               model: msg.model,
               permissionMode: msg.permissionMode,
-              effort,
+              effort: args.effort,
+              // ultracode는 스폰 플래그가 없어 initialize 직후 런타임 채널로 얹힌다
+              // (ClaudeSession.start 참조).
+              ultracode: args.ultracode,
               resumeSessionId: msg.resumeSessionId,
             });
             sendTo(ws, { type: 'started', startId, key: newKey, initInfo });
+            // 시작 시점의 실효 노력 수준을 같은 창구(effortSet)로 알린다 — ultracode를
+            // 요청했는데 얹지 못한 세션(구버전 CLI·미지원 모델)에서 UI만 울트라코드로
+            // 남는 것을 막는다. 성공한 경우엔 클라이언트가 이미 표시하던 값과 같아
+            // 아무 변화도 만들지 않는다.
+            broadcast({ type: 'effortSet', key: newKey, effort, ultracode });
             // 이미 원격 제어가 켜진 디렉터리에 새 세션이 열리면 그 세션에도 keys가
             // 붙어야 한다 — 안 그러면 새 탭의 pill만 꺼진 것처럼 보인다(codex 지적).
             if (rc.snapshot().length > 0) broadcast(remoteControlMessage());
@@ -315,6 +345,31 @@ export async function startServer({
         case 'setPermissionMode':
           await hub.setPermissionMode(key, msg.mode);
           return;
+        case 'setEffort': {
+          // 노력 수준 런타임 변경 — 성공하면 세션 재시작 없이 적용된다.
+          // 이 ack(effortSet)를 못 받은 클라이언트는(구버전 CLI의 error 또는 타임아웃)
+          // 예전 방식인 --resume 재시작으로 폴백한다.
+          //
+          // reqId는 성공·실패 어느 경로로든 그대로 되돌려준다 — 성공은 전 소켓 방송이고
+          // 실패는 일반 error 프레임이라, 이 상관자가 없으면 클라이언트가 남의 탭의
+          // 성공이나 무관한 error를 자기 요청의 결론으로 오인한다(codex 지적).
+          const reqId = msg.reqId ?? null;
+          const args = readEffortArgs(msg);
+          if (args.error) {
+            sendError(ws, { key, reqId, message: args.error });
+            return;
+          }
+          try {
+            await hub.setEffort(key, args.effort, args.ultracode);
+          } catch (err) {
+            sendError(ws, { key, reqId, message: err?.message ?? err });
+            return;
+          }
+          broadcast({
+            type: 'effortSet', key, reqId, effort: args.effort, ultracode: args.ultracode,
+          });
+          return;
+        }
         case 'setThinking': {
           // null(또는 생략) = CLI 기본(자동), 0 = 끔, 양의 정수 = 사고 토큰 예산.
           // 강제 변환 금지 — ""/false/[] 류가 Number()로 0(사고 끔)이 되는 것을 차단한다.

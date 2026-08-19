@@ -16,6 +16,28 @@ function registerStart(state, startId, opts) {
   return reducer(state, { type: 'register-start', startId, opts });
 }
 
+test('effortSet: 런타임 적용 방송이 UI 티어로 역매핑돼 반영된다(재시작 없음)', () => {
+  let s = stateWithSession('k', { effort: 'high' });
+  // 와이어는 CLI 형상 — ultracode 플래그가 켜져 있으면 UI는 최상위 티어로 표시한다
+  s = reducer(s, serverMsg({ type: 'effortSet', key: 'k', effort: 'xhigh', ultracode: true }));
+  assert.equal(s.sessions.get('k').effort, 'ultracode');
+  // 평범한 수준은 그대로
+  s = reducer(s, serverMsg({ type: 'effortSet', key: 'k', effort: 'low', ultracode: false }));
+  assert.equal(s.sessions.get('k').effort, 'low');
+  // ultracode를 요청했지만 얹지 못한 세션(구버전 CLI·미지원 모델)은 실제값으로 교정된다
+  s = reducer(s, serverMsg({ type: 'effortSet', key: 'k', effort: 'xhigh' }));
+  assert.equal(s.sessions.get('k').effort, 'xhigh');
+  // null = CLI 기본으로 되돌림
+  s = reducer(s, serverMsg({ type: 'effortSet', key: 'k', effort: null, ultracode: false }));
+  assert.equal(s.sessions.get('k').effort, null);
+  // 세션 탭이 없는 방송(다른 탭에서만 열린 세션)은 무해한 무동작
+  const before = s;
+  const after = reducer(s, serverMsg({ type: 'effortSet', key: 'ghost', effort: 'max' }));
+  assert.equal(after, before);
+  // 재시작 신호가 아니다 — 시작 대기표를 건드리지 않는다
+  assert.equal(after.pendingStarts.size, 0);
+});
+
 test('remove-session: 세션을 제거하고, 활성이었으면 남은 세션으로 전환(없으면 null)', () => {
   let s = stateWithSession('a');
   s.sessions.set('b', createSessionState({ key: 'b' }));

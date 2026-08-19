@@ -5,6 +5,7 @@
 // "세션이 진행 중일 때만"으로 게이트하면 안 된다 — 백그라운드 작업은 결과가 즉시
 // 돌아와 세션이 idle로 내려가므로, 정작 오래 도는 작업에서만 도크가 사라진다.
 import { openWork } from '../lib/running-work.js';
+import Icon from './Icon.jsx';
 
 export default function RunningWork({ session, conn, onJump }) {
   const list = openWork(session);
@@ -32,7 +33,7 @@ export default function RunningWork({ session, conn, onJump }) {
               data-tip={w.uid ? '대화에서 이 작업 보기' : '대화에서 위치를 찾지 못했습니다'}
             >
               <span className={`pulse-dot${live ? ' on' : ''}`} aria-hidden="true" />
-              <span className="dock-ico" aria-hidden="true">{w.icon}</span>
+              <Icon name={w.icon} size={14} className="dock-ico" />
               <span className="dock-label">{w.label}</span>
               <span className="dock-detail">{w.detail}</span>
             </button>

@@ -13,7 +13,7 @@ import React, {
 } from 'react';
 import { connect } from './ws.js';
 import { createInitialState, reducer } from './store-reducer.js';
-import { spawnEffort } from './effort.js';
+import { effortPayload } from './effort.js';
 import { normalizeTitle, saveTitle, titleFor } from './session-titles.js';
 
 const TOKEN_KEY = 'ccob-token';
@@ -35,6 +35,16 @@ export function getToken() {
 const StoreContext = createContext(null);
 let startCounter = 0;
 let jumpCounter = 0;
+let effortCounter = 0;
+// 이 탭만의 reqId 접두사 — 카운터만 쓰면 모든 탭이 'ef_1'부터 시작해, 성공 방송이
+// 전 소켓에 가는 구조에서 남의 탭 첫 요청이 내 대기표를 결착시킨다(codex 지적).
+const CLIENT_ID = Math.random().toString(36).slice(2, 8);
+
+// 노력 수준 런타임 변경(setEffort)의 ack 대기 한도. 이 시간 안에 effortSet/error가
+// 오지 않으면 "이 CLI는 런타임 변경을 못 한다"로 보고 호출측이 재시작 폴백을 고른다.
+// 서버의 제어 요청 타임아웃(30s)보다 짧게 둔다 — 사용자를 그만큼 기다리게 할 수 없고,
+// 늦게 도착한 성공 방송은 리듀서가 그때 반영하므로 표시가 어긋나지 않는다.
+const EFFORT_ACK_TIMEOUT_MS = 5_000;
 
 // 종료된 세션이 회색 상태 점으로 남아 있다가 사이드바 목록에서 사라지기까지의
 // 유예(사용자 의도: 닫기 → 3초 후 제거). 기준 시점은 CLI exit 확인 시점이며,
@@ -52,6 +62,23 @@ export function StoreProvider({ children }) {
   //  titleSync: key -> 이미 처리한 sessionId. 이월(재개 fork)·복원(새로고침)을 id당 1회만.
   const pendingTitlesRef = useRef(new Map());
   const titleSyncRef = useRef(new Map());
+  // 노력 수준 런타임 변경의 ack 대기표 — reqId -> {resolve, timer}.
+  // reqId로 짝을 맞추는 이유: 성공(effortSet)은 전 소켓에 방송되고, 실패는 일반 error
+  // 프레임으로 오기 때문에 key만으로는 남의 탭의 성공이나 무관한 error(예: 죽은
+  // 세션에 send)를 내 요청의 결론으로 오인할 수 있다.
+  const pendingEffortRef = useRef(new Map());
+
+  // ack 결착 — refs만 만지므로 첫 렌더의 클로저로 캡처돼도 안전하다(아래 WS effect).
+  // 세션 key까지 대조한다 — reqId 접두사와 이중 방어(다른 세션의 프레임으로는 결착 불가).
+  const settleEffort = (msg, applied) => {
+    const reqId = msg?.reqId;
+    if (reqId == null) return;
+    const pending = pendingEffortRef.current.get(reqId);
+    if (!pending || pending.key !== msg.key) return;
+    pendingEffortRef.current.delete(reqId);
+    clearTimeout(pending.timer);
+    pending.resolve(applied);
+  };
 
   // exited 세션마다 제거 타이머를 한 번만 건다(키별로 안정 유지 — 다른 세션의
   // 활동으로 이 effect가 재실행돼도 리셋하지 않는다). 재시작 대체 등으로 세션이
@@ -136,7 +163,13 @@ export function StoreProvider({ children }) {
     const token = getToken();
     const conn = connect({
       token,
-      onMessage: (msg) => dispatch({ type: 'server-message', message: msg }),
+      onMessage: (msg) => {
+        // 노력 수준 변경의 결론(성공 방송 / 실패 error)을 먼저 대기표에 반영한다 —
+        // 리듀서는 순수해야 하므로 Promise 결착은 여기서만 한다.
+        if (msg?.type === 'effortSet') settleEffort(msg, true);
+        else if (msg?.type === 'error' && msg.reqId != null) settleEffort(msg, false);
+        dispatch({ type: 'server-message', message: msg });
+      },
       onStatus: (status) => {
         dispatch({ type: 'conn', status });
         if (status === 'open') {
@@ -174,10 +207,11 @@ export function StoreProvider({ children }) {
             cwd: opts.cwd,
             model: opts.model ?? null,
             permissionMode: opts.permissionMode ?? 'default',
-            // UI 의사 티어(ultracode)는 실제 CLI 값(max)으로 매핑해 보낸다 —
-            // 서버 EFFORT_LEVELS 검증은 low..max만 통과시킨다. UI 표시용 effort는
-            // register-start의 opts.effort로 세션에 그대로 시딩된다(ultracode 보존).
-            effort: spawnEffort(opts.effort),
+            // UI 티어(ultracode)는 CLI와 같은 의미로 분해해 보낸다 — effort는 xhigh,
+            // 플래그는 ultracode:true(서버 EFFORT_LEVELS 검증은 low..max만 통과시킨다).
+            // UI 표시용 effort는 register-start의 opts.effort로 세션에 그대로
+            // 시딩된다(ultracode 보존).
+            ...effortPayload(opts.effort),
             resumeSessionId: opts.resumeSessionId ?? null,
           });
         if (!ok) {
@@ -188,6 +222,31 @@ export function StoreProvider({ children }) {
       },
       /** Stop a session's CLI process (client->server contract 'stop'). Server replies with exit. */
       stopSession: (key) => (wsRef.current ? wsRef.current.send({ type: 'stop', key }) : false),
+      /**
+       * 노력 수준 런타임 변경 — 세션 재시작 없이 실행 중 CLI에 적용한다.
+       * @returns Promise<boolean> 적용됐으면 true. false면 이 CLI가 런타임 변경을
+       * 지원하지 않는다는 뜻이므로(구버전: 제어 요청 거부 또는 무응답) 호출측이
+       * 예전 방식(--resume 재시작)으로 폴백할 수 있다. 화면의 effort 표시는 성공
+       * 방송(effortSet)을 받은 리듀서가 갱신한다 — 낙관적 선반영은 하지 않는다.
+       */
+      setEffort: (key, uiEffortValue) => {
+        const reqId = `ef_${CLIENT_ID}_${++effortCounter}`;
+        const sent = wsRef.current
+          && wsRef.current.send({ type: 'setEffort', key, reqId, ...effortPayload(uiEffortValue) });
+        if (!sent) return Promise.resolve(false);
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            pendingEffortRef.current.delete(reqId);
+            resolve(false);
+          }, EFFORT_ACK_TIMEOUT_MS);
+          pendingEffortRef.current.set(reqId, { key, resolve, timer });
+        });
+      },
+      /**
+       * 현재 상태 스냅샷 — await 뒤처럼 컴포넌트 클로저의 state가 낡았을 수 있는
+       * 자리에서만 쓴다(예: setEffort ack를 기다린 뒤의 재시작 폴백).
+       */
+      getState: () => stateRef.current,
       /**
        * 원격 제어 켜기/끄기. 대상 디렉터리는 **보내지 않는다** — 세션 key만 넘기고
        * 서버가 자기 장부에서 cwd를 되찾는다(WS로 온 임의 경로를 신뢰하지 않기 위해).

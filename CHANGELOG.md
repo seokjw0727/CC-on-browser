@@ -8,6 +8,43 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.9.4] - 2026-08-19
+
+> 노력 수준을 세션 재시작 없이 실행 중 CLI에 바로 적용하고, 선택 UI를 드래그
+> 슬라이더로 바꿨으며, 울트라코드를 CLI와 같은 의미로 전송합니다. 프론트엔드의
+> 유니코드 이모지·픽토그램은 전부 직접 그린 SVG 아이콘 29종으로 교체됐습니다.
+> (Effort changes now apply to the running CLI without a restart, chosen via a
+> new drag slider, and ultracode is sent with CLI-equivalent semantics. Every
+> rendered Unicode emoji/pictogram is replaced with a hand-drawn 29-icon SVG set.)
+
+### Changed
+- **노력 수준 변경이 더 이상 세션을 재시작하지 않습니다.** CLI v2.1.233에서
+  `apply_flag_settings` 제어 요청으로 실행 중 세션의 노력 수준을 바꿀 수 있음을
+  실측 확인해, 기존의 "정지 → `--effort` 재스폰(`--resume`)" 대신 런타임 채널로
+  즉시 적용합니다. 재시작이 없으니 **진행 중인 턴에도** 바꿀 수 있습니다(다음 턴부터
+  반영). 이 채널을 모르는 구버전 CLI에서는 요청이 거부되고, 그때만 예전 재시작
+  방식으로 자동 폴백합니다(재시작은 여전히 턴이 끝난 뒤에만).
+  (Changing the effort level no longer restarts the session — it is applied to the
+  running CLI via `apply_flag_settings`, with the old restart path kept as a
+  fallback for CLIs that do not support that control request.)
+- **노력 수준 팝오버가 드래그 슬라이더로 바뀌었습니다.** 단계별 막대 대신 핸들을
+  끌거나 도트를 눌러 고르고, 키보드(←/→/Home/End)로도 조작할 수 있습니다
+  (`role="slider"` ARIA 규약). 헤더에 현재 수준과 **(?) 도움말**이, 트랙 양옆에
+  "더 빠르게 / 더 스마트하게"가 붙고, 각 도트에 hover하면 그 수준의 설명이 뜹니다.
+- **울트라코드가 CLI와 같은 의미로 나갑니다.** 지금까지는 UI 치장 티어를
+  `--effort max`로 낮춰 보냈는데, CLI 자신의 `/effort ultracode`는 노력 수준
+  `xhigh` + `ultracode` 플래그로 보냅니다(실측). 이제 같은 형태로 전송해 실제
+  울트라코드(멀티에이전트 워크플로) 모드가 켜집니다 — 워크플로를 지원하지 않는
+  계정·모델에서는 실효가 '매우 높음'에 머물고, 그 경우 표시도 자동으로 교정됩니다.
+- **프론트엔드의 유니코드 이모지·픽토그램을 전부 직접 그린 SVG 아이콘으로 바꿨습니다.**
+  ☰·🗑·✕·⚡ 등 OS·폰트마다 다르게 그려지던 문자 글리프 29종을, 통일된 규격(24
+  격자·1.8px 라운드 스트로크·`currentColor`)의 SVG 아이콘 세트로 교체해 크기·굵기·
+  정렬이 항상 고정됩니다. 정의는 `Icon.jsx` 한 곳에 모여 있고, 세션 삭제·신뢰모드
+  경고·오류 토스트·울트라코드에만 포인트 색을 쓰며 그 외에는 전부 무채색입니다.
+  (Replaced every rendered Unicode emoji/pictogram in the frontend with a
+  hand-drawn, 29-icon SVG set for consistent sizing, weight, and alignment
+  across operating systems and fonts.)
+
 ## [1.9.3] - 2026-08-17
 
 > 원격 제어가 켜지지 않던 문제를 고쳤습니다 — CLI가 새로 묻는 동의 프롬프트에

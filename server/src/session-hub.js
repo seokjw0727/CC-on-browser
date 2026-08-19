@@ -27,7 +27,7 @@ export class SessionHub extends EventEmitter {
   }
 
   /** 새 CLI 세션을 spawn하고 initialize 왕복까지 마친 뒤 { key, initInfo } 반환. */
-  async startSession({ cwd, model, permissionMode, effort, resumeSessionId } = {}) {
+  async startSession({ cwd, model, permissionMode, effort, ultracode, resumeSessionId } = {}) {
     const session = new ClaudeSession({
       cliPath: this.#cliPath,
       cliArgsPrefix: this.#cliArgsPrefix,
@@ -35,6 +35,7 @@ export class SessionHub extends EventEmitter {
       model: model || undefined,
       permissionMode: permissionMode || undefined,
       effort: effort || undefined,
+      ultracode: ultracode === true,
       resumeSessionId: resumeSessionId || undefined,
     });
     const key = `s_${++this.#nextKey}`;
@@ -79,7 +80,10 @@ export class SessionHub extends EventEmitter {
     this.#sessions.set(key, entry);
     try {
       const initInfo = await session.start();
-      return { key, initInfo };
+      // 시작 후 **실제로** 적용된 노력 수준을 함께 돌려준다 — ultracode는 스폰 플래그가
+      // 없어 initialize 뒤에 얹히므로 요청대로 걸렸는지는 세션만 안다(실패 시 effortLevel만
+      // 적용된 상태). 이 값이 클라이언트 표시의 권위가 된다.
+      return { key, initInfo, effort: session.effort ?? null, ultracode: session.ultracode };
     } catch (err) {
       this.#sessions.delete(key);
       session.stop();
@@ -221,6 +225,11 @@ export class SessionHub extends EventEmitter {
 
   setMaxThinkingTokens(key, maxThinkingTokens) {
     return this.#require(key).session.setMaxThinkingTokens(maxThinkingTokens);
+  }
+
+  /** 노력 수준 런타임 변경 (재시작 없음 — ClaudeSession.setEffort 주석 참조). */
+  setEffort(key, effort, ultracode) {
+    return this.#require(key).session.setEffort(effort, { ultracode });
   }
 
   /** 링버퍼에서 afterSeq 이후 이벤트 + 미해결 권한 요청 + 종료 상태 반환 (재접속 리플레이용). */

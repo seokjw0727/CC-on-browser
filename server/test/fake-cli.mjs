@@ -13,6 +13,8 @@
 //   FAKE_BULK_COUNT        bulk 시나리오가 한 턴에 뱉는 메시지 수(기본 500)
 //   FAKE_SUGGEST_BYPASS=1  permission 시나리오의 제안에 setMode(bypassPermissions) 추가
 //                          — 신뢰모드 제안 필터(session-hub) 계약 검증용
+//   FAKE_NO_FLAG_SETTINGS=1 apply_flag_settings를 모르는 구버전 CLI 흉내(error 응답)
+//                          — 노력 수준 변경의 재시작 폴백 경로 검증용
 // 지연 중 interrupt가 오면 대기 턴을 취소하고 is_error result로 닫는다(실 CLI 미러).
 import nodeFs from 'node:fs';
 import nodePath from 'node:path';
@@ -120,6 +122,9 @@ if (scenario === 'start-fail') {
 
 let userCount = 0;
 let permCounter = 0;
+// apply_flag_settings의 누적 상태(shallow merge) — 실 CLI엔 되읽을 채널이 없으므로
+// 픽스처에서만 보관해 진단 필드(flag_settings)로 노출한다.
+let flagSettings = {};
 const pendingPermissions = new Map(); // request_id -> { toolUseId }
 // 지연 턴(FAKE_ECHO_DELAY_MS/FAKE_SUBAGENT_MS)의 대기 타이머 — interrupt가
 // 취소한다(실 CLI처럼). 기본 즉답 모드에선 항상 비어 있어 동작 불변.
@@ -251,6 +256,39 @@ function handle(msg) {
           permissionMode: request.mode,
           session_id: SESSION_ID,
         });
+      }
+      // 노력 수준 런타임 변경 — 실 CLI v2.1.233 실측: settings가 객체이면 success,
+      // 객체가 아니면(null·배열) error. 여기서 명시적으로 처리하는 이유: 아래 포괄
+      // 성공 응답에 묻히면 "구버전 CLI라면 실패했을 요청"까지 우연히 통과해 테스트가
+      // 계약을 검증하지 못한다(codex 지적). FAKE_NO_FLAG_SETTINGS=1이면 그 구버전을
+      // 흉내 내 error를 돌려준다(폴백 경로 e2e·통합 테스트용).
+      if (request?.subtype === 'apply_flag_settings') {
+        const bad = !request.settings || typeof request.settings !== 'object'
+          || Array.isArray(request.settings);
+        if (process.env.FAKE_NO_FLAG_SETTINGS === '1' || bad) {
+          out({
+            type: 'control_response',
+            response: {
+              subtype: 'error',
+              request_id: requestId,
+              error: process.env.FAKE_NO_FLAG_SETTINGS === '1'
+                ? 'unknown control request subtype: apply_flag_settings'
+                : 'apply_flag_settings requires `settings` to be an object',
+            },
+          });
+          return;
+        }
+        // 적용값을 기억해 두고 진단 필드로 되돌려준다(실 CLI엔 되읽을 채널이 없다).
+        flagSettings = { ...flagSettings, ...request.settings };
+        out({
+          type: 'control_response',
+          response: {
+            subtype: 'success',
+            request_id: requestId,
+            response: { echo_request: request, flag_settings: flagSettings },
+          },
+        });
+        return;
       }
       // interrupt는 지연 턴의 대기 타이머를 취소하고 실 CLI처럼 is_error result로
       // 턴을 닫는다(codex 지적 — 취소 없이는 지연 응답이 그대로 방출돼 "중단했는데
