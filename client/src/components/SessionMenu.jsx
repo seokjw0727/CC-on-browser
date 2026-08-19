@@ -135,7 +135,7 @@ export default function SessionMenu({ anchor, label, items, onClose, restoreRef 
       // 메뉴 위에서의 우클릭이 다시 행의 컨텍스트 메뉴를 열지 않게
       onContextMenu={(e) => e.preventDefault()}
     >
-      {items.map((it) => (
+      {items.filter(Boolean).map((it) => (
         <button
           key={it.key}
           type="button"

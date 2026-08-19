@@ -115,14 +115,14 @@ Already running (v1.8.0) on port 8787 — opened a new browser tab.
   CLI, reacting to session state (idle blinking with cursor-tracking eyes, thinking
   bubble, tool-scan scuttle, subagent juggling, permission hop, turn cheers, zzz after
   60s idle — respects `prefers-reduced-motion`).
-- **Remote Control** — the `📱 원격 제어` pill above the input starts
-  `claude remote-control` for the open repository, so you can drive it from
-  claude.ai/code and the Claude mobile app. The popover holds the connect link, a
-  copy button and a stop button. **Right-clicking a session row in the sidebar**
-  (Shift+F10 from the keyboard) toggles it too, which also reaches sessions in
-  projects you are not currently looking at. **While it is on, closing the browser
-  does not shut the app down** (that is the whole point) — turn it off when you are
-  done. Read [SECURITY.md](SECURITY.md) for what it exposes.
+- **Remote Control** — **right-click a session row in the sidebar** (Shift+F10 from
+  the keyboard) and pick "원격 제어 켜기" to start `claude remote-control` for that
+  repository, so you can drive it from claude.ai/code and the Claude mobile app. The
+  same menu reaches sessions in projects you are not currently looking at. A live row
+  carries a 📱 marker, and once the connect URL arrives the menu grows an
+  "claude.ai/code에서 열기" entry. **While it is on, closing the browser does not shut
+  the app down** (that is the whole point) — turn it off when you are done. Read
+  [SECURITY.md](SECURITY.md) for what it exposes.
 - **Running-work dock** — background shells, background agents and in-flight tools
   are listed *below* the input; click one to jump to its card in the transcript.
   The list comes from the CLI's own running-task snapshot, so it shows exactly
@@ -157,8 +157,10 @@ Already running (v1.8.0) on port 8787 — opened a new browser tab.
 5. **Permissions** — in confirming modes a dialog appears before each tool run.
    When Claude asks a question (AskUserQuestion), a question dialog with options,
    free-text input and skip appears instead.
-6. **Model & effort** — change mid-conversation from the composer. Changing effort
-   restarts the session onto the same conversation (`--effort` is start-only).
+6. **Model & effort** — change mid-conversation from the composer. Effort applies
+   **without restarting the session** (the CLI's runtime channel). Only CLIs that do
+   not know that channel fall back to restarting onto the same conversation, and you
+   get a heads-up toast before that happens.
 7. **Resume & delete** — open **새 세션 (New session)** and click a past session to
    resume it (with the model/mode selected above); the trash button deletes it (live
    sessions are protected). Transcripts live in `~/.claude`, so history survives
@@ -175,6 +177,7 @@ Already running (v1.8.0) on port 8787 — opened a new browser tab.
 | Remote control fails with `Workspace not trusted` | You have not accepted that folder's trust dialog yet. Run `claude` once in that directory and accept it, then turn remote control back on (the app will not accept it for you — that is a security decision). |
 | A console window flashes on launch | That window comes from npm's `.cmd` shim. Use the shortcut created by `cc-on-browser --shortcut` and no console appears ([see above](#launching-without-a-console-window-windows)). |
 | `Port 8787 is already in use` | Another program owns that port, or one of our own instances is there but **could not be recognized** (older version, missing or corrupt instance file). When it is recognized you get a new tab instead of an error — otherwise pick another port: `cc-on-browser --port 9000`. |
+| Changing effort restarts the session, or `unknown message type: setEffort` | An **older background server** from before the upgrade is still running, so the new UI is paired with an old server (the sidebar shows a version warning at the bottom). Close every session and re-run the app — the launcher replaces an idle stale server automatically. |
 | 401 / blank page | You opened a URL without the token — use the full printed `#token=` URL. |
 | Browser does not open | Run with `--no-open` and open the printed URL yourself; the `BROWSER` env var selects which browser to launch. |
 | Server stops (or doesn't) unexpectedly | All tabs closed = auto-stop after ~10s (by design). Connection loss (suspend) waits as long as a session is alive (30-min grace when none). |

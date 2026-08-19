@@ -502,6 +502,108 @@ test('setEffort: 구버전 CLI(제어 요청 거부)는 reqId를 실은 error로
   }
 });
 
+test('unknown message type 오류에도 reqId가 실린다 (버전 스큐에서 즉시 폴백하도록)', async () => {
+  // 이 프레임을 받는 쪽은 대개 "새 클라이언트 + 구 데몬"이다. 상관자가 없으면
+  // 요청자는 ack 타임아웃(5초)을 기다린 뒤에야 폴백을 고른다 — setEffort가 그랬다.
+  const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
+  client.send({ type: 'noSuchMessageType', key: null, reqId: 'r_skew' });
+  const err = await client.next((m) => m.type === 'error' && m.reqId === 'r_skew');
+  assert.match(err.message, /unknown message type: noSuchMessageType/);
+  // reqId가 없는 메시지에는 null이 실린다(기존 계약 유지 — 남의 대기표를 결착시키지 않는다)
+  client.send({ type: 'stillUnknown' });
+  const plain = await client.next((m) => m.type === 'error' && /stillUnknown/.test(m.message));
+  assert.equal(plain.reqId, null);
+  client.close();
+});
+
+test('/api/shutdown-if-idle: 인증·핸들러 부재·유휴 판정', async () => {
+  const stopped = [];
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    version: '9.9.9',
+    onShutdownRequest: () => stopped.push(Date.now()),
+  });
+  const b = `http://127.0.0.1:${h.port}`;
+  const post = (headers = {}) => fetch(`${b}/api/shutdown-if-idle`, { method: 'POST', headers });
+  try {
+    // 주입한 버전이 bootstrap으로 나간다 — 런처·클라이언트의 비교 근거.
+    const boot = await (await fetch(`${b}/api/bootstrap`, { headers: { 'x-auth-token': TOKEN } })).json();
+    assert.equal(boot.version, '9.9.9');
+
+    // 토큰 없이는 아무것도 내리지 못한다.
+    assert.equal((await post()).status, 401);
+    assert.equal(stopped.length, 0);
+    // GET은 받지 않는다 — 링크·프리페치로 데몬이 죽는 창구를 만들지 않는다.
+    assert.equal((await fetch(`${b}/api/shutdown-if-idle`, { headers: { 'x-auth-token': TOKEN } })).status, 405);
+
+    // 유휴 상태 — 200을 받고 핸들러가 불린다(실제 종료는 프로세스 주인의 몫).
+    const ok = await post({ 'x-auth-token': TOKEN });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(await ok.json(), { stopping: true });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(stopped.length, 1);
+  } finally {
+    await h.close();
+  }
+});
+
+test('/api/shutdown-if-idle: 살아있는 세션이 있으면 409로 거절한다 (남의 작업을 죽이지 않는다)', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const stopped = [];
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    onShutdownRequest: () => stopped.push(1),
+  });
+  const b = `http://127.0.0.1:${h.port}`;
+  const client = await TestClient.connect(`ws://127.0.0.1:${h.port}/ws?token=${TOKEN}`);
+  try {
+    client.send({ type: 'start', startId: 'cl_busy', cwd: tmpRoot });
+    const started = await client.next((m) => m.type === 'started' && m.startId === 'cl_busy');
+    const res = await fetch(`${b}/api/shutdown-if-idle`, {
+      method: 'POST',
+      headers: { 'x-auth-token': TOKEN },
+    });
+    assert.equal(res.status, 409);
+    assert.equal((await res.json()).error, 'busy');
+    assert.equal(stopped.length, 0, '일하는 데몬은 내리지 않는다');
+    client.send({ type: 'stop', key: started.key });
+    await client.next((m) => m.type === 'exit' && m.key === started.key);
+  } finally {
+    client.close();
+    await h.close();
+  }
+});
+
+test('/api/shutdown-if-idle: 핸들러가 없으면 501 — 종료 판단은 프로세스 주인의 몫', async () => {
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+  });
+  try {
+    const res = await fetch(`http://127.0.0.1:${h.port}/api/shutdown-if-idle`, {
+      method: 'POST',
+      headers: { 'x-auth-token': TOKEN },
+    });
+    assert.equal(res.status, 501);
+  } finally {
+    await h.close();
+  }
+});
+
 test('start: ultracode 세션은 --effort xhigh로 스폰되고 플래그는 시작 후 방송된다', async () => {
   process.env.FAKE_SCENARIO = 'echo';
   const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
@@ -679,6 +781,9 @@ test('(f) REST auth + /api/projects/sessions/transcript/browse/bootstrap', async
   assert.ok('claudeVersion' in bootstrap);
   assert.equal(typeof bootstrap.defaultCwd, 'string');
   assert.equal(bootstrap.platform, process.platform, '클라이언트의 폴더 선택 버튼 노출 판단용');
+  // version: 클라이언트 번들이 자기 빌드 버전과 견줘 "구 데몬 + 새 번들" 스큐를
+  // 알아채는 근거. 주입하지 않은 이 테스트 서버에서는 null이다(= 구버전과 구분 불가).
+  assert.equal(bootstrap.version, null, '주입하지 않으면 null');
 
   // /api/usage — 픽스처 assistant 엔트리(방금 timestamp) 1건이 양쪽 창에 집계되고,
   // 주입한 공식 사용률 스텁이 quota 필드로 실린다

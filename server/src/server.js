@@ -74,6 +74,7 @@ const API_METHODS = {
   '/api/claude-config': ['GET', 'PUT'],
   '/api/clipboard-files': ['POST'],
   '/api/paste-file': ['POST'],
+  '/api/shutdown-if-idle': ['POST'],
 };
 
 export async function startServer({
@@ -86,6 +87,13 @@ export async function startServer({
   staticDir,
   exitedRetentionMs,
   quotaFetcher, // 테스트 주입용 — 기본은 quota.js의 공식 사용률 조회
+  // 이 서버가 보고할 자기 버전(/api/bootstrap). 클라이언트 번들이 자기 빌드 버전과
+  // 견줘 "구 데몬 + 새 번들" 스큐를 알아채는 데 쓴다 — 그 상태에서는 새로 생긴 WS
+  // 메시지가 unknown message type으로 튕긴다. 모르면 null(구버전과 구분되지 않는다).
+  version = null,
+  // 유휴일 때 이 데몬을 내려도 되는가 — bin이 자기 shutdown()을 건다.
+  // 없으면 /api/shutdown-if-idle은 501로 거절한다(그 판단은 프로세스 주인의 몫).
+  onShutdownRequest,
   onClientCountChange, // WS 클라이언트 수 변화 알림 — bin이 브라우저 생존 신호로 쓴다.
   // 계약: 연결(open) 시 (count) 단항 호출, 종료(close) 시 (count, {bye}) —
   // bye는 "이 소켓이 bye 신호 후 TTL 내에 닫혔는가"(의도적 탭 닫힘 판별, lifecycle.js 참조).
@@ -434,7 +442,15 @@ export async function startServer({
           return;
         }
         default:
-          sendError(ws, { key, message: `unknown message type: ${msg.type}` });
+          // reqId를 되돌려준다 — 이 프레임을 받는 쪽은 대개 "구 데몬에 새 클라이언트"라,
+          // 상관자가 없으면 요청자가 ack 타임아웃(5초)을 기다린 뒤에야 폴백을 고른다.
+          // 지금 이 서버는 setEffort를 알지만, 다음 스큐에서 같은 일이 반복되지 않도록
+          // 미지의 메시지에도 상관자를 실어 보낸다.
+          sendError(ws, {
+            key,
+            reqId: msg.reqId ?? null,
+            message: `unknown message type: ${msg.type}`,
+          });
       }
     } catch (err) {
       sendError(ws, { key, message: err?.message ?? err });
@@ -632,6 +648,25 @@ export async function startServer({
       await handlePasteFile(req, res);
       return;
     }
+    if (req.method === 'POST' && url.pathname === '/api/shutdown-if-idle') {
+      // 런처가 "구버전 데몬을 조용히 교체"할 때만 쓰는 창구. 안전 조건은 하나다:
+      // **일하고 있으면 절대 내리지 않는다**. 살아있는 CLI 세션이나 원격 제어가
+      // 하나라도 있으면 409로 거절하고, 런처는 그 데몬을 그대로 재사용한다.
+      // (브라우저 탭 유무는 보지 않는다 — 탭은 곧 다시 열리므로 판단 근거가 아니다.)
+      if (hub.hasLiveSessions() || rc.hasLive()) {
+        json(res, 409, { error: 'busy', reason: 'live sessions or remote controls' });
+        return;
+      }
+      if (typeof onShutdownRequest !== 'function') {
+        json(res, 501, { error: 'shutdown not supported' });
+        return;
+      }
+      // 응답을 먼저 흘려보내고 종료를 예약한다 — close()가 이 소켓까지 끊으므로
+      // 순서를 뒤집으면 런처가 응답 대신 ECONNRESET을 본다.
+      json(res, 200, { stopping: true });
+      setTimeout(() => onShutdownRequest(), 0).unref?.();
+      return;
+    }
     // 여기까지 왔다면 이 경로가 받는 메서드가 아니다 — POST 전용 경로에 온 GET도 포함.
     const allowed = API_METHODS[url.pathname] ?? ['GET'];
     if (!allowed.includes(req.method)) {
@@ -646,6 +681,7 @@ export async function startServer({
             defaultCwd: os.homedir(),
             port: boundPort,
             platform, // 클라이언트가 네이티브 폴더 선택 버튼 노출 판단
+            version, // 번들 버전과 견주기 위한 서버(데몬) 버전 — 없으면 null
           });
           return;
         case '/api/projects':

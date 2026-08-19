@@ -8,6 +8,48 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.9.5] - 2026-08-19
+
+> 원격 제어를 켜고 끄는 자리를 사이드바 세션 행 우클릭 한 곳으로 모으고, 업그레이드
+> 직후에도 살아남은 구버전 백그라운드 서버 때문에 노력 수준 변경이 `unknown message
+> type: setEffort`로 튕기며 세션이 재시작되던 문제를 고쳤습니다.
+> (Remote control now lives solely in the sidebar row context menu, and the
+> stale-daemon version skew that broke effort changes is fixed — the launcher
+> replaces an idle stale daemon and the UI warns on mismatch.)
+
+### Changed
+- **원격 제어를 켜고 끄는 곳이 사이드바 우클릭 하나로 정리됐습니다.** 입력창 위의
+  `📱 원격 제어` pill과 팝오버를 없애고, **세션 행 우클릭**(키보드는 Shift+F10)의
+  "원격 제어 켜기/끄기"를 유일한 창구로 삼았습니다. pill이 하던 나머지 일은 그 자리로
+  옮겼습니다 — 켜진 세션의 행에 📱 표시가 붙고(보조기술에는 "원격 제어 켜짐"으로
+  읽힙니다), 접속 주소가 나오면 같은 메뉴에 "claude.ai/code에서 열기"가 생기며,
+  켜짐·실패는 토스트로 알립니다(실패 사유는 메뉴 툴팁에도 남습니다). 팝오버의 "주소
+  복사"와 세션 수(n/m) 표시는 제거됐고, 실패한 항목의 재시도는 끄기 → 켜기 2단계입니다.
+  (Remote control is now toggled only from the sidebar row's context menu; the
+  composer pill and its popover are gone, with the indicator, connect link and
+  failure reason moved into the row and menu.)
+
+### Fixed
+- **노력 수준을 바꿀 때 나던 `unknown message type: setEffort` 오류와 뜻하지 않은
+  세션 재시작을 고쳤습니다.** 원인은 코드가 아니라 **버전 스큐**였습니다: 백그라운드
+  서버(데몬)는 브라우저를 닫아도 살아남고 재실행은 그 데몬을 재사용하는데, 정적 번들은
+  디스크에서 매번 읽히므로 업그레이드 직후 "새 클라이언트 + 구 서버" 조합이 됩니다.
+  구 서버는 v1.9.4에서 생긴 `setEffort`를 몰라 오류를 냈고, 그 오류에 상관자(reqId)가
+  없어 클라이언트는 5초를 기다린 뒤 `--resume` 재시작으로 폴백했습니다. 이제
+  ① 런처가 데몬 재사용 전에 버전을 견줘, **유휴** 구버전 데몬이면 `POST
+  /api/shutdown-if-idle`(토큰 인증)로 내리고 새 데몬을 띄웁니다 — 살아있는 세션이나
+  원격 제어가 있으면 절대 내리지 않고 경고만 남긴 채 재사용합니다. ② `/api/bootstrap`이
+  서버 버전을 실어 주고, 클라이언트가 자기 빌드 버전과 달라지면 사이드바 하단에 상시
+  경고를 띄웁니다. ③ 서버는 모르는 메시지 오류에도 `reqId`를 되돌려 줘, 다음 스큐에서는
+  기다림 없이 즉시 폴백합니다.
+  (Fixed `unknown message type: setEffort` and the surprise session restart it caused:
+  a stale background daemon from before an upgrade was being reused. The launcher now
+  replaces an *idle* stale daemon, the UI warns on version mismatch, and unknown-message
+  errors carry `reqId` so clients fall back immediately.)
+- **노력 수준이 재시작으로 폴백할 때 그 사실을 알립니다.** 지금까지는 조용히 세션을
+  재시작해 사용자에게는 "바꿨더니 세션이 새로 떴다"로만 보였습니다.
+  (The effort-change restart fallback now announces itself before restarting.)
+
 ## [1.9.4] - 2026-08-19
 
 > 노력 수준을 세션 재시작 없이 실행 중 CLI에 바로 적용하고, 선택 UI를 드래그
@@ -502,7 +544,11 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
-[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.1...HEAD
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.5...HEAD
+[1.9.5]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.4...v1.9.5
+[1.9.4]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.3...v1.9.4
+[1.9.3]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.2...v1.9.3
+[1.9.2]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.1...v1.9.2
 [1.9.1]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.8.3...v1.9.0
 [1.7.1]: https://github.com/seokjw0727/CC-on-browser/compare/v1.7.0...v1.7.1

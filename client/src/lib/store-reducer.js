@@ -132,12 +132,49 @@ export function remoteControlFor(state, key) {
  *
  * 판정 근거는 서버가 realpath로 묶어 내려준 `cwds` 목록이다. raw cwd 문자열을
  * `r.cwd`와 직접 비교하면 심링크·junction·대소문자·끝 구분자에서 어긋난다 —
- * 정규화는 서버만 할 수 있다. RemotePill과 사이드바 메뉴가 같은 판정을 쓰도록
+ * 정규화는 서버만 할 수 있다. 사이드바 행 아이콘과 우클릭 메뉴가 같은 판정을 쓰도록
  * 여기 한 곳에 둔다.
  */
 export function remoteControlByCwd(state, cwd) {
   if (!cwd) return null;
   return (state.remoteControls ?? []).find((r) => (r.cwds ?? []).includes(cwd)) ?? null;
+}
+
+/**
+ * 스냅샷 두 개를 견줘 "이번에 새로 생긴 상태 전이"만 뽑는다 — 켜짐 안내·실패 사유를
+ * 토스트로 알리는 쪽(store.jsx)이 쓴다. 순수 함수로 둔 이유는 이 판정이 e2e로 닿지
+ * 않는 경로(ready)를 품고 있어 단위 테스트로 덮어야 하기 때문이다.
+ *
+ * 규율(codex 지적 반영):
+ *  · identity는 cwd다 — 서버 장부가 디렉터리당 항목 하나라, 객체 재생성·배열 순서
+ *    변경·keys 변동에 흔들리지 않는 유일한 좌표다.
+ *  · 비교는 state 필드만 본다 — url·capacity가 늦게 채워져도 다시 알리지 않는다.
+ *  · prev가 null이면(최초 스냅샷·WS 재연결 직후) 전이 없음으로 본다. 호출측이 조용히
+ *    시딩만 하도록 — 페이지를 열었을 뿐인데 예전 상태가 새 소식으로 뜨는 것을 막는다.
+ *
+ * @param {Map<string, string>|null} prev 이전 스냅샷 요약 (cwd -> state). null이면 시딩.
+ * @param {Array<object>} next 새 스냅샷 항목 배열
+ * @returns {Array<object>} 이번에 새로 ready·error가 된 항목들
+ */
+export function remoteControlTransitions(prev, next) {
+  const items = Array.isArray(next) ? next : [];
+  if (!prev) return [];
+  const out = [];
+  for (const rc of items) {
+    if (!rc?.cwd) continue;
+    if (prev.get(rc.cwd) === rc.state) continue;
+    if (rc.state === 'ready' || rc.state === 'error') out.push(rc);
+  }
+  return out;
+}
+
+/** remoteControlTransitions가 다음 비교에 쓸 스냅샷 요약 (cwd -> state). */
+export function remoteControlStates(list) {
+  const map = new Map();
+  for (const rc of Array.isArray(list) ? list : []) {
+    if (rc?.cwd) map.set(rc.cwd, rc.state);
+  }
+  return map;
 }
 
 function updateSession(state, key, fn) {

@@ -12,7 +12,12 @@ import React, {
   useRef,
 } from 'react';
 import { connect } from './ws.js';
-import { createInitialState, reducer } from './store-reducer.js';
+import {
+  createInitialState,
+  reducer,
+  remoteControlStates,
+  remoteControlTransitions,
+} from './store-reducer.js';
 import { effortPayload } from './effort.js';
 import { normalizeTitle, saveTitle, titleFor } from './session-titles.js';
 
@@ -57,6 +62,9 @@ export function StoreProvider({ children }) {
   const stateRef = useRef(state);
   stateRef.current = state;
   const removalTimersRef = useRef(new Map()); // key -> timeout (exited 세션 제거 예약)
+  // 원격 제어 스냅샷의 직전 요약(cwd -> state). null이면 "다음 스냅샷은 비교 대상이
+  // 아니라 시딩"이라는 뜻 — 최초 로드와 재연결 직후가 그렇다.
+  const rcPrevRef = useRef(null);
   // 세션 이름(우클릭 → 이름 변경)의 영속 보조 장부.
   //  pendingTitles: sessionId가 아직 확정되지 않은 동안 들어온 이름 — 확정 즉시 기록한다.
   //  titleSync: key -> 이미 처리한 sessionId. 이월(재개 fork)·복원(새로고침)을 id당 1회만.
@@ -186,6 +194,41 @@ export function StoreProvider({ children }) {
       wsRef.current = null;
     };
   }, []);
+
+  // 원격 제어 상태 전이 알림 — 사이드바 우클릭 메뉴가 유일한 진입점이 되면서,
+  // 컴포저 pill이 상시로 보여 주던 두 가지(켜졌다는 사실 + 실패 사유)를 여기서
+  // 토스트로 대신한다. 낙관적 갱신은 여전히 하지 않는다 — 서버 스냅샷만 본다.
+  //
+  // 연결이 끊기면 비교 기준을 버린다: 재연결 직후 서버는 전체 스냅샷을 다시 보내는데,
+  // 그때 이미 켜져 있던 항목을 "방금 켜졌다"고 알리면 거짓말이 된다(codex 지적).
+  // 최초 스냅샷도 같은 이유로 조용히 시딩만 한다(prev === null 규약).
+  useEffect(() => {
+    if (state.conn !== 'open') rcPrevRef.current = null;
+  }, [state.conn]);
+
+  useEffect(() => {
+    const changed = remoteControlTransitions(rcPrevRef.current, state.remoteControls);
+    rcPrevRef.current = remoteControlStates(state.remoteControls);
+    for (const rc of changed) {
+      if (rc.state === 'ready') {
+        dispatch({
+          type: 'add-toast',
+          kind: 'info',
+          text: '원격 제어가 켜졌습니다 — 브라우저를 닫아도 계속 동작합니다. 다 쓰면 꺼 주세요.',
+        });
+      } else {
+        dispatch({
+          type: 'add-toast',
+          kind: 'error',
+          text: `원격 제어를 켜지 못했습니다: ${rc.error || '알 수 없는 오류'}`,
+        });
+      }
+    }
+    // 의존성에 state.conn을 넣지 않는다 — 넣으면 연결이 끊긴 그 렌더에서 이 effect가
+    // 함께 돌면서, 위에서 막 버린 비교 기준을 낡은 스냅샷으로 다시 세워 버린다
+    // (그러면 재연결 시딩 규약이 무력화된다). 스냅샷이 실제로 바뀔 때만 돌면 된다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.remoteControls]);
 
   const actions = useMemo(
     () => ({

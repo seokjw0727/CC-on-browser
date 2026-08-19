@@ -356,6 +356,60 @@ test('remoteControlByCwd는 cwds가 없는 항목에서도 터지지 않는다',
   assert.equal(remoteControlByCwd(createInitialState(), 'C:/repo'), null);
 });
 
+// ----- 원격 제어 상태 전이 알림 -----
+// 컴포저 pill을 없앤 뒤 "켜졌다/실패했다"를 알리는 유일한 창구가 토스트다(store.jsx).
+// 가짜 CLI로는 ready 경로를 만들 수 없어(e2e는 실패만 관측한다) 여기서 덮는다.
+
+test('remoteControlTransitions: 최초 스냅샷은 전이가 아니다 (prev=null이면 조용히 시딩)', async () => {
+  const { remoteControlTransitions } = await import('../src/lib/store-reducer.js');
+  // 페이지를 막 열었을 뿐인데 이미 켜져 있던 항목을 "방금 켜졌다"고 알리면 거짓말이다.
+  assert.deepEqual(remoteControlTransitions(null, [rcState({ state: 'ready' })]), []);
+  assert.deepEqual(remoteControlTransitions(null, [rcState({ state: 'error' })]), []);
+});
+
+test('remoteControlTransitions: ready·error로 새로 바뀐 항목만 돌려준다', async () => {
+  const { remoteControlTransitions, remoteControlStates } = await import('../src/lib/store-reducer.js');
+  const starting = [rcState({ state: 'starting' })];
+  const prev = remoteControlStates(starting);
+  const ready = remoteControlTransitions(prev, [rcState({ state: 'ready' })]);
+  assert.deepEqual(ready.map((r) => r.state), ['ready']);
+  const failed = remoteControlTransitions(prev, [rcState({ state: 'error', error: '로그인 필요' })]);
+  assert.deepEqual(failed.map((r) => r.error), ['로그인 필요']);
+  // 켜는 중·끄는 중·꺼짐은 알리지 않는다 — 사용자가 방금 누른 결과라 이미 안다.
+  assert.deepEqual(remoteControlTransitions(prev, [rcState({ state: 'stopping' })]), []);
+  assert.deepEqual(remoteControlTransitions(prev, [rcState({ state: 'stopped' })]), []);
+});
+
+test('remoteControlTransitions: 같은 상태가 다시 오면 알리지 않는다 (url·capacity가 늦게 채워져도)', async () => {
+  const { remoteControlTransitions, remoteControlStates } = await import('../src/lib/store-reducer.js');
+  const first = [rcState({ state: 'ready', url: null })];
+  const prev = remoteControlStates(first);
+  // 같은 항목의 새 객체 + 뒤늦게 붙은 url — 상태가 그대로면 전이가 아니다.
+  const again = remoteControlTransitions(prev, [rcState({ state: 'ready', url: 'https://x' })]);
+  assert.deepEqual(again, []);
+});
+
+test('remoteControlTransitions: identity는 cwd라 순서가 바뀌어도 흔들리지 않는다', async () => {
+  const { remoteControlTransitions, remoteControlStates } = await import('../src/lib/store-reducer.js');
+  const prev = remoteControlStates([
+    rcState({ cwd: '/a', state: 'ready' }),
+    rcState({ cwd: '/b', state: 'starting' }),
+  ]);
+  // 배열 순서를 뒤집고 keys까지 갈아 끼워도, 바뀐 것은 /b 하나뿐이다.
+  const changed = remoteControlTransitions(prev, [
+    rcState({ cwd: '/b', state: 'ready', keys: ['s_7'] }),
+    rcState({ cwd: '/a', state: 'ready', keys: [] }),
+  ]);
+  assert.deepEqual(changed.map((r) => r.cwd), ['/b']);
+});
+
+test('remoteControlStates: cwd 없는 항목·배열 아닌 입력을 걸러 낸다', async () => {
+  const { remoteControlStates } = await import('../src/lib/store-reducer.js');
+  assert.equal(remoteControlStates(null).size, 0);
+  assert.equal(remoteControlStates([{ state: 'ready' }]).size, 0);
+  assert.equal(remoteControlStates([rcState()]).get('/repo'), 'ready');
+});
+
 test('rename-session: 사용자 지정 이름을 설정·해제하고 없는 키는 무시한다', () => {
   let s = stateWithSession('a');
   assert.equal(s.sessions.get('a').customTitle, '');

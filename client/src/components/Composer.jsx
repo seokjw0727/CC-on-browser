@@ -26,7 +26,6 @@ import {
 import ActiveModes from './ActiveModes.jsx';
 import Icon from './Icon.jsx';
 import RunningWork from './RunningWork.jsx';
-import RemotePill from './RemotePill.jsx';
 import Clawd from './Clawd.jsx';
 import './interact.css';
 
@@ -830,6 +829,11 @@ export default function Composer() {
     }
     const resumeId = cur.sessionId ?? cur.resumeSourceId;
     const canResume = cur.hasCompletedTurn && resumeId != null;
+    // 재시작이 실제로 일어나는 자리에서만 알린다 — 조용히 재시작하면 사용자에겐
+    // "노력 수준을 바꿨더니 세션이 새로 떴다"로만 보인다. 흔한 원인 둘: 구버전 CLI,
+    // 그리고 구버전 데몬이 새 메시지를 unknown message type으로 튕기는 버전 스큐
+    // (그 경우 사이드바 하단에 상시 경고가 함께 떠 있다).
+    notify(`런타임 변경이 안 돼 세션을 재시작합니다 — 노력 수준: ${label}`);
     stopSession(cur.key);
     startSession({
       cwd: cur.cwd,
@@ -1068,9 +1072,6 @@ export default function Composer() {
               <Icon name="chevron-down" size={10} className="pill-select-caret" />
             </span>
           )}
-
-          {/* 원격 제어 — claude.ai·모바일 앱에서 이 레포를 조종 (켜짐일 때만 눈에 띈다) */}
-          <RemotePill session={session} />
         </div>
 
         {/* 입력 */}

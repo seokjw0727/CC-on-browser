@@ -12,6 +12,7 @@
 // 바뀔 때 서버 목록을 다시 받으므로 로컬 캡처 없이도 신선하다.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../lib/store.jsx';
+import { versionSkew } from '../lib/app-version.js';
 import {
   deleteSessionFile,
   fetchBootstrap,
@@ -69,8 +70,8 @@ function fmtTime(ms) {
 const rowKeyOf = (s) => `${s.dirName}\n${s.sessionId}`;
 
 // 우클릭 메뉴의 원격 제어 항목이 툴팁으로 보여 줄 현재 상태. 켜짐일 때만 쓴다
-// (꺼짐·불가 사유는 아래에서 따로 만든다). 표시 문구의 주 출처는 컴포저의 📱 pill이고
-// 여기 있는 것은 메뉴 폭에 맞춘 한 줄 요약이다.
+// (꺼짐·불가 사유는 아래에서 따로 만든다). 컴포저 pill을 없앤 뒤로 이 메뉴가 원격
+// 제어의 유일한 창구라, 상태 설명도 여기 한 줄에 담는다.
 const RC_STATE_TIP = {
   starting: '원격 연결 중… — 누르면 취소하고 끕니다',
   ready: 'claude.ai·모바일 앱에서 이 레포를 조종할 수 있습니다',
@@ -937,6 +938,8 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
   const closeModal = () => dispatch({ type: 'close-new-session' });
   const [defaultCwd, setDefaultCwd] = useState('');
   const [platform, setPlatform] = useState(null); // 네이티브 폴더 선택 버튼 노출 판단
+  // 서버(데몬)와 이 번들의 버전이 어긋났는가 — null이면 정상. 배경은 app-version.js.
+  const [skew, setSkew] = useState(null);
   const [footPanel, setFootPanel] = useState(null); // null | 'stats' | 'settings'
   // 세션 컨텍스트 메뉴 — {rowKey, x, y}. 행 데이터는 매 렌더에 스토어에서 다시 읽어
   // 메뉴가 열린 사이 세션이 종료·제거돼도 낡은 정보로 동작하지 않게 한다.
@@ -995,6 +998,18 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
       .then((b) => {
         setDefaultCwd(b.defaultCwd || '');
         setPlatform(b.platform || null);
+        // 버전 스큐는 조용히 지나가면 안 된다 — 이 상태에서는 새로 생긴 WS 메시지가
+        // 서버에서 `unknown message type`으로 튕겨, 기능이 "이유 없이" 안 되는 것처럼
+        // 보인다(노력 수준 런타임 변경이 재시작으로 폴백하던 실제 사례).
+        const mismatch = versionSkew(b.version);
+        setSkew(mismatch);
+        if (mismatch) {
+          notify(
+            `서버(v${mismatch.server ?? '구버전'})와 화면(v${mismatch.client}) 버전이 다릅니다`
+            + ' — 모든 세션을 종료한 뒤 앱을 다시 실행해 주세요',
+            'error',
+          );
+        }
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1112,21 +1127,49 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
   const closeMenu = useCallback(() => setMenu(null), []);
 
   /**
-   * 우클릭 메뉴의 "원격 제어 켜기/끄기" 항목.
-   *
-   * 상태의 출처는 서버가 보내는 스냅샷 하나뿐이다(컴포저 pill과 같은 규율) — 낙관적
-   * 갱신을 하지 않으므로, 누른 직후의 피드백은 "전송했다"는 토스트로 준다. 실제 켜짐
-   * 여부는 remoteControl 방송이 돌아와야 알 수 있다.
+   * 이 행에 걸린 원격 제어 항목 한 번에 찾기 — 행 아이콘·메뉴 항목 세 곳이 **같은**
+   * 판정을 쓰게 하는 단일 출처다(어긋나면 아이콘은 켜졌는데 메뉴는 "켜기"가 된다).
    *
    * 조회는 세션 key 우선, 없으면 cwd 폴백이다 — 세션이 먼저 끝나도 원격 제어는 계속
    * 돌 수 있고 그때도 끌 수 있어야 한다(판정 근거는 store-reducer 주석 참조).
    */
-  const remoteMenuItem = (rowKey) => {
+  const remoteControlOf = (rowKey) => {
     const sess = state.sessions.get(rowKey);
     const byKey = remoteControlFor(state, rowKey);
     const rc = byKey ?? remoteControlByCwd(state, sess?.cwd ?? null);
-    // stopped는 "꺼짐"과 같다 — 껐다는 사실을 메뉴에 남길 이유가 없다.
-    const active = !!rc && rc.state !== 'stopped';
+    // stopped는 "꺼짐"과 같다 — 껐다는 사실을 UI에 남길 이유가 없다.
+    return { sess, byKey, rc, active: !!rc && rc.state !== 'stopped' };
+  };
+
+  /**
+   * 우클릭 메뉴의 "claude.ai/code에서 열기" — 연결 주소가 나온 뒤에만 뜬다.
+   * 컴포저 pill 팝오버가 갖고 있던 유일한 이동 경로를 여기로 옮긴 것이다.
+   * 항목이 없을 때는 null을 돌려주고 SessionMenu가 걸러 낸다.
+   */
+  const remoteOpenMenuItem = (rowKey) => {
+    const { rc, active } = remoteControlOf(rowKey);
+    if (!active || !rc.url) return null;
+    return {
+      key: 'remote-open',
+      icon: 'external',
+      label: 'claude.ai/code에서 열기',
+      tip: rc.url,
+      onSelect: () => {
+        // noopener/noreferrer — 새 탭이 이 앱의 window를 만지지 못하게.
+        window.open(rc.url, '_blank', 'noopener,noreferrer');
+      },
+    };
+  };
+
+  /**
+   * 우클릭 메뉴의 "원격 제어 켜기/끄기" 항목 — 원격 제어를 켜고 끄는 유일한 창구.
+   *
+   * 상태의 출처는 서버가 보내는 스냅샷 하나뿐이다 — 낙관적 갱신을 하지 않으므로,
+   * 누른 직후의 피드백은 "전송했다"는 토스트로 준다. 실제 켜짐·실패 여부는
+   * remoteControl 방송이 돌아온 뒤 store.jsx의 전이 토스트가 알린다.
+   */
+  const remoteMenuItem = (rowKey) => {
+    const { sess, byKey, rc, active } = remoteControlOf(rowKey);
     const offline = state.conn !== 'open';
     // 켜기는 서버가 라이브 세션에서만 받아 준다(종료된 세션의 key로는 cwd를 못 찾는다).
     // 눌러도 오류 토스트만 돌아오는 항목을 활성으로 두지 않는다.
@@ -1136,8 +1179,13 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
     let tip;
     if (offline) tip = 'WebSocket이 연결되어 있지 않습니다';
     else if (cannotStart) tip = '종료된 세션에서는 켤 수 없습니다';
-    else if (active) tip = RC_STATE_TIP[rc.state] ?? '';
-    else tip = 'claude.ai·모바일 앱에서 이 레포를 조종할 수 있게 켭니다';
+    else if (active) {
+      // 실패한 항목은 CLI가 낸 사유를 그대로 붙인다 — pill 팝오버가 없어진 뒤로
+      // 사유를 다시 볼 수 있는 곳은 여기뿐이다(켤 때의 오류 토스트는 지나간다).
+      tip = [RC_STATE_TIP[rc.state] ?? '', rc.state === 'error' ? rc.error : null]
+        .filter(Boolean)
+        .join(' — ');
+    } else tip = 'claude.ai·모바일 앱에서 이 레포를 조종할 수 있게 켭니다';
 
     const failed = () => notify('WebSocket이 연결되어 있지 않습니다.', 'error');
     return {
@@ -1199,6 +1247,12 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
     );
     const dotCls = `sess-dot${dot.cls ? ` ${dot.cls}` : ''}`;
     const dotLabel = `상태: ${dot.label}`;
+    // 원격 제어가 켜져 있다는 사실은 행에 남는다 — 컴포저 pill이 하던 "지금 켜져
+    // 있음" 표시를 대신한다. 판정은 메뉴와 같은 remoteControlOf 하나를 쓴다.
+    const { rc: rowRc, active: remoteOn } = remoteControlOf(row.key);
+    const remoteLabel = remoteOn
+      ? `원격 제어 ${rowRc.state === 'error' ? '실패' : '켜짐'}`
+      : null;
     // 세션 이름 — 사용자가 지정한 이름이 있으면 그것, 없으면 자동 제목(sessionDisplayTitle).
     const label = sessionDisplayTitle({
       customTitle: sess?.customTitle,
@@ -1258,12 +1312,22 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
           // 구분하기 어려운 사용자의 확인 경로(hover 없는 기기에는 닿지 않는다).
           data-tip={`${
             label !== node.cwd ? `${label}${node.cwd ? ` — ${node.cwd}` : ''}` : node.cwd || node.label
-          } · ${dot.label}`}
+          } · ${dot.label}${remoteLabel ? ` · ${remoteLabel}` : ''}`}
           // 이름 변경·종료는 우클릭 메뉴에만 있다 — 키보드 사용자에게 여는 법을 알린다.
           aria-keyshortcuts="Shift+F10"
         >
           <span className={dotCls} role="img" aria-label={dotLabel} />
           <span className="truncate">{label}</span>
+          {/* title을 주면 Icon이 role="img" + aria-label로 렌더한다(장식용은 aria-hidden).
+              툴팁이 닿지 않는 키보드·터치 사용자에게도 "켜져 있다"가 이름으로 읽힌다. */}
+          {remoteOn && (
+            <Icon
+              name="phone"
+              size={12}
+              className={`sess-remote-ico${rowRc.state === 'error' ? ' err' : ''}`}
+              title={remoteLabel}
+            />
+          )}
         </button>
       </div>
     );
@@ -1331,6 +1395,18 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
         )}
       </div>
 
+      {/* 버전 스큐 상시 경고 — 토스트는 지나가지만 이 상태는 앱을 다시 실행할
+          때까지 계속되므로, 그 사실이 화면에 남아 있어야 한다. */}
+      {skew && (
+        <div className="version-skew" role="status">
+          <Icon name="warning" size={13} className="vs-ico" />
+          <span className="truncate">
+            서버 v{skew.server ?? '구버전'} · 화면 v{skew.client}
+          </span>
+          <span className="vs-hint dim">세션 종료 후 재실행 필요</span>
+        </div>
+      )}
+
       {/* 하단 고정 통계·설정 버튼 — 세션 목록 스크롤 영역(.sidebar-inner) 밖 */}
       <SidebarFoot
         openPanel={footPanel}
@@ -1375,9 +1451,11 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
                 setRenaming({ rowKey: menu.rowKey, value: sess?.customTitle ?? '' });
               },
             },
-            // 원격 제어 ON/OFF — 컴포저 pill은 활성 세션만 다루므로, 다른 프로젝트의
-            // 라이브 세션까지 여기서 켜고 끌 수 있게 한다.
+            // 원격 제어 ON/OFF — 활성 세션뿐 아니라 다른 프로젝트의 라이브 세션까지
+            // 여기서 켜고 끈다(컴포저 pill을 없앤 뒤로 유일한 창구다).
             remoteMenuItem(menu.rowKey),
+            // 켜져서 주소가 나온 뒤에만 붙는다 — 그 전에는 null이라 렌더되지 않는다.
+            remoteOpenMenuItem(menu.rowKey),
             // 실행 중이면 CLI 프로세스를 정지하고, 이미 끝난 세션이면 목록에서 치운다.
             // 같은 자리에서 다른 일을 하므로 라벨도 다르게 — "닫기"가 무엇을 하는지
             // 사용자가 눌러 보기 전에 알 수 있어야 한다.

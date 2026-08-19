@@ -253,6 +253,56 @@ const findReusableDaemon = async (p, deadlineMs = REUSE_DEADLINE_MS) => {
   }
 };
 
+// 유휴 데몬에게 "지금 내려 달라"고 부탁한다 — 버전 스큐를 조용히 고치는 유일한 경로.
+// 서버는 살아있는 CLI 세션이나 원격 제어가 하나라도 있으면 409로 거절한다(그 판단은
+// 서버가 한다 — 런처는 남의 작업을 죽일 근거를 갖고 있지 않다).
+// @returns 'stopped' | 'busy' | 'error'
+const requestShutdownIfIdle = (p, authToken, timeoutMs) => new Promise((resolve) => {
+  let done = false;
+  let req = null;
+  const finish = (v) => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    try { req?.destroy(); } catch { /* 이미 정리됨 */ }
+    resolve(v);
+  };
+  const timer = setTimeout(() => finish('error'), timeoutMs);
+  try {
+    req = http.request(
+      {
+        method: 'POST',
+        host: '127.0.0.1',
+        port: p,
+        path: '/api/shutdown-if-idle',
+        headers: { 'x-auth-token': authToken, 'content-length': '0' },
+      },
+      (res) => {
+        res.resume();
+        if (res.statusCode === 200) finish('stopped');
+        else if (res.statusCode === 409) finish('busy');
+        else finish('error'); // 501(구버전 서버엔 이 창구가 없다)·401·그 밖 모두
+      },
+    );
+  } catch {
+    finish('error');
+    return;
+  }
+  req.on('error', () => finish('error'));
+  req.end();
+});
+
+// 데몬이 실제로 포트를 놓을 때까지 짧게 기다린다 — 종료는 비동기라, 바로 이어서
+// 새 데몬을 띄우면 EADDRINUSE로 죽는다.
+const waitForPortFree = async (p, timeoutMs) => {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if ((await probePort(p)) === 'free') return true;
+    if (Date.now() >= deadline) return false;
+    await delay(100);
+  }
+};
+
 const appUrl = (p, authToken) => `http://127.0.0.1:${p}/#token=${authToken}`;
 
 // 실행 중 데몬을 재사용했을 때의 한 줄. 버전은 **기록된 데몬의 것**을 쓴다 —
@@ -261,11 +311,47 @@ const alreadyRunningLine = (rec) =>
   `Already running${rec.version ? ` (v${rec.version})` : ''} on port ${rec.port}`
   + ' — opened a new browser tab.';
 
-/** 살아있는 데몬으로 탭만 열고 성공 종료. */
-const reuseDaemon = (rec) => {
+/** 살아있는 데몬으로 탭만 열고 성공 종료. warn이 있으면 그 한 줄을 먼저 낸다. */
+const reuseDaemon = (rec, { warn } = {}) => {
   openBrowser(appUrl(rec.port, rec.token));
   console.log(alreadyRunningLine(rec));
+  if (warn) console.warn(warn);
   process.exit(0);
+};
+
+// 버전이 어긋난 데몬을 만났을 때의 처리. 배경: 데몬은 브라우저를 닫아도 살아남고
+// 재실행은 그 데몬을 재사용하는데, 정적 번들은 디스크에서 매번 읽힌다 — 업그레이드
+// 직후 "새 클라이언트 + 구 서버"가 되어 새로 생긴 WS 메시지가 서버에서
+// `unknown message type`으로 튕긴다(v1.9.3 데몬에서 setEffort가 그랬다).
+//
+// 유휴면 조용히 교체하고, 일하는 중이면 죽이지 않고 경고만 남긴 채 재사용한다.
+// 여기서 돌아오면(=교체 성공) 호출측은 평소의 기동 경로를 그대로 탄다.
+const replaceStaleDaemon = async (rec) => {
+  const result = await requestShutdownIfIdle(rec.port, rec.token, 5_000);
+  if (result === 'stopped') {
+    if (await waitForPortFree(rec.port, 5_000)) {
+      console.log(`Replacing the running v${rec.version ?? '?'} server with v${pkg.version}...`);
+      return true;
+    }
+    // 내려가겠다고 답해 놓고 포트를 놓지 않았다. 재사용도 답이 아니다 — 곧 죽을
+    // 서버로 탭을 열면 빈 화면이 된다. 사실대로 알리고 다시 시도하게 한다.
+    fail([
+      `The v${rec.version ?? '?'} background server accepted the shutdown request`,
+      `  but did not release port ${rec.port}.`,
+      '  Wait a moment and run this command again.',
+    ].join('\n'));
+  }
+  const why = result === 'busy'
+    ? 'it still has live sessions'
+    : 'it did not accept the request';
+  reuseDaemon(rec, {
+    warn: [
+      `WARNING: the background server is v${rec.version ?? '?'} but this launcher is v${pkg.version}.`,
+      `  It was left running because ${why}.`,
+      '  Close every session and re-run this command to pick up the new version.',
+    ].join('\n'),
+  });
+  return false; // reuseDaemon이 process.exit 하므로 실제로는 닿지 않는다
 };
 
 const openBrowser = (url) => {
@@ -325,7 +411,11 @@ if (!noOpen && !isDaemon) {
     // 데몬이 잠시(또는 세션이 살아있으면 한참) 포트를 쥐고 있으므로, 탐색기·바로가기
     // 실행에서는 창만 깜빡이고 아무 일도 없는 것처럼 보였다. 우리 데몬이면 재사용한다.
     const found = await findReusableDaemon(port);
-    if (found.status === 'reuse') reuseDaemon(found.record);
+    if (found.status === 'reuse') {
+      // 같은 버전이면 그대로 재사용, 다르면 교체를 시도한다(replaceStaleDaemon 참조).
+      if (found.record.version === pkg.version) reuseDaemon(found.record);
+      await replaceStaleDaemon(found.record);
+    }
     if (found.status === 'busy') fail(portBusyMessage(port));
     // 'free' — 판정 중에 포트가 비었다(직전 데몬이 종료를 마쳤다 등). 오류가 아니라
     // 아래 정상 기동 경로로 그대로 떨어진다.
@@ -408,6 +498,10 @@ try {
     token: bootToken,
     cliPath,
     staticDir,
+    version: pkg.version,
+    // 런처가 버전이 어긋난 유휴 데몬을 교체할 때 쓰는 창구 — 서버는 "유휴인가"만
+    // 판정하고, 실제 종료(신원 파일 정리 포함)는 이 프로세스의 주인인 여기가 한다.
+    onShutdownRequest: shutdown,
     onClientCountChange: noOpen ? undefined : onClientCountChange,
     // 붙여넣기 임시 폴더 청소는 실제 앱 기동에서만 켠다 — 이 부수효과가 startServer의
     // 기본값이면 테스트가 서버를 띄우는 것만으로 사용자 %TEMP%를 지운다.

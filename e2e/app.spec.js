@@ -433,51 +433,31 @@ test('지난 세션 삭제 — 확인 후 목록에서 사라진다', async ({ p
   await expect(pastList).not.toContainText('E2E 씨앗 베타');
 });
 
-test('원격 제어 pill — 실패 경로가 사유와 함께 팝오버에 뜬다', async ({ page }) => {
+test('원격 제어 — 사이드바 우클릭으로 켜고 끄며, 실패 사유가 토스트로 뜬다', async ({ page }) => {
   // 가짜 CLI는 FAKE_RC 기본값(fail)으로 로그인 실패 문구를 내고 즉시 종료한다.
-  // 여기서 보는 것은 "서버가 파싱한 사유가 그대로 UI까지 도달하는가"다 —
-  // 실제 claude.ai 연결은 e2e에서 만들지 않는다.
-  await startSession(page, servers.echo.url);
-  // 팝오버 안에도 "원격 제어 끄기" 버튼이 있어 이름 정규식으로는 둘이 잡힌다 — 클래스로 특정한다.
-  const pill = page.locator('.remote-pill');
-  await expect(pill).toBeVisible();
-  await expect(pill).toContainText('원격 제어'); // 꺼진 상태
-
-  await pill.click();
-  // 자식이 실패하면 상태가 error로 내려오고 pill 문구가 바뀐다
-  await expect(pill).toContainText('원격 실패', { timeout: 15_000 });
-
-  const pop = page.getByRole('dialog', { name: '원격 제어' });
-  await expect(pop).toBeVisible();
-  await expect(pop).toContainText('logged in'); // CLI가 낸 사유 원문
-  // 사용자가 반드시 알아야 하는 문구 두 가지
-  await expect(pop).toContainText('브라우저를 닫아도 계속 동작합니다');
-
-  // Escape로 닫힌다
-  await page.keyboard.press('Escape');
-  await expect(pop).toBeHidden();
-});
-
-test('사이드바 우클릭 — 원격 제어를 켜고 끌 수 있다', async ({ page }) => {
-  // 가짜 CLI는 FAKE_RC 기본값(fail)이라 켜기는 곧바로 실패로 끝난다. 여기서 보는 것은
-  // "메뉴 항목이 실제로 서버까지 명령을 보내고, 돌아온 상태로 라벨이 뒤집히는가"다 —
-  // 실제 claude.ai 연결은 e2e에서 만들지 않는다(pill 테스트와 같은 규율).
+  // 여기서 보는 것은 "메뉴가 실제로 서버까지 명령을 보내고, 돌아온 상태가 UI 세 곳
+  // (메뉴 라벨·행 아이콘·토스트)에 같은 사실로 나타나는가"다 — 실제 claude.ai
+  // 연결은 e2e에서 만들지 않는다. 컴포저 pill은 제거됐으므로 관측 지점도 여기뿐이다.
   await startSession(page, servers.echo.url);
   const row = page.locator('.sess-row.live').first();
   const menu = page.getByRole('menu', { name: '세션 메뉴' });
-  const pill = page.locator('.remote-pill');
+  const remoteIcon = row.getByRole('img', { name: /원격 제어/ });
+
+  // 컴포저에는 원격 제어 컨트롤이 하나도 남아 있지 않다(이 작업의 수용 기준).
+  await expect(page.locator('.remote-pill')).toHaveCount(0);
 
   // 원격 제어 상태는 **서버가** 들고 있어 페이지를 새로 열어도 남는다 — 앞선
-  // 테스트(pill 실패 경로)가 켜 둔 채 끝났을 수 있으므로 먼저 꺼짐으로 맞춘다.
+  // 실행이 켜 둔 채 끝났을 수 있으므로 먼저 꺼짐으로 맞춘다.
   await row.click({ button: 'right' });
   const turnOff = menu.getByRole('menuitem', { name: '원격 제어 끄기' });
   if (await turnOff.count()) {
     await turnOff.click();
-    await expect(pill).not.toContainText('원격 실패', { timeout: 15_000 });
+    await expect(remoteIcon).toHaveCount(0, { timeout: 15_000 });
   } else {
     await page.keyboard.press('Escape');
   }
   await expect(menu).toHaveCount(0);
+  await expect(remoteIcon).toHaveCount(0);
 
   // 꺼진 상태에서는 "켜기"
   await row.click({ button: 'right' });
@@ -486,24 +466,77 @@ test('사이드바 우클릭 — 원격 제어를 켜고 끌 수 있다', async 
   await turnOn.click();
   await expect(menu).toHaveCount(0);
   // 낙관적 갱신을 하지 않으므로, 즉시 보이는 피드백은 "보냈다"는 토스트뿐이다.
-  // (정리 단계의 '끕니다' 토스트가 아직 떠 있을 수 있어 문구로 특정한다.)
   await expect(
     page.locator('.toast-text').filter({ hasText: '원격 제어를 켜는 중입니다' }),
   ).toBeVisible();
-  // 명령이 서버까지 갔다는 증거 — 컴포저 pill이 같은 스냅샷을 받아 상태를 바꾼다
-  await expect(pill).toContainText('원격 실패', { timeout: 15_000 });
 
-  // 켜진(=실패로 붙잡힌) 상태에서는 같은 자리가 "끄기"로 뒤집힌다
+  // 명령이 서버까지 갔다는 증거 ① — 실패 사유가 CLI 원문 그대로 토스트에 실린다.
+  // (pill 팝오버가 하던 일을 store.jsx의 상태 전이 감시가 이어받았다.)
+  await expect(
+    page.locator('.toast-text').filter({ hasText: 'logged in' }),
+  ).toBeVisible({ timeout: 15_000 });
+  // 증거 ② — 행에 원격 제어 표시가 붙는다(실패도 "켜져 있는 상태"다).
+  await expect(remoteIcon).toHaveCount(1);
+
+  // 켜진(=실패로 붙잡힌) 상태에서는 같은 자리가 "끄기"로 뒤집히고, 사유를 다시 볼 수 있다
   await row.click({ button: 'right' });
   await expect(menu.getByRole('menuitem', { name: '원격 제어 켜기' })).toHaveCount(0);
-  await menu.getByRole('menuitem', { name: '원격 제어 끄기' }).click();
-  // 끄면 실패 상태까지 정리된다 — pill이 꺼짐 문구로 돌아온다
-  await expect(pill).toContainText('원격 제어', { timeout: 15_000 });
-  await expect(pill).not.toContainText('원격 실패');
+  const offItem = menu.getByRole('menuitem', { name: '원격 제어 끄기' });
+  await expect(offItem).toHaveAttribute('data-tip', /logged in/);
+  await offItem.click();
+  // 끄면 실패 상태까지 정리된다 — 행 표시가 사라진다
+  await expect(remoteIcon).toHaveCount(0, { timeout: 15_000 });
 
   // 그리고 메뉴도 다시 "켜기"로 돌아와 있다(막다른 길이 없다)
   await row.click({ button: 'right' });
   await expect(menu.getByRole('menuitem', { name: '원격 제어 켜기' })).toBeVisible();
+  // 주소가 없는 실패 상태에서는 "열기" 항목이 뜨지 않는다(ready 경로는 단위 테스트가 덮는다)
+  await expect(menu.getByRole('menuitem', { name: 'claude.ai/code에서 열기' })).toHaveCount(0);
+});
+
+test('노력 수준 변경 — 세션 재시작 없이 즉시 적용된다', async ({ page }) => {
+  // 이 프로젝트의 회귀 하나를 못박는다: 구버전 데몬이 남아 setEffort를 모르면
+  // 클라이언트가 ack 타임아웃 뒤 --resume 재시작으로 폴백해, 사용자에겐 "노력 수준을
+  // 바꿨더니 세션이 새로 떴다"로 보였다. 가짜 CLI는 apply_flag_settings를 지원하므로
+  // 여기서는 런타임 채널이 실제로 성립하는지(=재시작이 없는지)를 본다.
+  await startSession(page, servers.echo.url);
+  const input = page.getByLabel('메시지 입력');
+  // 재시작이 일어나면 대화가 새 탭으로 이월되므로, 먼저 흔적을 하나 남겨 둔다.
+  await input.fill('노력 수준 전 메시지');
+  await input.press('Enter');
+  await expect(page.getByText(/echo: 노력 수준 전 메시지/).first()).toBeVisible();
+
+  // 사이드바 행 버튼의 접근 이름에도 세션 제목이 실려 /노력/에 걸린다 — 컴포저로 한정한다.
+  const picker = page.locator('.composer-foot').getByRole('button', { name: /노력/ });
+  await picker.click();
+  const slider = page.getByRole('slider', { name: '노력 수준' });
+  await expect(slider).toBeVisible();
+  const before = await slider.getAttribute('aria-valuenow');
+
+  // 키보드로 한 칸 올린다(드래그보다 결정적이다). 커밋은 180ms 디바운스 뒤에 나간다.
+  await slider.focus();
+  await slider.press('ArrowRight');
+
+  // 성공 토스트 = 런타임 채널로 적용됐다는 뜻. 폴백이면 "세션을 재시작합니다"가 뜬다.
+  await expect(
+    page.locator('.toast-text').filter({ hasText: '노력 수준 변경' }),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(
+    page.locator('.toast-text').filter({ hasText: '재시작' }),
+  ).toHaveCount(0);
+
+  // 표시도 실제로 올라갔다(서버의 effortSet 방송이 반영된 결과)
+  await expect(slider).not.toHaveAttribute('aria-valuenow', before ?? '0');
+
+  // 그리고 세션은 그대로다 — 재시작이었다면 이 메시지가 새 탭으로 옮겨지며
+  // 사이드바 행도 갈렸을 것이다. 대화가 남아 있고 행은 하나뿐이어야 한다.
+  await page.keyboard.press('Escape');
+  await expect(page.getByText(/echo: 노력 수준 전 메시지/).first()).toBeVisible();
+  await expect(page.locator('.sess-row.live')).toHaveCount(1);
+  // 이어서 보낸 메시지도 같은 세션에서 답한다
+  await input.fill('노력 수준 후 메시지');
+  await input.press('Enter');
+  await expect(page.getByText(/echo: 노력 수준 후 메시지/).first()).toBeVisible();
 });
 
 test('메시지 타임스탬프 — 사용자 메시지와 답변에 HH:MM이 붙는다', async ({ page }) => {

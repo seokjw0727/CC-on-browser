@@ -175,14 +175,28 @@ function writeRecord(home, record) {
 /**
  * /api/bootstrap만 흉내내는 가짜 서버. 토큰이 맞으면 200 + {port: reportPort}.
  * reportPort를 실제 포트와 다르게 주면 "stale 파일 뒤의 남의 서버" 상황이 된다.
+ *
+ * shutdownStatus: POST /api/shutdown-if-idle에 돌려줄 상태 코드 — 버전 스큐 교체
+ * 경로를 태우는 데 쓴다. 200이면 응답 뒤 실제로 리스너를 놓아(포트 해제) 런처가
+ * 새 데몬을 띄우러 갈 수 있게 한다. 409는 "일하는 중", 501은 "그런 창구 없음"
+ * (진짜 구버전 서버가 그렇다).
  */
-async function fakeServer({ token, reportPort = null }) {
+async function fakeServer({ token, reportPort = null, shutdownStatus = 501 }) {
   const http = await import('node:http');
   const paths = [];
   const srv = http.createServer((req, res) => {
     paths.push(req.url);
     if (req.headers['x-auth-token'] !== token) {
       res.writeHead(401).end();
+      return;
+    }
+    if (req.url === '/api/shutdown-if-idle') {
+      res.writeHead(shutdownStatus, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(shutdownStatus === 200 ? { stopping: true } : { error: 'busy' }));
+      if (shutdownStatus === 200) {
+        srv.close();
+        srv.closeAllConnections?.();
+      }
       return;
     }
     res.writeHead(200, { 'content-type': 'application/json' });
@@ -204,12 +218,13 @@ test('relaunch reuses a live daemon: opens a tab with the recorded token and exi
   const fake = await fakeServer({ token: 'tok-live' });
   const spy = browserSpy(home);
   try {
-    writeRecord(home, { port: fake.port, token: 'tok-live', pid: 4242, version: '9.9.9' });
+    // 버전이 같아야 그대로 재사용한다 — 다르면 교체를 시도하는 경로로 간다(아래 테스트).
+    writeRecord(home, { port: fake.port, token: 'tok-live', pid: 4242, version: pkg.version });
     const r = await runBin(['--port', String(fake.port)], { ...homeEnv(home), ...spy.env });
     assert.equal(r.code, 0, r.stderr);
     assert.equal(
       r.stdout.trim(),
-      `Already running (v9.9.9) on port ${fake.port} — opened a new browser tab.`,
+      `Already running (v${pkg.version}) on port ${fake.port} — opened a new browser tab.`,
     );
     // 인증은 진짜 bootstrap endpoint로 확인해야 한다.
     assert.ok(fake.paths.includes('/api/bootstrap'), `probed paths: ${fake.paths.join(',')}`);
@@ -220,6 +235,77 @@ test('relaunch reuses a live daemon: opens a tab with the recorded token and exi
     assert.ok(opened, 'openBrowser가 실제로 호출됐다');
     assert.ok(opened.includes(`127.0.0.1:${fake.port}`), `열린 주소의 포트: ${opened}`);
     assert.ok(opened.includes('token=tok-live'), `기록된 토큰으로 열린다: ${opened}`);
+  } finally {
+    await fake.close();
+  }
+});
+
+// ----- 버전 스큐(구 데몬 + 새 런처) -----
+// 데몬은 브라우저를 닫아도 살아남고 재실행은 그 데몬을 재사용하는데, 정적 번들은
+// 디스크에서 매번 읽힌다 — 업그레이드 직후 "새 클라이언트 + 구 서버"가 되어 새로
+// 생긴 WS 메시지가 `unknown message type`으로 튕긴다(v1.9.3 데몬의 setEffort 실측).
+
+test('version skew: an idle old daemon is asked to stop, then the launcher starts fresh', {
+  skip: NEEDS_DIST_SKIP,
+}, async (t) => {
+  const home = isolatedHome(t);
+  // 200 = "내려가겠다" — 응답 뒤 실제로 포트를 놓는다.
+  const fake = await fakeServer({ token: 'tok-old', shutdownStatus: 200 });
+  try {
+    writeRecord(home, { port: fake.port, token: 'tok-old', pid: 4243, version: '0.0.1' });
+    // 데몬 스폰은 건너뛴다(SKIP_DAEMON) — 여기서 보려는 것은 "구 데몬을 내리고
+    // 재사용 경로를 빠져나갔는가"까지다. 그 뒤 런처는 새 데몬을 기다리다 실패한다.
+    const r = await runBin(['--port', String(fake.port)], {
+      ...homeEnv(home),
+      CC_ON_BROWSER_TEST_SKIP_DAEMON: '1',
+    });
+    assert.ok(
+      fake.paths.includes('/api/shutdown-if-idle'),
+      `종료를 요청했다: ${fake.paths.join(',')}`,
+    );
+    assert.match(r.stdout, /Replacing the running v0\.0\.1 server/);
+    // 재사용으로 끝나지 않았다 — "Already running"은 나오지 않는다.
+    assert.doesNotMatch(r.stdout, /Already running/);
+    // 데몬을 안 띄웠으니 기동 실패로 끝나는 것이 맞다(이 테스트의 관측 종점).
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /did not come up/);
+  } finally {
+    await fake.close();
+  }
+});
+
+test('version skew: a busy old daemon is reused with a warning, never killed', {
+  skip: NEEDS_DIST_SKIP,
+}, async (t) => {
+  const home = isolatedHome(t);
+  // 409 = "살아있는 세션이 있다" — 남의 작업을 죽이지 않는다.
+  const fake = await fakeServer({ token: 'tok-busy', shutdownStatus: 409 });
+  try {
+    writeRecord(home, { port: fake.port, token: 'tok-busy', pid: 4244, version: '0.0.1' });
+    const r = await runBin(['--port', String(fake.port)], homeEnv(home));
+    assert.equal(r.code, 0, r.stderr);
+    // 그대로 재사용하고 탭만 연다 — 기존 계약.
+    assert.ok(r.stdout.includes(`Already running (v0.0.1) on port ${fake.port}`), r.stdout);
+    // 다만 왜 옛 버전이 도는지 알려 준다(사용자가 스스로 고칠 수 있는 유일한 단서).
+    assert.match(r.stderr, /background server is v0\.0\.1 but this launcher is v/);
+    assert.match(r.stderr, /live sessions/);
+  } finally {
+    await fake.close();
+  }
+});
+
+test('version skew: a daemon without the endpoint (501) is reused with a warning', {
+  skip: NEEDS_DIST_SKIP,
+}, async (t) => {
+  const home = isolatedHome(t);
+  // 진짜 구버전 서버에는 이 창구 자체가 없다 — 404/501 어느 쪽이든 교체를 포기한다.
+  const fake = await fakeServer({ token: 'tok-501', shutdownStatus: 501 });
+  try {
+    writeRecord(home, { port: fake.port, token: 'tok-501', pid: 4245, version: '1.0.0' });
+    const r = await runBin(['--port', String(fake.port)], homeEnv(home));
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /Already running \(v1\.0\.0\)/);
+    assert.match(r.stderr, /did not accept the request/);
   } finally {
     await fake.close();
   }

@@ -1328,6 +1328,18 @@ select.mode-trust:focus {
   .sess-dot { animation: none !important; }
 }
 
+/* ----- 원격 제어 켜짐 표시 -----
+   컴포저 pill을 없앤 뒤 "지금 원격으로 열려 있다"를 알리는 유일한 상시 신호다.
+   이름(제목)은 Icon이 aria-label로 싣고, 여기서는 자리와 색만 준다. */
+.sess-remote-ico {
+  flex: none;
+  margin-left: auto;
+  color: var(--accent);
+}
+.sess-remote-ico.err {
+  color: var(--danger);
+}
+
 /* 설정 라벨 아래 보조 줄 — 어떤 파일을 다루는지 같은 짧은 부연. */
 .setting-sub {
   display: block;
@@ -1742,6 +1754,30 @@ select.mode-trust:focus {
 }
 
 /* ===== 사이드바 하단 통계·설정 팝오버 ===== */
+/* ----- 버전 스큐 경고 -----
+   "구 데몬 + 새 번들"은 앱을 다시 실행할 때까지 지속되는 상태다 — 지나가는
+   토스트만으로는 부족해 하단에 상시로 남긴다. */
+.version-skew {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+.version-skew .vs-ico {
+  flex: none;
+}
+.version-skew .vs-hint {
+  margin-left: auto;
+  flex: none;
+  font-size: 0.68rem;
+}
+
 .sidebar-foot {
   position: relative;
   flex-shrink: 0;
@@ -2033,93 +2069,6 @@ select.mode-trust:focus {
 }
 @keyframes tip-in {
   from { opacity: 0; transform: translateY(2px); }
-}
-
-/* ----- 원격 제어 pill + 팝오버 (RemotePill) -----
-   꺼져 있을 때는 다른 pill과 같은 무게로 조용히 있고, 켜지면 색으로 존재를 알린다.
-   "브라우저를 닫아도 계속 돈다"는 성질 때문에 켜진 상태가 눈에 띄어야 한다. */
-.remote-wrap {
-  position: relative;
-  display: inline-flex;
-}
-.remote-pill {
-  cursor: pointer;
-  max-width: 190px;
-}
-.remote-pill.on {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.remote-pill.on.error {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-.remote-pill.on.starting,
-.remote-pill.on.stopping {
-  border-color: var(--warning);
-  color: var(--warning);
-}
-
-.remote-pop {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
-  z-index: 40;
-  width: min(360px, calc(100vw - 32px));
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: 0 10px 30px rgb(0 0 0 / 22%);
-  font-size: 0.82rem;
-  line-height: 1.5;
-}
-.rp-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 8px;
-}
-.rp-title {
-  font-weight: 600;
-}
-.rp-cap {
-  margin-left: auto;
-  font-size: 0.75rem;
-}
-.rp-error {
-  margin-bottom: 8px;
-  padding: 7px 9px;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
-  color: var(--danger);
-  word-break: break-word;
-}
-.rp-link {
-  display: inline-block;
-  font-weight: 600;
-  color: var(--accent);
-}
-.rp-url {
-  margin-top: 3px;
-  font-size: 0.72rem;
-  word-break: break-all;
-}
-.rp-wait {
-  font-size: 0.78rem;
-}
-.rp-note {
-  margin: 10px 0 0;
-  padding-top: 9px;
-  border-top: 1px solid var(--border-muted, var(--border));
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-.rp-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 10px;
 }
 
 /* ----- 실행 중 작업 도크 (RunningWork) — 입력창 아래 -----
