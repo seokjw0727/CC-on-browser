@@ -8,6 +8,16 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-08-20
+
+> 실행 중인 셸·서브에이전트를 입력창 밖 독립 카드로 꺼내 눌러서 내용을 볼 수 있게 하고,
+> 설정 팝업을 테마·세션·플러그인·업데이트 네 탭으로 나눴습니다. 사이드바에는 앱·데몬·CLI
+> 버전을 보여 주는 '정보'가 생겼고, 설정에서 새 버전을 직접 확인할 수 있습니다.
+> `/clear`·`/compact` 위의 지나간 대화도 이제 화면에서 접힙니다.
+> (Running shells and subagents moved out of the composer into an expandable dock, the
+> settings popup became four tabs, a new sidebar "정보" panel reports app/daemon/CLI
+> versions with an on-demand update check, and history above `/clear`·`/compact` folds away.)
+
 ### Added
 - **사이드바 하단에 '정보'가 생겼습니다.** 앱(번들) 버전, 데몬 버전, Claude CLI 버전,
   플랫폼, 포트, 저장소 링크를 한 화면에서 봅니다. 값은 앱을 켤 때 한 번 받는
