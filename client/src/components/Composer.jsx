@@ -1151,16 +1151,20 @@ export default function Composer() {
           )}
         </div>
 
-        {/* 실행 중 작업 도크 — 입력창 **아래**. 지금 돌고 있는 셸·서브에이전트를
-            모아 보여 주고, 누르면 대화 속 해당 카드로 이동한다. */}
-        {session && (
-          <RunningWork
-            session={session}
-            conn={state.conn}
-            onJump={(uid) => jumpTo(session.key, uid)}
-          />
-        )}
       </div>
+
+      {/* 실행 중 작업 도크 — 입력창 박스 **밖**의 독립 카드(.composer-shell의 형제).
+          셸 안에 있던 시절엔 도크에 포커스만 가도 .composer-shell:focus-within이 입력창
+          테두리를 물들였고, 상세를 펼치면 입력 박스가 통째로 늘어났다. 셸 **뒤**여야
+          한다 — .composer-mascot이 .composer-dock의 위쪽 모서리에 붙어 있어서, 앞에
+          두면 마스코트 발이 입력창이 아니라 이 스트립을 딛는다. */}
+      {session && (
+        <RunningWork
+          session={session}
+          conn={state.conn}
+          onJump={(uid) => jumpTo(session.key, uid)}
+        />
+      )}
 
       {/* 상태줄 — 컨텍스트·5h/7d 사용량·연결 */}
       <div className="composer-meta">

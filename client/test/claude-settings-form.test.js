@@ -17,6 +17,7 @@ import {
   parseSettings,
   patchEnvRows,
   patchField,
+  pluginRows,
   readEnabledPlugins,
   readEnvRows,
   readField,
@@ -247,4 +248,62 @@ test('enabledPlugins: boolean이 아닌 값이 있으면 토글로 뭉개지 않
     reason: 'blocked',
   });
   assert.deepEqual(readEnabledPlugins('{"enabledPlugins":[]}'), { ok: false, reason: 'blocked' });
+});
+
+// ----- pluginRows: 설치 목록 + 설정 켬/끔을 한 화면 목록으로 -----
+// 이 병합 규칙이 항목을 빠뜨리면 사용자가 설정 파일을 정리할 방법이 사라진다.
+
+test('pluginRows — 설치된 항목에 설정의 켬/끔이 붙는다', () => {
+  const installed = [{ key: 'a@m', name: 'a', marketplace: 'm', installs: [{ scope: 'user' }] }];
+  const r = pluginRows('{"enabledPlugins":{"a@m":true}}', installed);
+  assert.equal(r.ok, true);
+  assert.equal(r.rows.length, 1);
+  assert.equal(r.rows[0].installed, true);
+  assert.equal(r.rows[0].enabled, true);
+  assert.deepEqual(r.rows[0].installs, [{ scope: 'user' }]);
+});
+
+test('pluginRows — 설정에만 남은 찌꺼기도 목록에 넣는다', () => {
+  const r = pluginRows('{"enabledPlugins":{"gone@old":false}}', []);
+  assert.deepEqual(r.rows[0], {
+    key: 'gone@old',
+    name: 'gone',
+    marketplace: 'old',
+    installs: [],
+    installed: false,
+    enabled: false,
+  });
+});
+
+test('pluginRows — "설정 없음"은 undefined이지 false가 아니다', () => {
+  // 스위치(켬/끔)와 "설정 없음"(켜기·끄기 두 버튼)이 갈리는 근거다.
+  const r = pluginRows('{}', [{ key: 'a@m', name: 'a', marketplace: 'm', installs: [] }]);
+  assert.equal(r.rows[0].enabled, undefined);
+});
+
+test('pluginRows — 이름에 @가 들어가면 마지막 @를 기준으로 자른다', () => {
+  const r = pluginRows('{"enabledPlugins":{"scope@pkg@market":true}}', []);
+  assert.equal(r.rows[0].name, 'scope@pkg');
+  assert.equal(r.rows[0].marketplace, 'market');
+});
+
+test('pluginRows — key 사전순으로 정렬한다 (도착 순서와 무관)', () => {
+  const installed = [
+    { key: 'z@m', name: 'z', marketplace: 'm', installs: [] },
+    { key: 'a@m', name: 'a', marketplace: 'm', installs: [] },
+  ];
+  const r = pluginRows('{"enabledPlugins":{"m@m":true}}', installed);
+  assert.deepEqual(r.rows.map((x) => x.key), ['a@m', 'm@m', 'z@m']);
+});
+
+test('pluginRows — 다룰 수 없는 형태면 목록을 만들지 않는다 (값을 덮어쓰지 않는다)', () => {
+  assert.deepEqual(pluginRows('{"enabledPlugins":{"a@m":"yes"}}', []), {
+    ok: false,
+    reason: 'blocked',
+  });
+  assert.equal(pluginRows('{ oops', []).ok, false);
+});
+
+test('pluginRows — 설치 목록을 생략해도 설정 항목만으로 목록이 나온다', () => {
+  assert.equal(pluginRows('{"enabledPlugins":{"a@m":true}}').rows.length, 1);
 });

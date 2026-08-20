@@ -311,6 +311,37 @@ export function readEnabledPlugins(text) {
   return { ok: true, map: { ...value } };
 }
 
+/**
+ * 설치 목록과 설정의 켬/끔을 한 화면 목록으로 합친다. 두 화면(Config 편집기·설정
+ * 모달)이 같은 목록을 그려야 하므로 컴포넌트가 아니라 여기에 둔다 — 이 모듈은
+ * react-free라 node --test로 바로 고정된다.
+ *
+ * 설정에만 남은 항목(삭제된 플러그인의 찌꺼기)도 넣는다 — 화면에 없으면 파일에
+ * 영원히 남아 정리할 방법이 사라진다.
+ * @returns {{ok: true, rows: Array}|{ok: false, reason: 'invalid'|'blocked'}}
+ */
+export function pluginRows(text, installed = []) {
+  const enabled = readEnabledPlugins(text);
+  if (!enabled.ok) return enabled;
+  const byKey = new Map();
+  for (const p of installed) {
+    byKey.set(p.key, { ...p, installed: true, enabled: enabled.map[p.key] });
+  }
+  for (const key of Object.keys(enabled.map)) {
+    if (byKey.has(key)) continue;
+    const at = key.lastIndexOf('@'); // 이름에 @가 들어갈 수 있어 뒤에서 자른다
+    byKey.set(key, {
+      key,
+      name: at > 0 ? key.slice(0, at) : key,
+      marketplace: at > 0 ? key.slice(at + 1) : '',
+      installs: [],
+      installed: false,
+      enabled: enabled.map[key],
+    });
+  }
+  return { ok: true, rows: [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key)) };
+}
+
 /** 켬/끔 설정 — key는 불투명 식별자("name@marketplace")라 그대로 쓴다. */
 export function setPluginEnabled(text, key, enabled) {
   return patchField(text, ['enabledPlugins', key], !!enabled);

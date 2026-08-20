@@ -150,10 +150,44 @@ test('지난 세션은 사이드바가 아니라 새 세션 모달에 있다', a
   await expect(pastList.locator('.past-row').nth(1)).toContainText('E2E 씨앗 베타');
 });
 
+test('정보 모달 — 앱·데몬·CLI 버전을 bootstrap 한 번으로 채운다', async ({ page }) => {
+  await page.goto(servers.echo.url);
+  await page.getByRole('button', { name: '정보' }).click();
+  const info = page.getByRole('dialog', { name: '정보' });
+  await expect(info).toBeVisible();
+  for (const label of ['앱(번들) 버전', '데몬 버전', 'Claude CLI 버전', '플랫폼', '포트']) {
+    await expect(info.getByText(label, { exact: true })).toBeVisible();
+  }
+  // 포트는 실제로 떠 있는 서버의 것이라 반드시 값이 있다 — '알 수 없음'이면 배선이 끊긴 것.
+  const port = new URL(servers.echo.url).port;
+  await expect(info.locator('.info-value', { hasText: new RegExp(`^${port}$`) })).toBeVisible();
+  await expect(info.getByRole('link', { name: /GitHub/ })).toHaveAttribute('rel', /noopener/);
+  await info.getByRole('button', { name: '닫기' }).click();
+  await expect(info).toBeHidden();
+});
+
+test('설정 모달 — 네 탭이 있고 선택된 탭의 패널만 보인다', async ({ page }) => {
+  await page.goto(servers.echo.url);
+  await page.getByRole('button', { name: '설정' }).click();
+  const settings = page.getByRole('dialog', { name: '설정' });
+  await expect(settings.getByRole('tab')).toHaveCount(4);
+  // 기본 선택은 테마 — 세션 탭의 컨트롤은 아직 숨어 있어야 한다.
+  await expect(settings.getByRole('tab', { name: '테마' })).toHaveAttribute('aria-selected', 'true');
+  await expect(settings.getByLabel('기본 권한 모드')).toBeHidden();
+  await settings.getByRole('tab', { name: '세션' }).click();
+  await expect(settings.getByLabel('기본 권한 모드')).toBeVisible();
+  // 업데이트 확인은 버튼을 눌러야만 나간다 — 탭에 들어가는 것만으로는 아무 일도 없다.
+  await settings.getByRole('tab', { name: '업데이트' }).click();
+  await expect(settings.getByRole('button', { name: '확인', exact: true })).toBeVisible();
+  await expect(settings.locator('.update-status')).toBeEmpty();
+});
+
 test('설정의 기본 권한 모드가 새 세션 모달의 초기값이 된다', async ({ page }) => {
   await page.goto(servers.echo.url);
   await page.getByRole('button', { name: '설정' }).click();
   const settings = page.getByRole('dialog', { name: '설정' });
+  // 기본값은 '세션' 탭으로 들어갔다(테마·플러그인·업데이트와 성격이 달라 분리).
+  await settings.getByRole('tab', { name: '세션' }).click();
   await settings.getByLabel('기본 권한 모드').selectOption('plan');
   // 모델 목록은 CLI init 전이라 비어 있어야 하고, 셀렉트는 비활성이어야 한다.
   await expect(settings.getByLabel('기본 모델')).toBeDisabled();
@@ -352,6 +386,7 @@ test('윈도잉 — raw 디버그 토글이 memo에 삼켜지지 않는다', asy
 
   await page.getByRole('button', { name: '설정' }).click();
   const settings = page.getByRole('dialog', { name: '설정' });
+  await settings.getByRole('tab', { name: '세션' }).click();
   await settings.getByRole('switch', { name: '디버그 메시지 표시' }).click();
   await settings.getByRole('button', { name: '닫기' }).click();
   // 토글 직후, 새 메시지 없이 기존 raw 이벤트가 드러나야 한다.
@@ -627,7 +662,7 @@ test('메시지 타임스탬프 — 사용자·어시스턴트 메시지에만 �
   );
 });
 
-test('실행 중 도크 — 입력창 아래에 뜨고, 클릭하면 대화 속 카드로 이동한다', async ({ page }) => {
+test('실행 중 도크 — 입력창 박스 밖에 뜨고, 항목을 펼쳐 대화로 이동한다', async ({ page }) => {
   await startSession(page, servers.bgtask.url);
   const input = page.getByLabel('메시지 입력');
   await input.fill('백그라운드로 돌려줘');
@@ -637,21 +672,42 @@ test('실행 중 도크 — 입력창 아래에 뜨고, 클릭하면 대화 속 
   await expect(dock).toBeVisible();
   await expect(dock.locator('.dock-count')).toContainText('실행 중 1개');
   await expect(dock.locator('.dock-label')).toHaveText('sleep 40');
-  await expect(dock.locator('.dock-detail')).toHaveText('백그라운드 셸');
+  await expect(dock.locator('.dock-item .dock-detail')).toHaveText('백그라운드 셸');
 
-  // 위치 — 입력창(textarea) **아래**에 있어야 한다
+  // 위치 — 입력창(textarea) **아래**이면서, 입력 박스(.composer-shell) **밖**이어야 한다
   const inputBox = await input.boundingBox();
   const dockBox = await dock.boundingBox();
   expect(dockBox.y).toBeGreaterThan(inputBox.y);
+  await expect(page.locator('.composer-shell .running-dock')).toHaveCount(0);
 
-  // 클릭 → 해당 도구 카드로 이동 + 잠깐 강조
-  await dock.locator('.dock-item').click();
+  // 행 클릭 = 펼치기(점프가 아니다). aria-controls는 패널이 실재할 때만 건다.
+  const item = dock.locator('.dock-item');
+  await expect(item).toHaveAttribute('aria-expanded', 'false');
+  await item.click();
+  await expect(item).toHaveAttribute('aria-expanded', 'true');
+  const panel = dock.locator('.dock-panel');
+  await expect(panel).toBeVisible();
+  await expect(item).toHaveAttribute('aria-controls', await panel.getAttribute('id'));
+
+  // 점프는 상세 안의 명시적 버튼으로만 — 해당 도구 카드로 이동 + 잠깐 강조
+  await dock.locator('.dock-jump').click();
   const flashed = page.locator('.msg-jump-flash');
   await expect(flashed).toHaveCount(1);
   await expect(flashed.locator('.tool-card')).toBeVisible();
   // 대상이 화면 안에 들어와 있다
   const cardBox = await flashed.boundingBox();
   expect(cardBox.y).toBeGreaterThan(0);
+
+  // 점프는 패널을 닫지 않는다. 포커스가 **패널 안**(방금 누른 이동 버튼)에 있는
+  // 상태에서 Esc를 눌러야 "포커스를 행으로 되돌린다"는 계약이 실제로 검증된다.
+  await expect(panel).toBeVisible();
+  await expect(dock.locator('.dock-jump')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(panel).toHaveCount(0);
+  await expect(item).toHaveAttribute('aria-expanded', 'false');
+  await expect(item).toBeFocused();
+  // 닫힌 뒤에는 가리킬 패널이 없으므로 aria-controls도 떨어진다(IDREF 유령 방지)
+  await expect(item).not.toHaveAttribute('aria-controls', /./);
 });
 
 test('세션 우클릭 메뉴 — 이름 변경이 사이드바 행에 반영된다', async ({ page }) => {
@@ -771,6 +827,7 @@ async function openConfigEditor(page) {
   await page.goto(servers.echo.url);
   await page.getByRole('button', { name: '설정' }).click();
   const settings = page.getByRole('dialog', { name: '설정' });
+  await settings.getByRole('tab', { name: '세션' }).click();
   await settings.getByRole('button', { name: '편집' }).click();
   const editor = page.getByRole('dialog', { name: 'Claude Code Config 편집' });
   await expect(editor).toBeVisible();

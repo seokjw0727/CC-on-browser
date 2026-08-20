@@ -37,3 +37,34 @@ test('스큐 판정은 서버가 version을 싣지 않는 구버전도 다룬다
   // ② 서버가 version을 안 주면 server: null로 보고한다 — 그 자체가 구버전의 증거다.
   assert.match(src, /typeof serverVersion === 'string' \? serverVersion : null/);
 });
+
+// ----- 정보 모달의 값 표시 규칙 -----
+
+test('infoValue — 문자열은 다듬어서 그대로', async () => {
+  const { infoValue } = await import('../src/lib/app-version.js');
+  assert.equal(infoValue('1.9.5'), '1.9.5');
+  assert.equal(infoValue('  2.1.233 (Claude Code)  '), '2.1.233 (Claude Code)');
+});
+
+test('infoValue — 모르는 값 세 모양을 한 라벨로 접는다', async () => {
+  const { infoValue, UNKNOWN_LABEL } = await import('../src/lib/app-version.js');
+  // ① 구버전 데몬은 키를 빼먹어 undefined ② --version 타임아웃이면 서버가 null
+  // ③ 그 전에 죽으면 빈 문자열. 접지 않으면 화면에 undefined가 그대로 찍힌다.
+  for (const bad of [undefined, null, '', '   ', {}, []]) {
+    assert.equal(infoValue(bad), UNKNOWN_LABEL, JSON.stringify(bad));
+  }
+});
+
+test('infoValue — 포트 0은 진짜 값이라 접지 않는다', async () => {
+  const { infoValue, UNKNOWN_LABEL } = await import('../src/lib/app-version.js');
+  assert.equal(infoValue(0), '0');
+  assert.equal(infoValue(8787), '8787');
+  assert.equal(infoValue(NaN), UNKNOWN_LABEL);
+});
+
+test('하단 패널이 표 하나로 정의되고 삼항 분기가 되살아나지 않았다', () => {
+  // 제목·아이콘·본문이 다시 흩어지면 네 번째 패널을 넣을 때 또 하나를 빠뜨린다.
+  const src = readFileSync(join(__dirname, '..', 'src', 'components', 'Sidebar.jsx'), 'utf8');
+  assert.match(src, /FOOT_PANEL_ORDER\s*=\s*\['stats',\s*'settings',\s*'info'\]/);
+  assert.doesNotMatch(src, /panel === 'stats' \?/);
+});

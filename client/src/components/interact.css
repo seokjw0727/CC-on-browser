@@ -493,11 +493,6 @@ select.mode-trust:focus {
 .mm-check {
   color: var(--accent);
 }
-.mm-divider {
-  height: 1px;
-  background: var(--border-soft);
-  margin: 4px 6px;
-}
 /* 노력 수준 — 트리거 미니 바 + 팝오버 드래그 슬라이더 */
 .effort-bar {
   display: inline-flex;
@@ -692,18 +687,28 @@ select.mode-trust:focus {
   outline-offset: 2px;
 }
 
-/* ----- 실행 중 작업 도크 (RunningWork) -----
-   ActiveModes 배지 행과 분리된 동적 작업 모니터. 항목은 1줄 고정(말줄임)이라
-   .dock-list max-height = 항목 22px x 3이 항상 성립하고 초과분은 스크롤. */
+/* ----- 실행 중 작업 도크 (RunningWork) — 입력창 박스 **밖**의 독립 카드 -----
+   .composer-shell 안에 있던 시절엔 셸의 배경·패딩·중앙 정렬을 얻어 썼다. 형제로
+   나오면서 그 셋을 스스로 가져야 한다 — 특히 max-width/margin auto가 없으면 넓은
+   화면에서 스트립만 좌우로 늘어나 입력창과 어긋난다(.composer-meta와 같은 규약).
+   이 규칙들은 예전에 이 파일 두 곳(695~, 2076~)에 흩어져 특이도로 서로를 덮고
+   있었다. 한 블록으로 합쳤으니 새 규칙은 반드시 여기에만 추가한다. */
 .running-dock {
-  margin: 0 2px 6px;
-  padding: 6px 10px;
-  border-radius: 10px;
-  border: 1px solid var(--accent-line);
-  background: var(--accent-soft);
+  max-width: var(--composer-max);
+  margin: 8px auto 0;
+  padding: 7px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
   font-size: 12px;
 }
-.running-dock .dock-head {
+/* 연결이 끊겨도 숨기지 않는다(RunningWork 헤더 주석) — "마지막 확인 상태"임을
+   테두리로만 알리고 pulse는 컴포넌트가 멈춘다. */
+.running-dock.stale {
+  border-style: dashed;
+}
+.dock-head {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -711,7 +716,13 @@ select.mode-trust:focus {
   font-weight: 600;
   color: var(--text);
 }
-.running-dock .dock-stale-note {
+.dock-count {
+  color: var(--accent);
+}
+.running-dock.stale .dock-count {
+  color: var(--text-dim);
+}
+.dock-stale-note {
   margin-left: auto;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -719,48 +730,178 @@ select.mode-trust:focus {
   font-weight: 400;
   color: var(--text-dim);
 }
-.running-dock .dock-list {
+.dock-list {
   list-style: none;
   margin: 4px 0 0;
   padding: 0;
-  max-height: 66px;
+  /* 옛 66px(22px x 3행)는 행만 있던 시절의 값이다 — 상세 패널이 열리는 순간
+     3행짜리 스크롤 감옥이 돼 정작 펼친 내용을 못 읽는다. */
+  max-height: min(40vh, 300px);
   overflow-y: auto;
 }
-.running-dock .dock-item {
+.dock-item {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 22px;
+  width: 100%;
+  min-height: 22px;
   min-width: 0;
+  padding: 3px 6px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
 }
-.running-dock .dock-item.nested {
-  padding-left: 14px; /* 중첩(depth 1) 들여쓰기 — 좁은 화면에서도 폭 잠식 최소 */
+.dock-item:hover,
+.dock-item.open {
+  background: var(--surface-2);
 }
-.running-dock .dock-detail {
+.dock-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.dock-ico {
   flex: none;
-  padding: 1px 7px;
-  border-radius: 999px;
-  border: 1px solid var(--accent-line);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: var(--accent);
-  font-size: 10.5px;
-  font-weight: 600;
 }
-.running-dock .dock-label {
+.dock-label {
+  /* 라벨이 남는 폭을 먹어야 뒤의 배지·caret이 우변에 붙는다. */
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
-  flex: 0 1 auto;
 }
-.running-dock .dock-activity {
-  margin-left: auto;
+.dock-activity {
   flex: 0 0 auto;
   max-width: 45%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-dim);
+}
+.dock-detail {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--accent-line);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.dock-caret {
+  flex: none;
+  color: var(--text-faint);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.dock-item.open .dock-caret {
+  transform: rotate(180deg);
+}
+
+/* ----- 상세 아코디언 (한 번에 하나) -----
+   행 배지(.dock-detail)와 클래스를 나눠 둔다 — 같은 이름을 쓰면 행과 패널 양쪽에
+   같은 셀렉터가 잡혀 Playwright strict mode가 걸린다. */
+.dock-panel {
+  margin: 2px 0 4px 20px; /* 20px = 아이콘 열만큼 들여써 행에 소속돼 보이게 */
+  padding: 7px 9px;
+  border-left: 2px solid var(--accent-line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-dim);
+}
+.dock-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.dock-subtype {
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--accent-line);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.dock-meta {
+  color: var(--text-dim);
+}
+.dock-meta.mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.dock-desc {
+  margin-top: 4px;
+  color: var(--text);
+}
+.dock-cmd {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text);
+  /* 명령 전문이라 줄바꿈을 살리되, 긴 한 줄이 카드를 밀지 않게 강제 개행한다. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 132px;
+  overflow-y: auto;
+}
+.dock-steps {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.dock-step {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.dock-step-kind {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+.dock-step-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.dock-step.done .dock-step-text {
+  color: var(--text-dim);
+}
+.dock-note {
+  margin-top: 4px;
+  color: var(--text-faint);
+}
+.dock-jump {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.dock-jump:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+.dock-jump:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 /* ----- 인터럽트된 턴 복구 바 ----- */
@@ -824,16 +965,6 @@ select.mode-trust:focus {
   background: transparent;
   color: var(--text-dim);
   padding: 3px 6px;
-}
-.meta-x {
-  padding: 0 4px;
-  color: inherit;
-  background: none;
-  border: none;
-  opacity: 0.7;
-}
-.meta-x:hover {
-  opacity: 1;
 }
 .composer-mascot {
   position: absolute;
@@ -1840,8 +1971,78 @@ select.mode-trust:focus {
   max-width: 400px;
   max-height: min(74vh, 560px);
 }
+/* 플러그인 목록 행(이름@마켓플레이스 + 배지 + 스위치 + ✕)이 들어오면서 400px로는
+   이름이 잘린다 — 설정만 넓힌다(더 넓히면 통계 모달과 시각적 균형이 깨진다). */
+.foot-modal.settings-modal {
+  max-width: 460px;
+}
 .foot-modal .modal-title .foot-icon {
   color: var(--accent);
+}
+/* Icon.jsx 세트는 24 격자(stroke 1.8)라, 20 격자용 1.5를 그대로 받으면 직접 그린
+   옆 아이콘들보다 약 17% 얇게 그려진다 — 1.8/24 = 1.5/20이라 이 값이 정확히 같은 굵기다. */
+.foot-icon.ico {
+  stroke-width: 1.8;
+}
+
+/* ----- 정보 패널 (앱·데몬·CLI 버전) -----
+   설정 패널과 같은 행 문법을 쓰되 값만 mono로 고정한다 — 비례폭에서는 1.9.5와
+   1.9.15의 자릿수가 눈으로 구분되지 않아, 버전 스큐를 확인하러 온 사람이 정확히
+   그 지점에서 헛것을 본다. */
+.info-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.info-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.info-label {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.info-value {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: right;
+  overflow-wrap: anywhere; /* `claude --version`은 한 줄 전체를 뱉기도 한다 */
+}
+/* 모르는 값은 값처럼 보이면 안 된다 — mono를 풀고 흐리게 두어 "조회 실패"임을 알린다. */
+.info-value.unknown {
+  font-family: inherit;
+  color: var(--text-faint);
+}
+.info-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+}
+.info-link:hover {
+  text-decoration: underline;
+}
+/* 스큐 경고 — 사이드바 하단 띠와 같은 위험 색이지만, 모달 안에서는 border-top이
+   아니라 카드로 서야 한다(.mode-warning과 같은 문법). */
+.info-skew {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: var(--r-sm);
+  padding: 9px 11px;
+}
+.info-skew .ico {
+  flex: none;
+  margin-top: 1px;
 }
 .foot-body {
   flex: 1 1 auto;
@@ -1994,6 +2195,57 @@ select.mode-trust:focus {
 }
 
 /* ----- 설정 (테마 세그먼트 + 디버그 스위치) ----- */
+/* ----- 설정 모달 탭(테마·세션·플러그인·업데이트) -----
+   Config 편집기 탭(.cfg-tabs)과 같은 .seg 세그먼트를 쓴다 — 같은 앱에서 탭 모양이
+   둘이면 같은 조작인지 알아볼 수 없다. 여기서는 4칸이 모달 폭을 채우게만 편다. */
+.settings-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.settings-tabs {
+  align-self: stretch;
+}
+.settings-tabs button {
+  flex: 1 1 0;
+  padding: 5px 8px;
+  font-size: 11.5px;
+}
+/* 탭을 오갈 때 모달 높이가 튀지 않게 — 가장 긴 것은 플러그인 목록이다. */
+.settings-tabpanel {
+  min-height: 200px;
+}
+.settings-tabpanel:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+.setting-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+/* 업데이트 탭 — 결과·진행·실패가 한 라이브 영역(role=status)에서 갈아 끼워지므로,
+   높이가 튀지 않게 최소 높이를 주고 항목을 세로로 쌓는다. */
+.update-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 20px;
+}
+/* 안내 명령 — 사용자가 그대로 긁어 붙일 수 있어야 하므로 선택 가능한 텍스트로 둔다
+   (복사 버튼을 두지 않는 이유: 이 앱에는 아직 clipboard write 경로가 없다). */
+.update-cmd {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  user-select: all;
+  word-break: break-all;
+}
+
 .settings-panel {
   display: flex;
   flex-direction: column;
@@ -2071,53 +2323,6 @@ select.mode-trust:focus {
   from { opacity: 0; transform: translateY(2px); }
 }
 
-/* ----- 실행 중 작업 도크 (RunningWork) — 입력창 아래 -----
-   옛 .subagent-panel 규칙을 이름만 바꿔 승계했고, 항목이 button이 된 만큼만 덧댄다. */
-.running-dock {
-  margin-top: 8px;
-}
-.dock-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.dock-item {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  padding: 4px 6px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.dock-item:hover:not(:disabled) {
-  background: var(--surface-2);
-}
-.dock-item:disabled {
-  cursor: default;
-  opacity: 0.75;
-}
-.dock-item:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-.dock-ico {
-  flex: none;
-}
-.dock-label {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.dock-detail {
-  flex: none;
-  font-size: 0.72rem;
-  color: var(--text-faint);
-}
+/* 실행 중 작업 도크(.running-dock/.dock-*)의 규칙은 이 파일 위쪽 "실행 중 작업 도크"
+   블록 한 곳에만 있다 — 예전엔 여기에도 같은 이름의 규칙이 얹혀 있어 두 블록의
+   특이도 싸움이 실제 렌더를 결정했다. 새 규칙은 그쪽에 추가할 것. */

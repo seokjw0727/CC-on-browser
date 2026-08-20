@@ -17,8 +17,7 @@
 //  · 기준선(mtimeMs)은 로드 시각의 것이고, 저장에 성공하면 응답의 새 값으로 갈아
 //    끼운다 — 그러지 않으면 두 번째 저장이 자기 자신과 충돌한다.
 //  · 409(다른 곳에서 수정됨)는 덮어쓰지 않고 "다시 불러오기"를 안내한다.
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchClaudeConfig, fetchClaudePlugins, saveClaudeConfig } from '../lib/api.js';
+import { useEffect, useRef, useState } from 'react';
 import {
   KNOWN_FIELDS,
   UNSET,
@@ -27,7 +26,6 @@ import {
   optionsWithCurrent,
   patchEnvRows,
   patchField,
-  readEnabledPlugins,
   readEnvRows,
   readField,
   removePluginEntry,
@@ -35,8 +33,10 @@ import {
   unknownTopKeys,
   validateEnvRows,
 } from '../lib/claude-settings-form.js';
+import { useClaudeConfigDraft } from '../lib/claude-config-draft.js';
 import { MODE_CLASS } from '../lib/permission-modes.js';
 import TrustModeWarning from './TrustModeWarning.jsx';
+import PluginsForm from './PluginsForm.jsx';
 import Icon from './Icon.jsx';
 import { useFocusTrap } from '../lib/useFocusTrap.js';
 
@@ -244,249 +244,29 @@ function GeneralTab({ text, disabled, envRows, envError, onPatch, onEnvChange })
 }
 
 // ----- 플러그인 탭 -----
-
-const scopeLabel = (install) => {
-  const scope = install.scope === 'user' ? '사용자' : install.scope === 'project' ? '프로젝트' : install.scope || '';
-  return [scope, install.version ? `v${install.version}` : null].filter(Boolean).join(' ');
-};
-
-function PluginRow({ row, disabled, onToggle, onRemove }) {
-  const { key, name, marketplace, installed, installs, enabled } = row;
-  const on = enabled === true;
-  // 상태는 셋이다: 설정 없음(키 없음) / 켬 / 끔. 스위치는 둘만 표현할 수 있어,
-  // "설정 없음"인 행에는 스위치 대신 켬·끔 두 버튼을 둔다 — 그러지 않으면 명시적
-  // "끔"을 만들려고 켰다 껐다 두 번 눌러야 하고, 보조기술에도 끔과 똑같이 읽힌다.
-  const unset = enabled === undefined;
-  return (
-    <div className="cfg-plugin-row">
-      <span className="cfg-plugin-main">
-        <span className="cfg-plugin-name truncate">
-          {name}
-          {marketplace && <span className="dim cfg-plugin-market"> @{marketplace}</span>}
-        </span>
-        <span className="dim cfg-plugin-sub truncate">
-          {!installed && <span className="cfg-badge">미설치</span>}
-          {installs.map((install, i) => {
-            const label = scopeLabel(install);
-            return label ? (
-              // eslint-disable-next-line react/no-array-index-key
-              <span key={i} className="cfg-badge scope" data-tip={install.projectPath || undefined}>
-                {label}
-              </span>
-            ) : null;
-          })}
-          {installs.length === 0
-            && (installed ? '설치 정보 없음' : '설정에만 남아 있는 항목입니다')}
-        </span>
-      </span>
-      {unset ? (
-        <span className="cfg-plugin-choice" role="group" aria-label={`플러그인 설정: ${key} (현재: 설정 없음)`}>
-          <span className="cfg-plugin-state dim" aria-hidden="true">설정 없음</span>
-          <button
-            type="button"
-            className="cfg-row-btn"
-            disabled={disabled}
-            aria-label={`켜기: ${key}`}
-            onClick={() => onToggle(key, true)}
-          >
-            켜기
-          </button>
-          <button
-            type="button"
-            className="cfg-row-btn"
-            disabled={disabled}
-            aria-label={`끄기: ${key}`}
-            onClick={() => onToggle(key, false)}
-          >
-            끄기
-          </button>
-        </span>
-      ) : (
-        <>
-          <span className="cfg-plugin-state dim" aria-hidden="true">{on ? '켬' : '끔'}</span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={on}
-            className={`switch${on ? ' on' : ''}`}
-            disabled={disabled}
-            aria-label={`플러그인 사용: ${key}`}
-            data-tip={on ? '끄기' : '켜기'}
-            onClick={() => onToggle(key, !on)}
-          >
-            <span className="switch-knob" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="cfg-row-btn"
-            disabled={disabled}
-            aria-label={`설정에서 항목 제거: ${key}`}
-            data-tip="설정에서 이 항목을 제거(켬/끔 기록 삭제)"
-            onClick={() => onRemove(key)}
-          >
-            <Icon name="close" />
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
-function PluginsTab({ text, disabled, plugins, pluginsError, pluginsLoading, onReloadPlugins, onToggle, onRemove, headingRef }) {
-  const enabled = readEnabledPlugins(text);
-  const rows = useMemo(() => {
-    if (!enabled.ok) return [];
-    const byKey = new Map();
-    for (const p of plugins) {
-      byKey.set(p.key, { ...p, installed: true, enabled: enabled.map[p.key] });
-    }
-    // 설정에만 남은 항목(제거된 플러그인의 찌꺼기)도 보여 줘야 정리할 수 있다.
-    for (const key of Object.keys(enabled.map)) {
-      if (byKey.has(key)) continue;
-      const at = key.lastIndexOf('@');
-      byKey.set(key, {
-        key,
-        name: at > 0 ? key.slice(0, at) : key,
-        marketplace: at > 0 ? key.slice(at + 1) : '',
-        installs: [],
-        installed: false,
-        enabled: enabled.map[key],
-      });
-    }
-    return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plugins, text, enabled.ok]);
-
-  if (!enabled.ok) {
-    return (
-      <div className="cfg-form">
-        <BlockedNote>
-          enabledPlugins가 "이름: 켬/끔" 형태가 아닙니다 — 값을 덮어쓰지 않았습니다. JSON 탭에서 편집하세요.
-        </BlockedNote>
-      </div>
-    );
-  }
-
-  return (
-    <div className="cfg-form">
-      <div className="dim cfg-hint">
-        켬/끔과 항목 정리만 여기서 합니다. 설치·삭제·업데이트는 터미널에서{' '}
-        <code className="cfg-key">claude plugin</code> 명령으로 하세요.
-      </div>
-      {/* 목록 조회는 설정 로드와 독립이다 — 실패해도 켬/끔 편집은 계속된다. */}
-      <div role="status">
-        {pluginsLoading && <span className="dim cfg-hint">설치 목록을 불러오는 중…</span>}
-        {pluginsError && (
-          <span className="past-note past-note-error">
-            <span className="dim">설치 목록을 불러오지 못했습니다({pluginsError}) — 설정에 기록된 항목만 보입니다.</span>
-            <button type="button" className="past-retry" disabled={disabled} onClick={onReloadPlugins}>
-              다시 시도
-            </button>
-          </span>
-        )}
-      </div>
-      <div className="cfg-plugin-list" role="group" aria-labelledby="cfg-plugins-heading">
-        <span className="dim cfg-label" id="cfg-plugins-heading" tabIndex={-1} ref={headingRef}>
-          플러그인 {rows.length > 0 ? `(${rows.length})` : ''}
-        </span>
-        {rows.length === 0 && !pluginsLoading && (
-          <span className="dim cfg-hint">설치되었거나 설정에 기록된 플러그인이 없습니다.</span>
-        )}
-        {rows.map((row) => (
-          <PluginRow
-            key={row.key}
-            row={row}
-            disabled={disabled}
-            onToggle={onToggle}
-            onRemove={onRemove}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
+// 폼(scopeLabel·PluginRow·목록 병합)은 PluginsForm.jsx로 옮겼다 — 설정 모달의
+// '플러그인' 탭과 같은 화면이라, 두 벌로 두면 한쪽만 고쳐져 같은 파일을 다르게
+// 보여 준다. 목록 병합 규칙 자체는 claude-settings-form.js의 pluginRows가 소유한다.
 
 // ----- 모달 본체 -----
 
 export default function ConfigEditorModal({ presenceStatus, restoreRef, onClose, notify }) {
   const dialogRef = useFocusTrap(true, undefined, restoreRef);
   const [tab, setTab] = useState('general');
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
-  const [path, setPath] = useState('');
-  const [text, setText] = useState('');
-  const [baseline, setBaseline] = useState(''); // 마지막으로 로드/저장한 내용
-  const [mtimeMs, setMtimeMs] = useState(null); // 저장에 쓸 기준선
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null); // 인라인 오류(JSON 문법·저장 실패)
-  const [conflict, setConflict] = useState(false);
-  // env 편집 draft — null이면 원문에서 그대로 파생한다(편집 중이 아님).
+  // env 편집 draft — null이면 원문에서 그대로 파생한다(편집 중이 아님). 이 개념은
+  // 플러그인 탭에 없어 공용 훅으로 올리지 않았다.
   const [envDraft, setEnvDraft] = useState(null);
-  // 설치 플러그인 목록 — 설정과 별개의 요청이라 실패해도 편집을 막지 않는다.
-  const [plugins, setPlugins] = useState([]);
-  const [pluginsError, setPluginsError] = useState(null);
-  const [pluginsLoading, setPluginsLoading] = useState(true);
-  // 요청 세대 — 닫혔다 다시 열리거나 "다시 불러오기"를 누른 뒤 늦게 도착한 응답이
-  // 현재 편집 내용을 덮어쓰지 못하게 한다.
-  const genRef = useRef(0);
-  const pluginGenRef = useRef(0);
-  const aliveRef = useRef(true);
+  // 원문·기준선·mtime·저장·409·플러그인 목록은 설정 모달의 플러그인 탭과 공유한다.
+  // 새로 불러올 때 편집 중이던 env 행은 버린다 — 새로 받은 내용이 진실이다.
+  const draft = useClaudeConfigDraft({ notify, onLoadStart: () => setEnvDraft(null) });
+  const {
+    path, text, saving, loading, loadError, error, conflict, plugins, pluginsLoading, pluginsError,
+  } = draft;
   const tabRefs = useRef(new Map()); // 탭 버튼 — 화살표 이동 시 포커스를 옮길 대상
-  const pluginsHeadingRef = useRef(null); // 행이 사라졌을 때의 포커스 착지점
   const jsonRef = useRef(null); // 원문 편집기 — "JSON 탭으로 이동"의 착지점
   const [focusJson, setFocusJson] = useState(false);
-  // StrictMode(개발)는 마운트 직후 정리→재설정을 한 번 흉내 낸다. 정리에서 false로만
-  // 두면 그 뒤의 응답이 전부 폐기돼 "불러오는 중…"에서 멈춘다 — 설정에서 다시 켠다.
-  useEffect(() => {
-    aliveRef.current = true;
-    return () => { aliveRef.current = false; };
-  }, []);
   // 저장하지 않은 변경이 있는 채로 닫으려 했는가 — 한 번 더 확인받는다.
   const [confirmingClose, setConfirmingClose] = useState(false);
-
-  const load = async () => {
-    const gen = ++genRef.current;
-    setLoading(true);
-    setError(null);
-    setConflict(false);
-    setEnvDraft(null); // 새로 받은 내용이 진실이다 — 편집 중이던 행은 버린다
-    try {
-      const res = await fetchClaudeConfig();
-      if (!aliveRef.current || genRef.current !== gen) return;
-      setPath(res.path || '');
-      setText(res.content ?? '{}');
-      setBaseline(res.content ?? '{}');
-      setMtimeMs(res.mtimeMs ?? null);
-      setLoadError(null);
-    } catch (err) {
-      if (!aliveRef.current || genRef.current !== gen) return;
-      setLoadError(String(err.message ?? err));
-    } finally {
-      if (aliveRef.current && genRef.current === gen) setLoading(false);
-    }
-  };
-
-  const loadPlugins = async () => {
-    const gen = ++pluginGenRef.current;
-    setPluginsLoading(true);
-    setPluginsError(null);
-    try {
-      const res = await fetchClaudePlugins();
-      if (!aliveRef.current || pluginGenRef.current !== gen) return;
-      setPlugins(Array.isArray(res.plugins) ? res.plugins : []);
-    } catch (err) {
-      if (!aliveRef.current || pluginGenRef.current !== gen) return;
-      setPluginsError(String(err.message ?? err));
-    } finally {
-      if (aliveRef.current && pluginGenRef.current === gen) setPluginsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    load();
-    loadPlugins();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const ready = formReady(text);
   // 편집 중인 env 행 — draft가 있으면 그쪽이 화면의 진실이다.
@@ -495,24 +275,14 @@ export default function ConfigEditorModal({ presenceStatus, restoreRef, onClose,
   const envError = envDraft ? validateEnvRows(envDraft) : null;
   // 아직 원문에 반영되지 못한 env 행도 "저장하지 않은 편집"이다 — 이것까지 세지
   // 않으면 방금 친 줄이 확인 없이 사라진다.
-  const dirty = text !== baseline || !!envError;
+  const dirty = draft.dirty || !!envError;
 
-  // 폼 조작의 공통 출구 — 실패(blocked/invalid)는 값을 건드리지 않고 문구로 알린다.
+  // 폼 조작의 공통 출구. 값 반영·오류 문구는 공용 훅이 하고, 여기서는 이 모달에만
+  // 있는 "닫기 확인"만 되돌린다 — 내용을 고치는 순간 그 확인은 유효하지 않다.
   const applyPatch = (result, blockedMessage) => {
-    if (result.ok) {
-      setText(result.text);
-      setError(null);
-      // 내용을 고치는 순간 이전 결과(충돌·닫기 확인)는 더 이상 유효하지 않다
-      setConflict(false);
-      setConfirmingClose(false);
-      return true;
-    }
-    setError(
-      result.reason === 'invalid'
-        ? 'JSON이 올바르지 않아 폼으로 고칠 수 없습니다 — JSON 탭에서 먼저 고치세요.'
-        : blockedMessage ?? '이 항목은 폼으로 다룰 수 없는 형태입니다 — JSON 탭에서 편집하세요.',
-    );
-    return false;
+    const ok = draft.apply(result, blockedMessage);
+    if (ok) setConfirmingClose(false);
+    return ok;
   };
 
   const patchOne = (fieldPath, value) => applyPatch(patchField(text, fieldPath, value));
@@ -527,53 +297,19 @@ export default function ConfigEditorModal({ presenceStatus, restoreRef, onClose,
   };
 
   const togglePlugin = (key, enabled) => applyPatch(setPluginEnabled(text, key, enabled));
-
-  const removePlugin = (key) => {
-    // 설치되지 않은 항목은 제거하면 행 자체가 사라진다 — 포커스가 <body>로 떨어지지
-    // 않게 목록 제목으로 옮겨 둔다(지난 세션 삭제와 같은 처리).
-    const willVanish = !plugins.some((p) => p.key === key);
-    if (applyPatch(removePluginEntry(text, key)) && willVanish) {
-      pluginsHeadingRef.current?.focus?.();
-    }
-  };
+  // 포커스 복귀(행이 사라지는 경우)는 PluginsForm이 맡는다 — 성공 여부를 그대로
+  // 돌려줘야 그쪽이 판단할 수 있다.
+  const removePlugin = (key) => applyPatch(removePluginEntry(text, key));
 
   const save = async () => {
-    if (saving || !dirty) return;
+    // env 검사는 draft.save의 dirty 관문 **앞**에 둔다 — 뒤에 두면 원문은 그대로인데
+    // env 줄만 깨진 상태에서 안내가 사라진다(그 상태도 dirty로 세고 있다).
     if (envError) {
-      setError(`환경 변수를 먼저 고쳐 주세요: ${envError}`);
+      draft.setError(`환경 변수를 먼저 고쳐 주세요: ${envError}`);
       return;
     }
-    try {
-      JSON.parse(text);
-    } catch (err) {
-      setError(`JSON 문법 오류: ${err.message}`);
-      return;
-    }
-    const gen = genRef.current;
-    const sent = text; // 저장 중 편집이 들어와도 기준선은 "보낸 내용"이어야 한다
-    setSaving(true);
-    setError(null);
-    setConflict(false);
-    try {
-      const res = await saveClaudeConfig({ content: sent, expectedMtimeMs: mtimeMs });
-      if (!aliveRef.current || genRef.current !== gen) return;
-      // 새 기준선으로 갈아 끼운다 — 모달을 열어 둔 채 이어서 저장할 수 있게.
-      setMtimeMs(res.mtimeMs ?? null);
-      setBaseline(sent);
-      setConflict(false);
-      setConfirmingClose(false); // 저장했으니 "저장하지 않은 변경" 경고는 유효하지 않다
-      notify?.('Claude Code 설정을 저장했습니다. 이후 시작되는 세션부터 적용됩니다.');
-    } catch (err) {
-      if (!aliveRef.current || genRef.current !== gen) return;
-      if (err?.status === 409) {
-        setConflict(true);
-        setError('다른 곳에서 파일이 바뀌었습니다. 덮어쓰지 않았습니다 — 다시 불러온 뒤 편집하세요.');
-      } else {
-        setError(String(err.message ?? err));
-      }
-    } finally {
-      if (aliveRef.current && genRef.current === gen) setSaving(false);
-    }
+    // 저장했으니 "저장하지 않은 변경" 경고는 더 이상 유효하지 않다.
+    if (await draft.save()) setConfirmingClose(false);
   };
 
   // 저장 중에는 닫기를 막는다 — 진행 중 사라지면 결과를 알 수 없다.
@@ -675,7 +411,7 @@ export default function ConfigEditorModal({ presenceStatus, restoreRef, onClose,
             {loadError && (
               <span className="past-note past-note-error">
                 <span className="dim">설정을 불러오지 못했습니다: {loadError}</span>
-                <button type="button" className="past-retry" onClick={load}>
+                <button type="button" className="past-retry" onClick={draft.load}>
                   다시 시도
                 </button>
               </span>
@@ -752,16 +488,21 @@ export default function ConfigEditorModal({ presenceStatus, restoreRef, onClose,
                   )}
 
                   {t.id === 'plugins' && ready && (
-                    <PluginsTab
+                    <PluginsForm
                       text={text}
                       disabled={saving}
                       plugins={plugins}
                       pluginsError={pluginsError}
                       pluginsLoading={pluginsLoading}
-                      onReloadPlugins={loadPlugins}
+                      onReloadPlugins={draft.loadPlugins}
                       onToggle={togglePlugin}
                       onRemove={removePlugin}
-                      headingRef={pluginsHeadingRef}
+                      idPrefix="cfg"
+                      blocked={(
+                        <BlockedNote>
+                          enabledPlugins가 &quot;이름: 켬/끔&quot; 형태가 아닙니다 — 값을 덮어쓰지 않았습니다. JSON 탭에서 편집하세요.
+                        </BlockedNote>
+                      )}
                     />
                   )}
 
@@ -775,16 +516,15 @@ export default function ConfigEditorModal({ presenceStatus, restoreRef, onClose,
                       autoComplete="off"
                       aria-label="settings.json 내용"
                       onChange={(e) => {
-                        setText(e.target.value);
+                        draft.editText(e.target.value); // 충돌 표시 해제까지 함께 한다
                         // 원문을 직접 고치면 커밋되지 못한 env 행은 최신이 아니게 된다.
                         // 조용히 버리면 방금 친 줄이 소리 없이 사라지므로, 버렸다고 알린다.
-                        setError(
+                        draft.setError(
                           envDraft && validateEnvRows(envDraft)
                             ? '원문을 직접 고쳐서, 저장되지 않은 환경 변수 줄은 버렸습니다.'
                             : null,
                         );
                         setEnvDraft(null);
-                        setConflict(false);
                         setConfirmingClose(false);
                       }}
                     />
@@ -799,7 +539,7 @@ export default function ConfigEditorModal({ presenceStatus, restoreRef, onClose,
             <div className="sidebar-error" role="alert">
               {error}
               {conflict && (
-                <button type="button" className="past-retry" onClick={load}>
+                <button type="button" className="past-retry" onClick={draft.load}>
                   다시 불러오기
                 </button>
               )}

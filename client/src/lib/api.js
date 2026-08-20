@@ -101,6 +101,17 @@ export const fetchUsage = () => get('/api/usage');
 export const fetchDailyUsage = (days = 365) => get(`/api/usage-daily?days=${days}`);
 
 /**
+ * 업데이트 확인 — 브라우저가 아니라 서버가 대신 내는 외부 요청이다(CORS 회피 +
+ * "무엇이 나가는지"의 창구 단일화). **자동 호출 금지** — 설정 → 업데이트 탭에서
+ * 사용자가 버튼을 눌렀을 때만 부른다. useEffect에서 부르는 순간 설정 모달을 여는
+ * 것만으로 앱이 조용히 외부에 신호를 보내기 시작한다.
+ * 조회 실패도 HTTP 200이다: latest=null + error로 오므로 throw로 오지 않는다
+ * (throw는 이 로컬 서버 자체에 닿지 못했을 때만).
+ * @returns {Promise<{latest: string|null, current: string|null, error?: string}>}
+ */
+export const fetchUpdateCheck = () => get('/api/update-check');
+
+/**
  * Claude Code 사용자 설정(~/.claude/settings.json) 원문 로드 — 설정 → Config 편집기.
  * 파일이 없으면 exists=false, content는 '{}' 기준선.
  * @returns {Promise<{exists: boolean, content: string, mtimeMs: number|null, path: string}>}

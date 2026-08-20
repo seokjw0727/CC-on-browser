@@ -897,6 +897,180 @@ test('/api/usage quota 실패 → quota:null + 로컬 집계 보존 + 요청마�
   }
 });
 
+// registry.npmjs.org로 실제로 나가지 않게 하는 유일한 seam. 전역 fetch와 같은
+// 시그니처라 수용 기준(200 AND 문자열 version) 판정은 서버 코드가 그대로 수행한다 —
+// 가짜가 그 판정까지 대신하면 테스트가 코드가 아니라 가짜를 검증하게 된다.
+function fakeRegistry(initial = { mode: 'ok', version: '9.9.9' }) {
+  const calls = [];
+  const state = { ...initial };
+  const fn = async (url, init) => {
+    calls.push({ url, init });
+    if (state.mode === 'throw') throw new Error('offline');
+    if (state.mode === 'http500') return { ok: false, status: 503, json: async () => ({}) };
+    // 2xx지만 본문이 없는 응답 — res.ok로 거르면 통과해 버린다(정확히 200만 성공).
+    if (state.mode === 'http204') {
+      return { ok: true, status: 204, json: async () => { throw new SyntaxError('no body'); } };
+    }
+    if (state.mode === 'notjson') {
+      return { ok: true, status: 200, json: async () => { throw new SyntaxError('bad'); } };
+    }
+    if (state.mode === 'badshape') return { ok: true, status: 200, json: async () => ({ version: 42 }) };
+    return { ok: true, status: 200, json: async () => ({ version: state.version }) };
+  };
+  return { fn, calls, state };
+}
+
+test('/api/update-check: 성공 + 캐시 + 보내는 것은 URL 하나뿐', async () => {
+  const reg = fakeRegistry();
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    version: '1.0.0',
+    registryFetch: reg.fn,
+  });
+  try {
+    const b = `http://127.0.0.1:${h.port}`;
+    const auth = { headers: { 'x-auth-token': TOKEN } };
+    // 인증 없이는 레지스트리에 나가지도 않는다
+    assert.equal((await fetch(`${b}/api/update-check`)).status, 401);
+    assert.equal(reg.calls.length, 0);
+
+    const r1 = await (await fetch(`${b}/api/update-check`, auth)).json();
+    assert.deepEqual(r1, { latest: '9.9.9', current: '1.0.0' });
+    const r2 = await (await fetch(`${b}/api/update-check`, auth)).json();
+    assert.deepEqual(r2, r1);
+    assert.equal(reg.calls.length, 1, '성공은 캐시된다 — 두 번째 요청은 나가지 않는다');
+
+    // 보안 회귀 가드: 나가는 것은 이 URL의 GET 한 줄뿐이어야 한다.
+    assert.equal(reg.calls[0].url, 'https://registry.npmjs.org/cc-on-browser/latest');
+    assert.ok(!reg.calls[0].url.includes('?'), '쿼리스트링으로 무언가 실어 보내지 않는다');
+    const headers = JSON.stringify(reg.calls[0].init.headers).toLowerCase();
+    for (const leak of ['token', 'authorization', 'cookie']) {
+      assert.ok(!headers.includes(leak), `${leak}이 헤더에 실리면 안 된다`);
+    }
+    assert.ok(reg.calls[0].init.signal, '타임아웃 시그널이 배선돼 있다');
+  } finally {
+    await h.close();
+  }
+});
+
+test('/api/update-check: 실패 다섯 갈래는 모두 200이고 캐시되지 않는다', async () => {
+  const reg = fakeRegistry();
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    version: '1.0.0',
+    registryFetch: reg.fn,
+  });
+  try {
+    const b = `http://127.0.0.1:${h.port}`;
+    const auth = { headers: { 'x-auth-token': TOKEN } };
+    let expected = 0;
+    for (const mode of ['throw', 'http500', 'http204', 'notjson', 'badshape']) {
+      reg.state.mode = mode;
+      const res = await fetch(`${b}/api/update-check`, auth);
+      assert.equal(res.status, 200, `${mode}도 200이다 — UI가 실패 종류를 떠안지 않는다`);
+      assert.deepEqual(await res.json(), {
+        latest: null, current: '1.0.0', error: 'update check failed',
+      }, mode);
+      expected += 1;
+      assert.equal(reg.calls.length, expected, `${mode} 실패가 캐시되면 다시 눌러도 안 나간다`);
+    }
+    // 실패가 캐시를 오염시키지 않았다 — 회복되면 바로 결과가 나온다
+    reg.state.mode = 'ok';
+    assert.deepEqual(
+      await (await fetch(`${b}/api/update-check`, auth)).json(),
+      { latest: '9.9.9', current: '1.0.0' },
+    );
+  } finally {
+    await h.close();
+  }
+});
+
+test('/api/update-check: version을 넘기지 않은 데몬은 current:null로 보고한다', async () => {
+  const reg = fakeRegistry();
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    registryFetch: reg.fn,
+  });
+  try {
+    const b = `http://127.0.0.1:${h.port}`;
+    const res = await fetch(`${b}/api/update-check`, { headers: { 'x-auth-token': TOKEN } });
+    assert.equal(res.status, 200);
+    // 비교 가능 여부 판정은 클라이언트 몫 — 서버는 모른다는 사실만 그대로 보고한다
+    assert.deepEqual(await res.json(), { latest: '9.9.9', current: null });
+  } finally {
+    await h.close();
+  }
+});
+
+test('/api/update-check: GET 외 메서드는 Allow: GET을 단 405 (레지스트리에 나가지 않는다)', async () => {
+  const reg = fakeRegistry();
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    version: '1.0.0',
+    registryFetch: reg.fn,
+  });
+  try {
+    const b = `http://127.0.0.1:${h.port}`;
+    for (const method of ['POST', 'PUT']) {
+      const res = await fetch(`${b}/api/update-check`, {
+        method,
+        headers: { 'x-auth-token': TOKEN },
+      });
+      assert.equal(res.status, 405, method);
+      assert.equal(res.headers.get('allow'), 'GET', method);
+    }
+    assert.equal(reg.calls.length, 0);
+  } finally {
+    await h.close();
+  }
+});
+
+test('/api/update-check: 동시 요청은 하나의 조회를 나눠 쓴다 (버튼 연타 방어)', async () => {
+  const reg = fakeRegistry();
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    version: '1.0.0',
+    registryFetch: reg.fn,
+  });
+  try {
+    const b = `http://127.0.0.1:${h.port}`;
+    const auth = { headers: { 'x-auth-token': TOKEN } };
+    const [a1, a2] = await Promise.all([
+      fetch(`${b}/api/update-check`, auth).then((r) => r.json()),
+      fetch(`${b}/api/update-check`, auth).then((r) => r.json()),
+    ]);
+    assert.deepEqual(a1, a2);
+    assert.equal(reg.calls.length, 1);
+  } finally {
+    await h.close();
+  }
+});
+
 test('onClientCountChange fires on WS connect/disconnect (browser-presence signal)', async () => {
   const counts = [];
   const h = await startServer({

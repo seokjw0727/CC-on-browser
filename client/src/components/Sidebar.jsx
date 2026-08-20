@@ -12,7 +12,8 @@
 // 바뀔 때 서버 목록을 다시 받으므로 로컬 캡처 없이도 신선하다.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../lib/store.jsx';
-import { versionSkew } from '../lib/app-version.js';
+import { APP_VERSION, UNKNOWN_LABEL, infoValue, versionSkew } from '../lib/app-version.js';
+import { updateMessage, updateStatus } from '../lib/update-check.js';
 import {
   deleteSessionFile,
   fetchBootstrap,
@@ -20,8 +21,11 @@ import {
   fetchProjects,
   fetchRecentSessions,
   fetchTranscript,
+  fetchUpdateCheck,
   pickDirectory,
 } from '../lib/api.js';
+import { formReady, removePluginEntry, setPluginEnabled } from '../lib/claude-settings-form.js';
+import { useClaudeConfigDraft } from '../lib/claude-config-draft.js';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
 import { createSessionState, remoteControlByCwd, remoteControlFor } from '../lib/store-reducer.js';
 import { isQuestionRequest } from '../lib/ask-user-question.js';
@@ -47,10 +51,15 @@ import { Sparkle, Mascot } from './Brand.jsx';
 import Icon from './Icon.jsx';
 import SessionMenu from './SessionMenu.jsx';
 import ConfigEditorModal from './ConfigEditorModal.jsx';
+import PluginsForm from './PluginsForm.jsx';
 import TrustModeWarning from './TrustModeWarning.jsx';
 import { useFocusTrap } from '../lib/useFocusTrap.js';
 import { usePresence } from '../lib/usePresence.js';
 import './interact.css';
+
+// package.json repository(github:seokjw0727/CC-on-browser)의 웹 주소. 여기 박아 두는
+// 이유: 번들에 package.json을 끌어들이지 않으려고 vite define은 version만 넘긴다.
+const REPO_URL = 'https://github.com/seokjw0727/CC-on-browser';
 
 // 모달 "지난 세션" 목록 크기 — 기본 20, "더 보기" 클릭 시 50(서버 clamp 상한).
 const PAST_LIMIT_DEFAULT = 20;
@@ -522,6 +531,13 @@ function SettingsIcon() {
   );
 }
 
+// 정보 아이콘만 Icon.jsx 세트에서 가져온다(StatsIcon·SettingsIcon은 20 격자 직접 그림).
+// 새 path를 추가하지 않는 이유: icon.test.js가 세트를 정확한 종수로 고정해 두었고,
+// 이미 같은 뜻의 'info'가 있다. 굵기 보정은 interact.css의 .foot-icon.ico가 한다.
+function InfoIcon() {
+  return <Icon name="info" size={17} className="foot-icon" />;
+}
+
 function ChevronIcon() {
   return (
     <svg className="foot-chevron" viewBox="0 0 16 16" aria-hidden="true">
@@ -712,29 +728,22 @@ function Retrospective({ notify }) {
   );
 }
 
-// 설정 패널 — 테마(라이트/다크 세그먼트) / 새 세션 기본값(모델·권한 모드) /
-// 디버그 raw 이벤트 표시 스위치(store debugRaw + localStorage 'ccob-debug').
+// 설정 패널 — 테마 / 세션 / 플러그인 / 업데이트 네 탭.
 //
-// 기본값은 "새 세션 모달을 열 때의 초기 선택값"에만 쓰인다 — 실행 중 세션이나
+// 탭이 넷이 된 이유: 한 줄로 늘어놓던 시절엔 성격이 다른 항목(테마·새 세션 기본값·
+// CLI 전역 설정)이 같은 목록에 섞여, 어느 것이 이 앱의 설정이고 어느 것이 Claude Code
+// 자체의 설정인지 구분되지 않았다.
+//
+// 기본값(세션 탭)은 "새 세션 모달을 열 때의 초기 선택값"에만 쓰인다 — 실행 중 세션이나
 // 이미 열려 있는 모달에는 소급 적용하지 않는다.
-function SettingsPanel({ theme, onSetTheme, onEditConfig }) {
-  const { state, setDebug } = useStore();
-  const [defaults, setDefaults] = useState(() => loadDefaults());
-  // 모델 카탈로그는 CLI가 세션 init에서 보고한다 — 앱을 켜고 아직 아무 세션도
-  // 시작하지 않았다면 비어 있어 고를 수 없다(안내 문구로 대체).
-  const models = Array.isArray(state.initInfo?.models) ? state.initInfo.models : [];
-  const catalogReady = models.length > 0;
-  const modelValue = resolveDefaultModel(defaults.model, models);
+const SETTINGS_TABS = [
+  { id: 'theme', label: '테마' },
+  { id: 'session', label: '세션' },
+  { id: 'plugins', label: '플러그인' },
+  { id: 'update', label: '업데이트' },
+];
 
-  const setDefaultModel = (value) => {
-    setDefaults((cur) => ({ ...cur, model: value }));
-    writePref(DEFAULT_MODEL_KEY, value);
-  };
-  const setDefaultMode = (value) => {
-    setDefaults((cur) => ({ ...cur, mode: value }));
-    writePref(DEFAULT_MODE_KEY, value);
-  };
-
+function ThemeSettings({ theme, onSetTheme }) {
   return (
     <div className="settings-panel">
       <div className="setting-row">
@@ -758,7 +767,30 @@ function SettingsPanel({ theme, onSetTheme, onEditConfig }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
 
+function SessionSettings({ onEditConfig }) {
+  const { state, setDebug } = useStore();
+  const [defaults, setDefaults] = useState(() => loadDefaults());
+  // 모델 카탈로그는 CLI가 세션 init에서 보고한다 — 앱을 켜고 아직 아무 세션도
+  // 시작하지 않았다면 비어 있어 고를 수 없다(안내 문구로 대체).
+  const models = Array.isArray(state.initInfo?.models) ? state.initInfo.models : [];
+  const catalogReady = models.length > 0;
+  const modelValue = resolveDefaultModel(defaults.model, models);
+
+  const setDefaultModel = (value) => {
+    setDefaults((cur) => ({ ...cur, model: value }));
+    writePref(DEFAULT_MODEL_KEY, value);
+  };
+  const setDefaultMode = (value) => {
+    setDefaults((cur) => ({ ...cur, mode: value }));
+    writePref(DEFAULT_MODE_KEY, value);
+  };
+
+  return (
+    <div className="settings-panel">
       <div className="setting-row">
         <label className="setting-label" htmlFor="default-model-select" data-tip="새 세션 모달을 열 때 미리 선택되는 모델입니다">
           기본 모델
@@ -845,34 +877,392 @@ function SettingsPanel({ theme, onSetTheme, onEditConfig }) {
   );
 }
 
-// 하단 고정 버튼 행 — 패널 자체는 화면 중앙 모달(FootModalPresence, aside 밖)로 뜬다.
-function SidebarFoot({ openPanel, onToggle }) {
+// 플러그인 탭 — Config 편집기와 **같은** 파일(~/.claude/settings.json)을 다룬다.
+// 두 화면이 각자 draft를 들기 때문에, 탭에 들어올 때와 편집기가 닫힌 뒤 다시 읽어야
+// 편집기에서 저장한 내용을 이 화면의 낡은 원문이 되돌려 놓지 않는다. 그래도 어긋나면
+// 저장이 409로 막히고 "다시 불러오기"가 안전망이다.
+function PluginSettings({ active, configEditorOpen, onEditConfig }) {
+  const { notify } = useStore();
+  const draft = useClaudeConfigDraft({ notify, auto: false });
+  const { reloadIfClean } = draft;
+  useEffect(() => {
+    if (!active || configEditorOpen) return;
+    // 다시 읽는 것은 **저장하지 않은 편집이 없을 때만**이다(설계도의 "탭 진입 시마다
+    // 다시 읽는다"를 한 겹 좁혔다). 무조건 읽으면 방금 누른 켬/끔이 탭을 한 번
+    // 오가는 것만으로 조용히 사라진다. 그 대신 남는 어긋남은 저장이 409로 막고
+    // "다시 불러오기"가 받아 준다.
+    reloadIfClean();
+  }, [active, configEditorOpen, reloadIfClean]);
+
   return (
-    <div className="sidebar-foot">
-      <FootButton
-        title="통계"
-        panel="stats"
-        openPanel={openPanel}
-        onToggle={onToggle}
-        icon={<StatsIcon />}
-      />
-      <FootButton
-        title="설정"
-        panel="settings"
-        openPanel={openPanel}
-        onToggle={onToggle}
-        icon={<SettingsIcon />}
-      />
+    <div className="settings-panel">
+      {/* 비동기 상태(로딩·실패)는 시각 표시만으로 전달되지 않는다 — 라이브 영역으로. */}
+      <div role="status">
+        {draft.loading && <span className="dim foot-note">불러오는 중…</span>}
+        {draft.loadError && (
+          <span className="past-note past-note-error">
+            <span className="dim">설정을 불러오지 못했습니다: {draft.loadError}</span>
+            <button type="button" className="past-retry" onClick={draft.load}>
+              다시 시도
+            </button>
+          </span>
+        )}
+      </div>
+
+      {/* 로드 전(text가 빈 문자열)에는 formReady가 false다 — 관문이 없으면 탭에 들어간
+          순간 "JSON 문법 오류" 거짓 안내가 먼저 뜬다(Config 편집기와 같은 처방). */}
+      {!draft.loading && !draft.loadError && (
+        <>
+          {!formReady(draft.text) ? (
+            <div className="cfg-form">
+              <span className="dim cfg-blocked">
+                지금 설정 파일은 폼으로 다룰 수 없습니다(JSON 문법 오류이거나 최상위가 객체가 아닙니다).
+              </span>
+              <button
+                type="button"
+                className="cfg-row-btn"
+                onClick={(e) => onEditConfig(e.currentTarget)}
+              >
+                Config 편집기 열기
+              </button>
+            </div>
+          ) : (
+            <PluginsForm
+              text={draft.text}
+              disabled={draft.saving}
+              plugins={draft.plugins}
+              pluginsLoading={draft.pluginsLoading}
+              pluginsError={draft.pluginsError}
+              onReloadPlugins={draft.loadPlugins}
+              onToggle={(k, v) => draft.apply(setPluginEnabled(draft.text, k, v))}
+              onRemove={(k) => draft.apply(removePluginEntry(draft.text, k))}
+              idPrefix="set"
+              blocked={(
+                <span className="dim cfg-blocked">
+                  enabledPlugins가 &quot;이름: 켬/끔&quot; 형태가 아닙니다 — 값을 덮어쓰지 않았습니다.
+                  세션 탭의 Config 편집기(JSON 탭)에서 고치세요.
+                </span>
+              )}
+            />
+          )}
+
+          <div className="setting-actions">
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={draft.saving || !draft.dirty}
+              onClick={draft.save}
+            >
+              {draft.saving ? '저장 중…' : '저장'}
+            </button>
+          </div>
+
+          {/* 이 모달에는 Config 편집기의 "닫기 확인" 관문이 없어 Esc·배경 클릭으로 바로
+              닫힌다 — 저장하지 않은 편집이 있다는 사실은 상시로 보여 준다. */}
+          {draft.dirty && !draft.saving && (
+            <div className="dim cfg-hint" role="status">
+              저장하지 않은 변경이 있습니다 — 저장을 눌러야 파일에 반영됩니다.
+            </div>
+          )}
+        </>
+      )}
+
+      {draft.error && (
+        <div className="sidebar-error" role="alert">
+          {draft.error}
+          {draft.conflict && (
+            <button type="button" className="past-retry" onClick={draft.load}>
+              다시 불러오기
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-// 통계·설정 중앙 모달 — 새 세션 모달과 같은 overlay/trap/presence 패턴.
+// 업데이트 탭 — 조회는 **버튼을 누를 때만** 나간다. 마운트 시 자동 조회를 넣지 말 것:
+// 설정 모달을 여는 것만으로 앱이 밖에 신호를 보내게 된다(설계도 §4).
+function UpdateSettings() {
+  const [phase, setPhase] = useState('idle'); // idle | checking | done | failed
+  const [result, setResult] = useState(null); // updateStatus() 결과
+  const [error, setError] = useState(null); // 로컬 서버에조차 닿지 못한 경우
+  // 요청 세대 + 생존 플래그 — 모달을 닫았다 다시 열거나 버튼을 연타한 뒤 늦게 도착한
+  // 응답이 현재 화면을 덮어쓰지 못하게 한다.
+  const genRef = useRef(0);
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
+
+  const check = async () => {
+    const gen = (genRef.current += 1);
+    setPhase('checking');
+    setError(null);
+    try {
+      const payload = await fetchUpdateCheck();
+      if (!aliveRef.current || genRef.current !== gen) return;
+      setResult(updateStatus(payload));
+      setPhase('done');
+    } catch (err) {
+      if (!aliveRef.current || genRef.current !== gen) return;
+      setError(String(err.message ?? err));
+      setPhase('failed');
+    }
+  };
+
+  return (
+    <div className="settings-panel">
+      <div className="setting-row">
+        <span
+          className="setting-label"
+          data-tip="npm 레지스트리에서 배포된 최신 버전만 조회합니다 — 개인 정보는 보내지 않습니다"
+        >
+          업데이트 확인
+        </span>
+        <button
+          type="button"
+          className="setting-edit-btn"
+          disabled={phase === 'checking'}
+          aria-describedby="update-status"
+          onClick={check}
+        >
+          {phase === 'checking' ? '확인 중…' : '확인'}
+        </button>
+      </div>
+      <div className="dim setting-note">
+        자동으로 확인하지 않습니다. 버튼을 누를 때만 registry.npmjs.org에 버전을 물어봅니다.
+      </div>
+
+      <div className="update-status" id="update-status" role="status">
+        {phase === 'checking' && <span className="dim foot-note">확인 중…</span>}
+        {phase === 'failed' && (
+          <span className="past-note past-note-error">
+            <span className="dim">업데이트를 확인하지 못했습니다: {error}</span>
+            <button type="button" className="past-retry" onClick={check}>
+              다시 시도
+            </button>
+          </span>
+        )}
+        {phase === 'done' && result && (
+          <>
+            <span className="foot-note">{updateMessage(result)}</span>
+            {result.state === 'unknown' && result.reason === 'fetch-failed' && (
+              <button type="button" className="past-retry" onClick={check}>
+                다시 시도
+              </button>
+            )}
+            {/* 실행은 사용자 손에 남긴다 — 서버가 npm install을 대신 돌리지 않는다. */}
+            {result.state === 'outdated' && <code className="update-cmd">{result.command}</code>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// 네 탭의 껍데기. 패널은 전부 마운트해 두고 hidden만 토글한다 — aria-controls가
+// 실재하는 요소를 가리켜야 하기 때문(Config 편집기와 같은 규칙). 다만 저장 중 탭을
+// 잠그는 편집기와 달리 여기서는 잠그지 않는다: 다른 탭(테마·세션)은 저장 대상과
+// 무관하고, 패널이 계속 마운트돼 있어 저장은 안전하게 끝난다.
+function SettingsPanel({ theme, onSetTheme, onEditConfig, configEditorOpen }) {
+  const [tab, setTab] = useState('theme');
+  const tabRefs = useRef(new Map());
+  const goTab = (id) => {
+    setTab(id);
+    tabRefs.current.get(id)?.focus?.();
+  };
+  // 탭 이동 — WAI-ARIA 탭 패턴(←·→·Home·End). 포커스와 선택이 함께 움직인다.
+  const onTabKeyDown = (e) => {
+    const i = SETTINGS_TABS.findIndex((t) => t.id === tab);
+    const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+    if (step) {
+      e.preventDefault();
+      goTab(SETTINGS_TABS[(i + step + SETTINGS_TABS.length) % SETTINGS_TABS.length].id);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      goTab(SETTINGS_TABS[0].id);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      goTab(SETTINGS_TABS[SETTINGS_TABS.length - 1].id);
+    }
+  };
+
+  return (
+    <div className="settings-shell">
+      <div className="settings-tabs seg" role="tablist" aria-label="설정 항목">
+        {SETTINGS_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            id={`set-tab-${t.id}`}
+            aria-selected={tab === t.id}
+            aria-controls={`set-panel-${t.id}`}
+            className={tab === t.id ? 'on' : ''}
+            // 선택된 탭만 Tab 순서에 남긴다(탭 안 이동은 화살표 담당).
+            tabIndex={tab === t.id ? 0 : -1}
+            ref={(el) => {
+              if (el) tabRefs.current.set(t.id, el);
+              else tabRefs.current.delete(t.id);
+            }}
+            onClick={() => goTab(t.id)}
+            onKeyDown={onTabKeyDown}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {SETTINGS_TABS.map((t) => (
+        <div
+          key={t.id}
+          className="settings-tabpanel"
+          role="tabpanel"
+          id={`set-panel-${t.id}`}
+          aria-labelledby={`set-tab-${t.id}`}
+          hidden={tab !== t.id}
+          tabIndex={0}
+        >
+          {t.id === 'theme' && <ThemeSettings theme={theme} onSetTheme={onSetTheme} />}
+          {t.id === 'session' && <SessionSettings onEditConfig={onEditConfig} />}
+          {t.id === 'plugins' && (
+            <PluginSettings
+              active={tab === 'plugins'}
+              configEditorOpen={configEditorOpen}
+              onEditConfig={onEditConfig}
+            />
+          )}
+          {t.id === 'update' && <UpdateSettings />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 정보 패널 — "지금 무엇이 돌고 있는가"를 한 화면에 모은다.
+// 앱(번들) 버전만 이 번들에 박힌 값(APP_VERSION)이고, 나머지는 전부 Sidebar 본체가
+// 시작 때 한 번 받아 둔 /api/bootstrap 응답에서 온다. 여기서 다시 조회하지 않는 이유:
+// `claude --version` 결과는 서버가 프로세스 단위로 캐시하므로 재조회로 새 값을 얻을
+// 수도 없고, 데몬이 이미 죽었다면 재조회가 실패해 직전까지 알던 값마저 잃는다.
+function InfoPanel({ appInfo, platform, skew }) {
+  const rows = [
+    { label: '앱(번들) 버전', value: infoValue(APP_VERSION), tip: '이 화면(정적 번들)이 빌드된 버전' },
+    { label: '데몬 버전', value: infoValue(appInfo?.daemonVersion), tip: '브라우저를 닫아도 살아남는 백그라운드 서버의 버전' },
+    { label: 'Claude CLI 버전', value: infoValue(appInfo?.claudeVersion), tip: '데몬이 실행하는 claude 실행 파일의 --version 출력' },
+    { label: '플랫폼', value: infoValue(platform) },
+    { label: '포트', value: infoValue(appInfo?.port) },
+  ];
+  return (
+    <div className="info-panel">
+      {rows.map(({ label, value, tip }) => (
+        <div className="info-row" key={label}>
+          <span className="info-label" data-tip={tip}>{label}</span>
+          <span className={`info-value${value === UNKNOWN_LABEL ? ' unknown' : ''}`}>{value}</span>
+        </div>
+      ))}
+
+      {/* 스큐를 여기서 versionSkew()로 다시 계산하지 않는다 — 판정 기준이 두 곳이 되면
+          사이드바 하단 경고와 이 모달이 서로 다른 말을 할 수 있다. */}
+      {skew && (
+        <div className="info-skew" role="status">
+          <Icon name="warning" size={14} />
+          <span>
+            서버 v{skew.server ?? '구버전'} · 화면 v{skew.client} — 모든 세션을 종료한 뒤 앱을 다시 실행해 주세요
+          </span>
+        </div>
+      )}
+
+      <div className="info-row">
+        <span className="info-label">저장소</span>
+        {/* window.open이 아니라 앵커로 둔다 — 키보드 포커스와 "어디로 가는가"(상태줄
+            URL)를 브라우저가 공짜로 준다. noopener/noreferrer는 새 탭이 이 앱의
+            window를 만지지 못하게(원격 제어 열기와 같은 이유). */}
+        <a
+          className="info-link"
+          href={REPO_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-tip={REPO_URL}
+        >
+          GitHub <Icon name="external" size={13} />
+        </a>
+      </div>
+    </div>
+  );
+}
+
+// 패널 정의의 단일 출처. 제목·아이콘·본문이 세 군데에 흩어져 있으면 패널을 하나 늘릴
+// 때 그중 하나를 빠뜨린 채 배포된다 — '정보'를 넣으며 실제로 세 곳을 따로 고쳐야 했다.
+// 키를 Glyph로 둔 것은 의도적: Icon으로 구조분해하면 파일 상단에서 import한 Icon
+// 컴포넌트를 가린다.
+const FOOT_PANELS = {
+  stats: {
+    title: '통계',
+    Glyph: StatsIcon,
+    body: ({ state, notify }) => (
+      <>
+        <UsageStats gu={state.globalUsage} />
+        <Retrospective notify={notify} />
+      </>
+    ),
+  },
+  settings: {
+    title: '설정',
+    Glyph: SettingsIcon,
+    body: ({ theme, onSetTheme, onEditConfig, configEditorOpen }) => (
+      <SettingsPanel
+        theme={theme}
+        onSetTheme={onSetTheme}
+        onEditConfig={onEditConfig}
+        configEditorOpen={configEditorOpen}
+      />
+    ),
+  },
+  info: {
+    title: '정보',
+    Glyph: InfoIcon,
+    body: ({ appInfo, platform, skew }) => (
+      <InfoPanel appInfo={appInfo} platform={platform} skew={skew} />
+    ),
+  },
+};
+// 화면 순서는 따로 적는다 — Object.keys에 기대면 표의 정의 순서를 옮기는 순간 UI가 바뀐다.
+const FOOT_PANEL_ORDER = ['stats', 'settings', 'info'];
+
+// 하단 고정 버튼 행 — 패널 자체는 화면 중앙 모달(FootModalPresence, aside 밖)로 뜬다.
+function SidebarFoot({ openPanel, onToggle }) {
+  return (
+    <div className="sidebar-foot">
+      {FOOT_PANEL_ORDER.map((panel) => {
+        const { title, Glyph } = FOOT_PANELS[panel];
+        return (
+          <FootButton
+            key={panel}
+            title={title}
+            panel={panel}
+            openPanel={openPanel}
+            onToggle={onToggle}
+            icon={<Glyph />}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+// 통계·설정·정보 중앙 모달 — 새 세션 모달과 같은 overlay/trap/presence 패턴.
 // 포커스 복원은 useFocusTrap 언마운트 정리가 트리거 버튼으로 되돌린다.
-function FootModal({ panel, presenceStatus, onClose, theme, onSetTheme, onEditConfig, inert }) {
+function FootModal({
+  panel, presenceStatus, onClose, theme, onSetTheme, onEditConfig, inert, configEditorOpen,
+  appInfo, platform, skew,
+}) {
   const { state, notify } = useStore();
   const dialogRef = useFocusTrap(true);
-  const title = panel === 'stats' ? '통계' : '설정';
+  // 알 수 없는 panel로도 제목·아이콘 없는 빈 모달이 뜨지 않게 폴백을 둔다.
+  const { title, Glyph, body } = FOOT_PANELS[panel] ?? FOOT_PANELS.stats;
   return (
     <div
       className={`modal-overlay${presenceStatus === 'closing' ? ' closing' : ''}`}
@@ -889,29 +1279,27 @@ function FootModal({ panel, presenceStatus, onClose, theme, onSetTheme, onEditCo
     >
       <div
         ref={dialogRef}
-        className="modal foot-modal"
+        className={`modal foot-modal${panel === 'settings' ? ' settings-modal' : ''}`}
         role="dialog"
         aria-modal="true"
         id={`sidebar-${panel}-modal`}
         aria-labelledby={`sidebar-${panel}-title`}
       >
         <div className="modal-title">
-          {panel === 'stats' ? <StatsIcon /> : <SettingsIcon />}
+          <Glyph />
           <span id={`sidebar-${panel}-title`}>{title}</span>
           <span className="spacer" />
           <button type="button" className="icon-btn" onClick={onClose} aria-label="닫기">
             <Icon name="close" />
           </button>
         </div>
+        {/* body는 컴포넌트로 렌더(<Body/>)하지 않고 호출한다 — 표 항목이 컴포넌트
+            타입이 되면 렌더마다 새 타입으로 보여 하위 상태(설정 탭 선택 등)가 날아간다. */}
         <div className="modal-body foot-body">
-          {panel === 'stats' ? (
-            <>
-              <UsageStats gu={state.globalUsage} />
-              <Retrospective notify={notify} />
-            </>
-          ) : (
-            <SettingsPanel theme={theme} onSetTheme={onSetTheme} onEditConfig={onEditConfig} />
-          )}
+          {body({
+            state, notify, theme, onSetTheme, onEditConfig, configEditorOpen,
+            appInfo, platform, skew,
+          })}
         </div>
       </div>
     </div>
@@ -920,7 +1308,8 @@ function FootModal({ panel, presenceStatus, onClose, theme, onSetTheme, onEditCo
 
 // 닫힘 페이드아웃(140ms) 동안 마지막 패널 내용을 유지한 채 마운트를 지속.
 function FootModalPresence({ panel, ...rest }) {
-  // rest에는 inert·onEditConfig가 그대로 흘러간다(설정 패널 → Config 편집기 배선).
+  // rest에는 inert·onEditConfig·configEditorOpen이 그대로 흘러간다(설정 패널 →
+  // Config 편집기 배선과, 편집기가 닫힌 뒤 플러그인 탭이 다시 읽게 하는 신호).
   const { mounted, status } = usePresence(!!panel, 140);
   const lastPanelRef = useRef(panel);
   if (panel) lastPanelRef.current = panel;
@@ -940,7 +1329,11 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
   const [platform, setPlatform] = useState(null); // 네이티브 폴더 선택 버튼 노출 판단
   // 서버(데몬)와 이 번들의 버전이 어긋났는가 — null이면 정상. 배경은 app-version.js.
   const [skew, setSkew] = useState(null);
-  const [footPanel, setFootPanel] = useState(null); // null | 'stats' | 'settings'
+  // 정보 모달이 쓰는 나머지 bootstrap 값. defaultCwd·platform과 같은 1회 응답에서
+  // 갈라 담는다 — 모달 쪽에서 다시 부르면 데몬이 죽은 뒤 이미 알던 값까지 잃는다.
+  // 조회 실패 시 null로 남고, 그때는 모든 행이 '알 수 없음'으로 정상 표시된다.
+  const [bootInfo, setBootInfo] = useState(null); // {claudeVersion, daemonVersion, port} | null
+  const [footPanel, setFootPanel] = useState(null); // null | 'stats' | 'settings' | 'info'
   // 세션 컨텍스트 메뉴 — {rowKey, x, y}. 행 데이터는 매 렌더에 스토어에서 다시 읽어
   // 메뉴가 열린 사이 세션이 종료·제거돼도 낡은 정보로 동작하지 않게 한다.
   const [menu, setMenu] = useState(null);
@@ -998,6 +1391,13 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
       .then((b) => {
         setDefaultCwd(b.defaultCwd || '');
         setPlatform(b.platform || null);
+        // 서버가 키를 빼먹거나(구버전 데몬) 타입이 다를 수 있으므로 여기서 한 번
+        // 정규화해 둔다 — 화면 쪽 분기를 여러 군데로 늘리지 않기 위해.
+        setBootInfo({
+          claudeVersion: b.claudeVersion ?? null,
+          daemonVersion: b.version ?? null, // 서버는 'version', 화면은 앱 버전과 구분해 부른다
+          port: b.port ?? null,
+        });
         // 버전 스큐는 조용히 지나가면 안 된다 — 이 상태에서는 새로 생긴 WS 메시지가
         // 서버에서 `unknown message type`으로 튕겨, 기능이 "이유 없이" 안 되는 것처럼
         // 보인다(노력 수준 런타임 변경이 재시작으로 폴백하던 실제 사례).
@@ -1491,7 +1891,13 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
         onClose={() => setFootPanel(null)}
         theme={theme}
         onSetTheme={onSetTheme}
+        appInfo={bootInfo}
+        platform={platform}
+        skew={skew}
         inert={configMounted}
+        // 편집기가 페이드아웃까지 끝난 뒤에 플러그인 탭이 파일을 다시 읽게 한다 —
+        // 열려 있는 동안 읽으면 편집기가 저장하기 전 내용을 기준선으로 삼는다.
+        configEditorOpen={configMounted}
         onEditConfig={(trigger) => {
           configTriggerRef.current = trigger ?? null;
           setConfigOpen(true);

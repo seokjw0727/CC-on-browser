@@ -8,7 +8,38 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+### Added
+- **사이드바 하단에 '정보'가 생겼습니다.** 앱(번들) 버전, 데몬 버전, Claude CLI 버전,
+  플랫폼, 포트, 저장소 링크를 한 화면에서 봅니다. 값은 앱을 켤 때 한 번 받는
+  `/api/bootstrap` 응답에서만 오고(모달을 열 때 다시 조회하지 않습니다), 모르는 값은
+  빈 칸이 아니라 "알 수 없음"으로 표시합니다. 서버와 화면의 버전이 어긋나 있으면 그
+  경고도 여기 함께 뜹니다 — 판정은 사이드바 하단 경고와 같은 값을 씁니다.
+  (New sidebar "정보" panel showing app/daemon/Claude CLI versions, platform, port and
+  the repo link, sourced from the single bootstrap response.)
+- **설정에서 업데이트를 확인할 수 있습니다.** 설정 → 업데이트 탭의 버튼을 누르면 서버가
+  npm 레지스트리에 배포된 최신 버전을 물어보고 현재 버전과 견줍니다. **자동으로는 절대
+  조회하지 않습니다** — 버튼을 누를 때만 나가며, 나가는 것은 URL의 GET 한 줄뿐입니다
+  (토큰·세션·경로를 싣지 않습니다). 업데이트가 있으면 실행 명령을 보여 주기만 하고,
+  설치는 사용자가 직접 합니다.
+  (Manual update check in 설정 → 업데이트; never fires automatically.)
+
 ### Changed
+- **설정 팝업이 테마·세션·플러그인·업데이트 네 탭으로 나뉘었습니다.** 한 줄로 늘어놓던
+  시절엔 이 앱의 설정(테마·새 세션 기본값)과 Claude Code 자체의 설정이 같은 목록에 섞여
+  구분되지 않았습니다. 플러그인 켬/끔은 이제 Config 편집기를 열지 않고 설정에서 바로
+  할 수 있습니다 — 두 화면은 같은 폼과 같은 저장 규칙(mtime 기준선·409 충돌 거부)을
+  공유하고, 저장하지 않은 변경이 있으면 그 사실을 상시로 알립니다.
+  (The settings popup is now four tabs — theme, session, plugins, update — and plugin
+  toggles are available without opening the Config editor.)
+- **실행 중 작업 도크가 입력창 밖으로 나오고, 눌러서 내용을 볼 수 있습니다.** 예전에는
+  입력 박스 안에 얹혀 있어 도크에 포커스만 가도 입력창 테두리가 물들었고, 행을 누르면
+  곧바로 대화로 점프해 버려 **연결 정보가 없는 작업은 눌러 볼 수조차 없었습니다.** 이제
+  도크는 입력창 아래 독립 카드이고, 행을 누르면 그 자리에서 상세가 펼쳐집니다 —
+  서브에이전트는 지금까지의 진행(최근 8단계)과 활동 상태를, 셸은 명령 전문을,
+  백그라운드 작업은 종류와 식별자를 보여 줍니다. 대화로의 이동은 상세 안의
+  "대화에서 보기" 버튼이 맡고, Esc로 접으면 포커스가 원래 행으로 돌아옵니다.
+  (The running-work dock moved outside the composer box; rows now expand in place to
+  show what each shell/subagent is doing, with jump-to-chat as an explicit button.)
 - **`/clear`·`/compact` 다음에는 그 위의 대화가 화면에서 접힙니다.** 두 명령은 CLI의
   컨텍스트를 비우는데 화면에는 지나간 대화가 그대로 남아 있어, 보이는 것과 모델이 실제로
   기억하는 것이 어긋났습니다. 이제 초기화 구분선·압축 카드가 채팅 창의 시작점이 되어
