@@ -8,6 +8,15 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-08-21
+
+> 탭을 모두 닫으면 실행 중이던 `claude` 세션도 확실히 함께 끝납니다. 데몬이 내려가기 전에
+> 세션 프로세스와 그 자식(셸·MCP 서버)까지 정리하고 실제 사망을 확인하므로, 화면 없이
+> 계속 돌며 구독을 소모하던 고아 프로세스가 남지 않습니다.
+> (Closing the last tab now really ends the running `claude` session — the daemon
+> force-kills the session's process tree and confirms it is gone before exiting, so no
+> orphaned CLI keeps running and burning quota.)
+
 ### Fixed
 - **브라우저를 닫으면 실행 중이던 CLI 세션도 확실히 함께 끝납니다.** 지금까지는 탭을 모두
   닫아 데몬이 내려갈 때, 종료 경로가 세션 프로세스의 사망을 기다리지 않았습니다 — 세션에
@@ -615,7 +624,9 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
-[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.5...HEAD
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.1...HEAD
+[1.10.1]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.0...v1.10.1
+[1.10.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.5...v1.10.0
 [1.9.5]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.4...v1.9.5
 [1.9.4]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.3...v1.9.4
 [1.9.3]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.2...v1.9.3
