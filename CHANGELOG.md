@@ -8,6 +8,22 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+### Fixed
+- **브라우저를 닫으면 실행 중이던 CLI 세션도 확실히 함께 끝납니다.** 지금까지는 탭을 모두
+  닫아 데몬이 내려갈 때, 종료 경로가 세션 프로세스의 사망을 기다리지 않았습니다 — 세션에
+  "그만"만 전해 두고 곧바로 프로세스를 빠져나갔고, 그 뒤처리를 맡던 타이머는 발화할 기회가
+  없었습니다. Windows에서는 부모가 죽어도 자식이 살아남으므로, 턴이 진행 중이던 `claude`가
+  화면 없이 계속 돌며 구독을 소모할 수 있었습니다. 이제 종료 경로가 **우아한 종료 →
+  강제 트리 종료 → 실제 사망 확인**을 마친 뒤에야 데몬을 내리고, CLI가 띄운 셸·MCP 서버
+  같은 손자 프로세스까지 함께 정리합니다(Windows는 `taskkill /T`, POSIX는 프로세스 그룹).
+  종료 중에 시작된 세션도 거부해 장부 밖에서 태어나는 고아를 막습니다. 정리를 끝내 확인하지
+  못한 경우에는 조용히 넘어가지 않고 사유를 로그로 남깁니다.
+  절전·리드 닫힘 생존과 원격 제어를 켜 둔 동안의 생존은 **그대로**입니다.
+  (Closing the browser now really ends the CLI session: shutdown waits for a graceful exit,
+  force-kills the process tree, and confirms death before the daemon exits — orphaned
+  `claude` processes could previously keep running, and burning quota, after every tab
+  was closed. Sleep/lid-close survival and remote-control pinning are unchanged.)
+
 ## [1.10.0] - 2026-08-20
 
 > 실행 중인 셸·서브에이전트를 입력창 밖 독립 카드로 꺼내 눌러서 내용을 볼 수 있게 하고,

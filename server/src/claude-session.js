@@ -3,10 +3,16 @@
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import { createJsonlParser } from './jsonl.js';
+import { killTree as defaultKillTree } from './kill-tree.js';
 
 const INIT_TIMEOUT_MS = 10_000;
 const CONTROL_TIMEOUT_MS = 30_000;
 const STOP_KILL_TIMEOUT_MS = 5_000;
+// terminate()가 stdin EOF만으로 우아하게 내려가길 기다리는 시간. 진행 중인 턴을
+// 정리할 여유는 주되, 사용자가 브라우저를 닫고 기다리는 시간이므로 짧게 잡는다.
+const TERMINATE_GRACE_MS = 3_000;
+// 강제 트리 종료를 쏜 뒤 실제 사망을 확인하는 상한.
+const TERMINATE_KILL_WAIT_MS = 2_000;
 
 export class ClaudeSession extends EventEmitter {
   #cliPath;
@@ -23,6 +29,15 @@ export class ClaudeSession extends EventEmitter {
   #proc = null;
   #exited = false;
   #stopTimer = null;
+  // 자식 프로세스의 실제 사망 여부. #exited('close' 기반)와 일부러 분리한다 —
+  // 손자(셸·MCP 서버 등)가 stdio 파이프를 물고 있으면 프로세스가 이미 죽은 뒤에도
+  // 'close'는 오지 않는다. 종료 확인은 반드시 이쪽('exit')을 봐야 한다.
+  #procExited = false;
+  /** @type {Promise<boolean>|null} terminate()의 단일 종료 절차(멱등) */
+  #terminating = null;
+  #platform;
+  #killTree;
+  #stopKillTimeoutMs;
   #nextRequestId = 0;
   /** 최근 stderr 라인(최대 3) — 조기 종료 시 원인("No conversation found…")을 에러 메시지에 싣는다 */
   #stderrTail = [];
@@ -35,10 +50,17 @@ export class ClaudeSession extends EventEmitter {
 
   constructor({
     cliPath, cliArgsPrefix = [], cwd, model, permissionMode, effort, ultracode = false, resumeSessionId,
+    // 플랫폼·트리 종료·정지 유예는 주입 가능하게 둔다(테스트용) — remote-control.js와 같은 규약.
+    platform = process.platform,
+    killTree = defaultKillTree,
+    stopKillTimeoutMs = STOP_KILL_TIMEOUT_MS,
   } = {}) {
     super();
     if (!cliPath) throw new TypeError('cliPath is required');
     if (!cwd) throw new TypeError('cwd is required');
+    this.#platform = platform;
+    this.#killTree = killTree;
+    this.#stopKillTimeoutMs = stopKillTimeoutMs;
     this.#cliPath = cliPath;
     this.#cliArgsPrefix = cliArgsPrefix;
     this.#cwd = cwd;
@@ -73,6 +95,11 @@ export class ClaudeSession extends EventEmitter {
       cwd: this.#cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      // POSIX에서만 자기 프로세스 그룹을 준다 — terminate()가 그룹 전체(-pid)를
+      // 시그널해 CLI가 띄운 셸·MCP 서버까지 함께 정리하기 위해서다.
+      // win32는 taskkill /T가 트리를 처리하므로 detached가 필요 없다
+      // (remote-control.js의 spawnChild와 같은 선택).
+      detached: this.#platform !== 'win32',
     });
 
     // 종료된 프로세스에 쓰다 EPIPE로 죽지 않도록.
@@ -99,9 +126,13 @@ export class ClaudeSession extends EventEmitter {
     });
 
     this.#proc.on('error', (err) => {
+      this.#procExited = true; // 스폰 자체가 실패했다 — 죽일 프로세스가 없다
       this.#failPendingControl(err);
       this.#handleExit(null);
     });
+    // 'exit'는 프로세스의 사망, 'close'는 stdio까지 닫힘. UI 이벤트 흐름은 종전대로
+    // 'close'에 걸고, 종료 확인만 'exit'로 본다(#procExited 주석 참조).
+    this.#proc.on('exit', () => { this.#procExited = true; });
     this.#proc.on('close', (code) => this.#handleExit(code));
 
     const initInfo = await this.#sendControlRequest({ subtype: 'initialize' }, INIT_TIMEOUT_MS);
@@ -205,8 +236,15 @@ export class ClaudeSession extends EventEmitter {
     });
   }
 
+  /**
+   * 개별 세션 정지(UI의 "정지"). 우아한 종료를 요청하고 최후 수단으로만 kill한다.
+   * 데몬 종료 경로는 이걸 쓰지 않는다 — terminate()를 쓴다(사유는 그쪽 주석).
+   */
   stop() {
     if (!this.#proc || this.#exited) return;
+    // terminate()가 이미 종료 절차를 쥐고 있으면 끼어들지 않는다 — 여기서 kill()을
+    // 걸면 트리 정리 없이 직속 프로세스만 죽어 손자가 고아로 남는다.
+    if (this.#terminating) return;
     try {
       this.#proc.stdin.end();
     } catch {
@@ -214,10 +252,122 @@ export class ClaudeSession extends EventEmitter {
     }
     if (!this.#stopTimer) {
       this.#stopTimer = setTimeout(() => {
-        if (!this.#exited) this.#proc.kill();
-      }, STOP_KILL_TIMEOUT_MS);
+        if (this.#procExited) return;
+        // 최후 수단도 **트리째** 정리한다. proc.kill()만 쏘면 자기 프로세스 그룹을
+        // 가진 CLI(POSIX detached)의 자식 — 셸·MCP 서버 — 이 그대로 남는다(codex 지적).
+        const pid = this.#proc?.pid;
+        if (pid == null) {
+          this.#proc?.kill();
+          return;
+        }
+        try {
+          const r = this.#killTree(pid, { platform: this.#platform, force: true });
+          if (r && typeof r.catch === 'function') r.catch(() => {});
+        } catch {
+          // 주입된 killTree가 동기적으로 던져도 정지 요청을 실패로 만들지 않는다
+        }
+      }, this.#stopKillTimeoutMs);
       this.#stopTimer.unref?.();
     }
+  }
+
+  /**
+   * 완전 종료 — 데몬이 내려갈 때 이 세션의 CLI 프로세스와 그 **자식 트리**까지 정리하고,
+   * 실제로 죽었는지 확인한 뒤에야 resolve한다. 멱등(같은 Promise를 돌려준다).
+   *
+   * 왜 stop()으로 부족한가: stop()은 stdin만 닫고 즉시 반환하며, 그 5초 kill 타이머는
+   * unref돼 있다. 데몬이 곧바로 process.exit()하면 타이머는 영영 발화하지 않고,
+   * Windows에선 부모가 죽어도 자식이 살아남으므로 진행 중이던 claude 프로세스가
+   * 고아로 남아 계속 돈다(토큰 소모). 그래서 종료 경로는 반드시 이 함수를 await한다.
+   *
+   * 흐름: stdin EOF로 우아한 종료 유도 → graceMs 대기 → 강제 트리 종료 →
+   *       killWaitMs 안에 사망 재확인. 확인에 실패해도 resolve(false)한다 —
+   *       데몬을 영원히 붙잡는 쪽이 더 나쁘다(사유는 로그로 남긴다).
+   *
+   * @returns {Promise<boolean>} **CLI 루트 프로세스**의 사망을 확인했으면 true.
+   *   손자(셸·MCP 서버)까지의 사망은 확인하지 않는다 — pid를 알 수 없어서다.
+   *   그쪽은 트리 종료의 best-effort이며, win32에서 루트가 먼저 우아하게 내려간
+   *   경우에는 트리를 열거할 수 없어 CLI 자신의 정리에 맡긴다.
+   */
+  terminate({ graceMs = TERMINATE_GRACE_MS, killWaitMs = TERMINATE_KILL_WAIT_MS } = {}) {
+    if (this.#terminating) return this.#terminating;
+    this.#terminating = this.#runTerminate(graceMs, killWaitMs).then((dead) => {
+      // 실패했다면 재시도 여지를 남긴다 — 캐시된 false를 붙들고 있으면 stop()도
+      // terminate()도 다시는 아무 일도 하지 않는다(codex 지적).
+      if (!dead) this.#terminating = null;
+      return dead;
+    });
+    return this.#terminating;
+  }
+
+  async #runTerminate(graceMs, killWaitMs) {
+    const proc = this.#proc;
+    if (!proc) return true; // 아직 스폰 전 — 죽일 프로세스가 없다
+    const { pid } = proc;
+    // 종료 절차를 독점한다 — stop()의 타이머가 중간에 끼어들어 트리 정리 없이
+    // 직속 프로세스만 죽이는 것을 막는다.
+    if (this.#stopTimer) {
+      clearTimeout(this.#stopTimer);
+      this.#stopTimer = null;
+    }
+
+    if (!this.#procExited) {
+      try {
+        proc.stdin.end();
+      } catch {
+        // 이미 닫힌 스트림이면 무시
+      }
+      await this.#waitForProcExit(graceMs);
+    }
+
+    // 강제 트리 종료. 우아하게 내려간 경우에도 POSIX에서는 한 번 더 쏜다 —
+    // 그룹 리더가 죽어도 같은 프로세스 그룹의 손자는 남아 있을 수 있고, 대상이
+    // 없으면 ESRCH로 무해하다(remote-control.js의 terminate와 같은 선택).
+    // win32는 부모가 이미 죽었으면 taskkill /T가 트리를 열거할 수 없어 손자까지는
+    // 보장하지 못한다 — 그 경우는 CLI 자신의 정리에 맡기는 명시적 한계다.
+    if (pid != null && (!this.#procExited || this.#platform !== 'win32')) {
+      try {
+        await this.#killTree(pid, { platform: this.#platform, force: true });
+      } catch {
+        // 주입된 killTree가 던져도 종료 절차를 멈추지 않는다
+      }
+    }
+
+    if (this.#procExited) return true;
+    const dead = await this.#waitForProcExit(killWaitMs);
+    if (!dead) {
+      console.error(
+        `[cc-on-browser] CLI 세션(pid ${pid})을 종료하지 못했습니다 —`
+        + ' `claude` 프로세스가 남았는지 확인해 주세요.',
+      );
+    }
+    return dead;
+  }
+
+  /**
+   * 자식 프로세스의 'exit'를 상한과 함께 기다린다.
+   * 타이머를 unref하지 않는다: 이건 종료 경로의 유한한 대기(최대 몇 초)이고,
+   * unref하면 이벤트 루프가 비는 순간 Node가 그대로 빠져나가 정리를 건너뛴다.
+   * @returns {Promise<boolean>} 상한 안에 죽었으면 true
+   */
+  #waitForProcExit(timeoutMs) {
+    if (this.#procExited) return Promise.resolve(true);
+    const proc = this.#proc;
+    if (!proc) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let timer = null;
+      const finish = (ok) => {
+        if (timer !== null) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        proc.off('exit', onExit);
+        resolve(ok);
+      };
+      const onExit = () => finish(true);
+      proc.on('exit', onExit);
+      timer = setTimeout(() => finish(this.#procExited), timeoutMs);
+    });
   }
 
   #canWrite() {

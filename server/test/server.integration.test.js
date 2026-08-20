@@ -1823,3 +1823,95 @@ test('붙여넣기 임시 폴더 청소는 기동을 붙잡지 않고, 실패해
     await h3.close();
   }
 });
+
+// ── 데몬 종료 = 세션 종료 ──────────────────────────────────────────────────
+// 브라우저를 전부 닫으면 lifecycle이 close()를 부른다. 그 close()가 세션의 실제
+// 사망을 기다리지 않으면 bin의 process.exit(0)가 먼저 나가고, Windows에선 부모가
+// 죽어도 자식이 살아남아 진행 중이던 claude가 계속 돈다(토큰까지 소모한다).
+function pidAlive(pid) {
+  if (pid == null) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitPidDead(pid, timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (!pidAlive(pid)) return;
+    if (Date.now() >= deadline) throw new Error(`process ${pid} is still alive`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+test('(z) close(): EOF를 무시하는 CLI 세션과 그 손자 프로세스까지 정리한 뒤에 끝난다', async () => {
+  process.env.FAKE_SCENARIO = 'hang';
+  process.env.FAKE_GRANDCHILD = '1';
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+  });
+  let client = null;
+  try {
+    client = await TestClient.connect(`ws://127.0.0.1:${h.port}/ws?token=${TOKEN}`);
+    client.send({ type: 'start', startId: 'cl_kill', cwd: tmpRoot });
+    const started = await client.next((m) => m.type === 'started' && m.startId === 'cl_kill');
+    const cliPid = started.initInfo.pid;
+    const grandPid = started.initInfo.grandchildPid;
+    assert.ok(cliPid, 'fake CLI가 진단 필드로 pid를 보고해야 한다');
+    assert.ok(grandPid, 'FAKE_GRANDCHILD=1이면 손자 pid도 보고해야 한다');
+    assert.equal(pidAlive(cliPid), true);
+    assert.equal(pidAlive(grandPid), true);
+
+    await h.close();
+
+    // 핵심 계약: close()가 resolve된 **시점에** 이미 죽어 있어야 한다.
+    assert.equal(pidAlive(cliPid), false, 'close() 이후 CLI 프로세스가 남으면 안 된다');
+    // 손자는 트리 종료(win: taskkill /T · posix: 프로세스 그룹)로만 잡힌다.
+    await waitPidDead(grandPid);
+  } finally {
+    client?.close();
+    await h.close();
+    delete process.env.FAKE_GRANDCHILD;
+    process.env.FAKE_SCENARIO = 'echo';
+  }
+});
+
+test('(z2) close()가 원격 제어 정리를 기다리는 동안 시작된 세션은 거부된다', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  // 원격 제어 정리를 우리가 풀어 줄 때까지 붙잡는다 — 실제로 최대 12초 열려 있는
+  // 창이다. 그 사이 태어난 세션은 stopAll의 순회 밖이라 그대로 고아가 된다.
+  let release = null;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const rc = fakeRemoteControl();
+  const blockingRc = { ...rc, closeAll: async () => { await gate; return rc.closeAll(); } };
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    remoteControl: blockingRc,
+  });
+  const client = await TestClient.connect(`ws://127.0.0.1:${h.port}/ws?token=${TOKEN}`);
+  try {
+    const closing = h.close(); // await하지 않는다 — rc 정리에 걸려 있는 상태
+    client.send({ type: 'start', startId: 'cl_late', cwd: tmpRoot });
+    const err = await client.next((m) => m.type === 'error' && m.startId === 'cl_late');
+    assert.match(err.message, /shutting down/);
+    release();
+    await closing;
+  } finally {
+    client.close();
+    release();
+    await h.close();
+  }
+});

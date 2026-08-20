@@ -16,6 +16,8 @@ export class SessionHub extends EventEmitter {
   /** @type {Map<string, {key, session, ring: {seq,payload}[], nextSeq, pendingPermissions: Map, exited, exitCode}>} */
   #sessions = new Map();
   #nextKey = 0;
+  // 종료가 시작됐는가 — 서 있으면 새 세션을 받지 않는다. beginClosing() 주석 참조.
+  #closing = false;
 
   constructor({ cliPath, cliArgsPrefix = [], ringLimit = RING_LIMIT, exitedRetentionMs = EXITED_RETENTION_MS } = {}) {
     super();
@@ -26,8 +28,20 @@ export class SessionHub extends EventEmitter {
     this.#exitedRetentionMs = exitedRetentionMs;
   }
 
+  /**
+   * 종료 시작 선언 — 이후 startSession()은 거부된다. 멱등.
+   *
+   * server.close()가 **가장 먼저** 부른다. stopAll()에서야 세우면 늦다: close()는
+   * 그 전에 원격 제어 정리를 최대 12초 기다리고, 그 창에서 시작된 세션은 stopAll()의
+   * 순회 밖에서 태어나 그대로 고아가 된다(codex 지적).
+   */
+  beginClosing() {
+    this.#closing = true;
+  }
+
   /** 새 CLI 세션을 spawn하고 initialize 왕복까지 마친 뒤 { key, initInfo } 반환. */
   async startSession({ cwd, model, permissionMode, effort, ultracode, resumeSessionId } = {}) {
+    if (this.#closing) throw new Error('server is shutting down');
     const session = new ClaudeSession({
       cliPath: this.#cliPath,
       cliArgsPrefix: this.#cliArgsPrefix,
@@ -86,7 +100,10 @@ export class SessionHub extends EventEmitter {
       return { key, initInfo, effort: session.effort ?? null, ultracode: session.ultracode };
     } catch (err) {
       this.#sessions.delete(key);
-      session.stop();
+      // 장부에서 지운 프로세스는 stopAll()의 추적 밖이다 — 여기서 끝까지 정리하지
+      // 않으면 초기화에 실패한 CLI가 아무도 죽일 수 없는 고아로 남는다(codex 지적).
+      // 이미 죽은 프로세스면 terminate는 즉시 돌아온다.
+      await session.terminate().catch(() => {});
       throw err;
     }
   }
@@ -249,10 +266,24 @@ export class SessionHub extends EventEmitter {
     this.#require(key).session.stop();
   }
 
-  stopAll() {
+  /**
+   * 모든 세션을 완전히 종료하고 **실제 사망을 확인할 때까지** 기다린다(데몬 종료 경로).
+   *
+   * 예전에는 stop()만 뿌리고 즉시 반환했다 — 호출측이 곧바로 process.exit()하면
+   * stop()의 unref된 kill 타이머는 발화하지 못하고, Windows에서는 부모가 죽어도
+   * 자식이 살아남아 진행 중이던 claude 프로세스가 계속 돌았다. 그래서 async다.
+   *
+   * @returns {Promise<boolean>} 모든 세션의 사망을 확인했으면 true
+   */
+  async stopAll() {
+    // 방어 — 호출측이 beginClosing()을 건너뛴 경로에서도 새 세션은 막는다.
+    this.#closing = true;
+    const pending = [];
     for (const entry of this.#sessions.values()) {
       if (entry.cleanupTimer) clearTimeout(entry.cleanupTimer);
-      entry.session.stop();
+      pending.push(entry.session.terminate());
     }
+    const results = await Promise.allSettled(pending);
+    return results.every((r) => r.status === 'fulfilled' && r.value !== false);
   }
 }

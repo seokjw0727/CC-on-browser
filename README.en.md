@@ -166,6 +166,9 @@ Already running (v1.8.0) on port 8787 — opened a new browser tab.
    sessions are protected). Transcripts live in `~/.claude`, so history survives
    server restarts.
 8. **Quit** — close every tab and the server stops ~10s later (`--no-open`: Ctrl+C).
+   **Running CLI sessions end with it**: the server waits until the session process
+   and its children (shells, MCP servers) are really gone before it exits. To leave a
+   long task running while closing the browser, turn remote control on first.
    Suspend/lid-close is not treated as quitting.
 
 ## Troubleshooting

@@ -22,6 +22,10 @@ const VERSION_TIMEOUT_MS = 3_000;
 // close()가 원격 제어 자식 정리를 기다리는 상한. remote-control.js의 stop 유예
 // (기본 5초 × 2단계)보다 넉넉하되, 사용자가 체감할 만큼 길지는 않게.
 const CLOSE_REMOTE_GRACE_MS = 12_000;
+// close()가 CLI 세션 종료를 기다리는 상한. ClaudeSession.terminate의 내부 유예
+// (우아한 종료 3초 + 강제 킬 확인 2초)보다 넉넉하게 잡는다 — 상한이 강제 킬보다
+// 먼저 걸리면 "기다렸다"는 사실만 남고 고아는 그대로 남아, 이 기능이 무의미해진다.
+const CLOSE_SESSIONS_GRACE_MS = 10_000;
 const USAGE_CACHE_MS = 30_000;
 const QUOTA_CACHE_MS = 60_000;
 // 일별 집계(돌아보기 잔디)는 최대 1년치 스캔이라 5h/7d보다 캐시를 길게 둔다
@@ -151,6 +155,7 @@ export async function startServer({
   platform = process.platform, // 테스트 주입용 — E2E가 비-Windows UI(cwd 직접 입력 폴백)를 강제
   remoteControl, // 테스트 주입용 — 기본은 remote-control.js의 실제 자식 프로세스 관리자
   closeRemoteGraceMs = CLOSE_REMOTE_GRACE_MS, // 테스트 주입용 — 정리 대기 상한
+  closeSessionsGraceMs = CLOSE_SESSIONS_GRACE_MS, // 테스트 주입용 — 세션 종료 대기 상한
   // 설정 편집 API가 다루는 유일한 파일. 기본은 사용자 전역 ~/.claude/settings.json이며,
   // 테스트는 임시 경로를 주입해 실제 홈 설정을 절대 건드리지 않는다.
   claudeConfigPath = defaultConfigPath(),
@@ -1115,6 +1120,9 @@ export async function startServer({
   const close = () => {
     if (closing) return closing;
     closing = (async () => {
+      // 종료 선언이 가장 먼저다 — 아래 원격 제어 정리를 기다리는 동안(최대 12초)
+      // 시작된 세션은 stopAll()의 순회 밖에서 태어나 고아가 된다(codex 지적).
+      hub.beginClosing();
       try {
         await Promise.race([
           rc.closeAll(),
@@ -1134,16 +1142,41 @@ export async function startServer({
         // 정리 실패를 삼키지 않는다 — 실패는 곧 "자식이 남았을 수 있다"는 뜻이다.
         console.error(`[cc-on-browser] 원격 제어 정리 실패: ${err?.message ?? err}`);
       }
-      hub.stopAll();
-      for (const ws of sockets) {
-        try { ws.terminate(); } catch { /* noop */ }
+      // CLI 세션도 **실제 사망을 확인할 때까지** 기다린다. 이걸 기다리지 않으면
+      // 데몬이 먼저 process.exit()하고, Windows에서는 부모가 죽어도 자식이 살아남아
+      // 진행 중이던 claude 프로세스가 그대로 계속 돈다(고아 — 토큰까지 소모한다).
+      // 상한이 있는 이유는 원격 제어 쪽과 같다: 정리가 걸려도 손쓸 수 없는 데몬으로
+      // 남지는 않아야 한다. 다만 그 상한은 강제 킬이 이미 발행된 뒤에 걸린다.
+      try {
+        const allDead = await Promise.race([
+          hub.stopAll(),
+          new Promise((resolve) => {
+            const t = setTimeout(() => resolve('timeout'), closeSessionsGraceMs);
+            t.unref?.();
+          }),
+        ]);
+        if (allDead !== true) {
+          console.error(
+            '[cc-on-browser] CLI 세션 정리를 확인하지 못한 채 종료합니다 —'
+            + ' `claude` 프로세스가 남았는지 확인해 주세요.',
+          );
+        }
+      } catch (err) {
+        // 정리 실패를 삼키지 않는다 — 실패는 곧 "자식이 남았을 수 있다"는 뜻이다.
+        console.error(`[cc-on-browser] CLI 세션 정리 실패: ${err?.message ?? err}`);
+      } finally {
+        // 어떤 실패에도 리스너는 반드시 놓는다 — 여기서 빠져나가지 못하면 포트를 쥔
+        // 채 응답도 하지 않는 데몬이 되어 사용자가 손쓸 방법이 사라진다.
+        for (const ws of sockets) {
+          try { ws.terminate(); } catch { /* noop */ }
+        }
+        sockets.clear();
+        wss.close();
+        await new Promise((resolve) => {
+          server.close(() => resolve());
+          server.closeAllConnections?.();
+        });
       }
-      sockets.clear();
-      wss.close();
-      await new Promise((resolve) => {
-        server.close(() => resolve());
-        server.closeAllConnections?.();
-      });
     })();
     return closing;
   };

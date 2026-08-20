@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { ClaudeSession } from '../src/claude-session.js';
+import { killTree } from '../src/kill-tree.js';
 
 const fakeCliPath = fileURLToPath(new URL('./fake-cli.mjs', import.meta.url));
 
@@ -504,4 +505,116 @@ test('(g2) setMaxThinkingTokens wire format — subtype/필드명이 실측 프�
   } finally {
     await shutdown(session, exit);
   }
+});
+
+// ── 완전 종료(terminate) ────────────────────────────────────────────────────
+// 배경: stop()은 stdin만 닫고 즉시 반환하며 kill 타이머가 unref돼 있다. 데몬이 곧바로
+// process.exit()하면 그 타이머는 발화하지 못하고, Windows에선 부모가 죽어도 자식이
+// 살아남아 진행 중이던 claude가 고아로 남았다. terminate()는 그 계약을 뒤집는다 —
+// **실제 사망을 확인한 뒤에만** resolve한다.
+
+function alive(pid) {
+  if (pid == null) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitDead(pid, timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (!alive(pid)) return;
+    if (Date.now() >= deadline) throw new Error(`process ${pid} is still alive`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+test('(o) terminate(): stdin EOF를 무시하는 세션도 강제 종료하고 사망을 확인한다', async () => {
+  const session = makeSession('hang');
+  const info = await session.start();
+  const { pid } = info;
+  assert.ok(pid, 'fake CLI가 진단 필드로 pid를 보고해야 한다');
+  assert.equal(alive(pid), true, '시작 직후에는 살아 있어야 한다');
+
+  // graceMs를 짧게 준다 — hang 픽스처는 EOF에 절대 내려가지 않으므로 유예는 낭비다.
+  const dead = await session.terminate({ graceMs: 200, killWaitMs: 5000 });
+  assert.equal(dead, true, 'terminate는 사망을 확인하고 true를 돌려줘야 한다');
+  await waitDead(pid);
+});
+
+test('(o2) terminate()는 멱등 — 두 번 불러도 같은 종료 절차를 공유한다', async () => {
+  const session = makeSession('hang');
+  const info = await session.start();
+  const first = session.terminate({ graceMs: 100, killWaitMs: 5000 });
+  const second = session.terminate({ graceMs: 100, killWaitMs: 5000 });
+  assert.equal(first, second, '두 번째 호출은 진행 중인 Promise를 그대로 돌려준다');
+  assert.equal(await first, true);
+  await waitDead(info.pid);
+});
+
+test('(o3) 이미 종료된 세션의 terminate()는 즉시 true', async () => {
+  const session = makeSession('echo');
+  const exit = trackExit(session);
+  const info = await session.start();
+  session.stop();
+  await exit.promise;
+  await waitDead(info.pid);
+
+  const startedAt = Date.now();
+  assert.equal(await session.terminate(), true);
+  // 유예(3초)를 태우지 않고 곧바로 돌아와야 한다 — 종료 경로의 지연은 사용자가 기다린다.
+  assert.ok(Date.now() - startedAt < 1000, '이미 죽은 프로세스를 기다리지 않는다');
+});
+// 아래 두 건은 트리 종료를 **가짜로** 주입해 관측한다(진짜로 죽이면 호출 여부를
+// 구분할 수 없다). 그래서 각 테스트는 끝에서 진짜 트리 종료로 뒷정리한다 —
+// 안 그러면 살아남은 자식이 테스트 러너의 이벤트 루프를 붙잡는다.
+function spyKillTree() {
+  const calls = [];
+  return { calls, fn: (pid, opts) => { calls.push({ pid, ...opts }); return Promise.resolve(); } };
+}
+
+async function reallyKill(pid) {
+  await killTree(pid, { platform: process.platform, force: true });
+  await waitDead(pid);
+}
+
+test('(o4) stop()의 최후 수단은 트리째 종료한다 — 단일 kill은 CLI의 자식을 남긴다', async () => {
+  process.env.FAKE_SCENARIO = 'hang';
+  const spy = spyKillTree();
+  const session = new ClaudeSession({
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    cwd: process.cwd(),
+    stopKillTimeoutMs: 100, // 5초 유예를 테스트에서 기다릴 이유는 없다
+    killTree: spy.fn,
+  });
+  const info = await session.start();
+  session.stop(); // hang 픽스처는 EOF에 안 내려간다 → 최후 수단이 발화한다
+  await new Promise((resolve) => setTimeout(resolve, 400));
+
+  assert.equal(spy.calls.length, 1, '트리 종료가 정확히 한 번 발화해야 한다');
+  assert.equal(spy.calls[0].pid, info.pid);
+  assert.equal(spy.calls[0].force, true);
+  await reallyKill(info.pid);
+});
+
+test('(o5) terminate()가 실패하면 재시도 여지를 남긴다 — 실패를 캐시하지 않는다', async () => {
+  process.env.FAKE_SCENARIO = 'hang';
+  const spy = spyKillTree(); // 아무것도 죽이지 않는다 = 강제 종료 실패 재현
+  const session = new ClaudeSession({
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    cwd: process.cwd(),
+    killTree: spy.fn,
+  });
+  const info = await session.start();
+  assert.equal(await session.terminate({ graceMs: 50, killWaitMs: 100 }), false);
+  assert.equal(spy.calls.length, 1);
+  // 실패한 결과를 캐시해 버리면 이후 어떤 경로로도 이 프로세스를 죽일 수 없다.
+  assert.equal(await session.terminate({ graceMs: 50, killWaitMs: 100 }), false);
+  assert.equal(spy.calls.length, 2, '두 번째 terminate가 실제로 다시 시도해야 한다');
+  await reallyKill(info.pid);
 });

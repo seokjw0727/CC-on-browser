@@ -29,6 +29,9 @@ import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+// 트리 종료는 CLI 세션(claude-session.js)과 같은 구현을 쓴다 — 한쪽만 고쳐 고아가
+// 남는 일이 없도록 kill-tree.js 한 곳에 둔다.
+import { killTree as defaultKillTree } from './kill-tree.js';
 
 /**
  * cwd 정규화의 **단일 출처**. 이 관리자와 server.js의 keysForCwd가 반드시 같은
@@ -211,39 +214,6 @@ export function sanitizeName(raw, cwd) {
   if (cleaned) return cleaned;
   const base = cwd ? clean(path.basename(cwd)) : '';
   return base || 'cc-on-browser';
-}
-
-/** 기본 트리 종료. win32는 taskkill /T, POSIX는 프로세스 그룹 시그널. */
-function defaultKillTree(pid, { platform, force }) {
-  return new Promise((resolve) => {
-    if (platform === 'win32') {
-      let child;
-      try {
-        child = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
-          stdio: 'ignore',
-          windowsHide: true,
-        });
-      } catch {
-        resolve();
-        return;
-      }
-      child.on('error', () => resolve());
-      child.on('close', () => resolve());
-      return;
-    }
-    // detached로 띄웠으므로 -pid가 프로세스 그룹 전체다.
-    const sig = force ? 'SIGKILL' : 'SIGTERM';
-    try {
-      process.kill(-pid, sig);
-    } catch {
-      try {
-        process.kill(pid, sig);
-      } catch {
-        /* 이미 죽음 */
-      }
-    }
-    resolve();
-  });
 }
 
 /**

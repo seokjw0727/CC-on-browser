@@ -7,6 +7,9 @@
 //   | question(AskUserQuestion — can_use_tool에 requires_user_interaction:true, 실 CLI 2026-07-12 실측 미러)
 //   | bulk(프롬프트 1회당 assistant 텍스트 N개 — 채팅 윈도잉 계약 e2e용)
 //   | preview(cwd에 실제 HTML+CSS를 쓰고 Write→Edit tool_use/result 방출 — 미리보기 e2e용)
+//   | hang(stdin EOF를 무시하고 계속 도는 CLI — "우아한 종료를 거부하는 진행 중인 턴"
+//         재현. 데몬 종료 경로가 강제 트리 종료까지 해내는지 검증하는 유일한 픽스처다.
+//         FAKE_GRANDCHILD=1이면 손자 프로세스를 하나 더 띄워 트리 종료를 관측 가능하게 한다)
 // 관찰용 env:
 //   FAKE_ECHO_DELAY_MS     echo 응답 전 지연(기본 0 — 즉답, 테스트 계약 유지)
 //   FAKE_SUBAGENT_MS       subagent 도구 실행 시간(기본 1500ms, 0 허용)
@@ -18,6 +21,7 @@
 // 지연 중 interrupt가 오면 대기 턴을 취소하고 is_error result로 닫는다(실 CLI 미러).
 import nodeFs from 'node:fs';
 import nodePath from 'node:path';
+import { spawn as nodeSpawn } from 'node:child_process';
 import { createJsonlParser } from '../src/jsonl.js';
 
 // `claude remote-control` 분기 — stream-json 루프에 **들어가기 전에** 처리해야 한다.
@@ -120,6 +124,23 @@ if (scenario === 'start-fail') {
   process.exit(1);
 }
 
+// hang: EOF에도 내려가지 않는 CLI. 이벤트 루프를 붙잡는 실제 핸들이 필요하다 —
+// 미해결 await만으로는 Node가 "버려진 await"로 보고 exit 13으로 끝낸다(위 remote-control
+// 분기의 stayAlive와 같은 이유).
+let grandchildPid = null;
+if (scenario === 'hang') {
+  setInterval(() => {}, 1 << 30);
+  if (process.env.FAKE_GRANDCHILD === '1') {
+    // 손자. stdio를 'ignore'로 둔다 — 우리 stdout 파이프를 물지 않게 해서,
+    // "부모의 close는 정상적으로 오는데 손자만 남는" 상황을 정확히 재현한다.
+    const grandchild = nodeSpawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    grandchildPid = grandchild.pid ?? null;
+  }
+}
+
 let userCount = 0;
 let permCounter = 0;
 // apply_flag_settings의 누적 상태(shallow merge) — 실 CLI엔 되읽을 채널이 없으므로
@@ -219,6 +240,10 @@ function handle(msg) {
             output_style: 'default',
             // 픽스처 전용 진단: spawn argv 에코 (--effort 등 플래그 전달 검증용)
             argv: process.argv.slice(2),
+            // 픽스처 전용 진단: 프로세스 신원. 종료 테스트가 "정말 죽었는가"를
+            // 판정하려면 pid가 필요한데, 서버는 자식 pid를 밖으로 내보내지 않는다.
+            pid: process.pid,
+            grandchildPid,
           },
         },
       });
@@ -655,4 +680,9 @@ function handle(msg) {
 
 const feed = createJsonlParser(handle, () => {});
 process.stdin.on('data', feed);
-process.stdin.on('end', () => process.exit(0));
+process.stdin.on('end', () => {
+  // hang 시나리오만 EOF를 무시한다 — 종료 경로가 stdin EOF에만 기댄다면 이 세션은
+  // 영원히 살아남는다는 사실을, 테스트가 관측할 수 있게 하는 지점.
+  if (scenario === 'hang') return;
+  process.exit(0);
+});
