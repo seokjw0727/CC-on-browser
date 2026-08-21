@@ -8,6 +8,27 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.10.2] - 2026-08-21
+
+> **이 릴리스는 v1.9.5 · v1.10.0 · v1.10.1의 변경 내용을 모두 함께 담습니다.** 세 버전은
+> 태그까지 올라갔지만 아래에서 고친 브라우저 테스트 실패로 릴리스가 만들어지지 못했습니다.
+> 실제로 배포된 마지막 버전은 **v1.9.4**이므로, 거기서 올라오시는 경우 세 버전의 변경(브라우저를
+> 닫을 때의 세션 정리, 실행 중 작업 도크·설정 4탭·사이드바 정보, `/clear`·`/compact` 접기 등)까지
+> 한꺼번에 받게 됩니다. 항목 전체는
+> [CHANGELOG](https://github.com/seokjw0727/CC-on-browser/blob/master/CHANGELOG.md)에 있습니다.
+> (This release carries everything from v1.9.5, v1.10.0 and v1.10.1 as well — all three were
+> tagged but never published, blocked by the browser test fixed below. The last actually
+> published version was v1.9.4, so upgrading from there brings all of it at once; the full
+> list is in the CHANGELOG.)
+>
+> **1.10.2에서 더해진 변경 자체는 제품 동작에 영향이 없습니다.** 릴리스 파이프라인을 세 번
+> 연속 막던 브라우저 테스트 실패를 고친 것입니다 — 개발·테스트용 가짜 스택이 서버에 자기
+> 버전을 알려 주지 않아 화면 상단에 거짓 "버전이 다릅니다" 경고가 떴고, 그 경고가 채팅 맨 위
+> "이전 메시지 더 보기" 버튼을 덮어 클릭 테스트를 흔들고 있었습니다.
+> (What 1.10.2 itself adds has no product-behaviour impact: it fixes the browser test that
+> blocked the last three releases — the dev/E2E fake stack never told the server its own
+> version, so a bogus version-skew toast covered the "load earlier" button.)
+
 ### Fixed
 - **개발·E2E용 가짜 스택(`scripts/dev-fake.mjs`)이 자기 버전을 서버에 알려 주지 않던 것.**
   실제 진입점(`bin/cc-on-browser.mjs`)은 처음부터 `startServer`에 `version`을 넘겼지만 이
@@ -647,7 +668,8 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
-[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.1...HEAD
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.2...HEAD
+[1.10.2]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.1...v1.10.2
 [1.10.1]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.5...v1.10.0
 [1.9.5]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.4...v1.9.5
