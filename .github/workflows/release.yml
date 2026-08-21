@@ -147,7 +147,15 @@ jobs:
             NOTES=$(awk "/^## \\[${TAG#v}\\]/{flag=1;next}/^## \\[/{flag=0}flag" CHANGELOG.md || true)
             gh release create "$TAG" --verify-tag --title "$TAG" --notes "${NOTES:-Release $TAG}"
           fi
-          gh release upload "$TAG" "$TARBALL" "$TARBALL.sha256"
+          # tarball과 체크섬을 나눠 올린다.
+          #  · tarball은 --clobber 없이 — 같은 태그의 배포 산출물을 말없이 갈아치우지
+          #    않는다(위 "체크섬이 다르면 실패" 분기가 지키는 불변 태그 계약과 같은 이유).
+          #  · 체크섬만 --clobber. 이전 실행이 .sha256까지만 올리고 tarball 업로드에서
+          #    죽었다면 위의 "tarball 이미 있음" 분기를 타지 못해 여기로 내려오는데,
+          #    한 줄로 묶어 올리면 남아 있는 체크섬 자산과 충돌해 재실행이 영영 실패한다.
+          #    체크섬은 방금 만든 같은 tarball에서 재계산한 파생 값이라 덮어써도 안전하다.
+          gh release upload "$TAG" "$TARBALL"
+          gh release upload "$TAG" "$TARBALL.sha256" --clobber
 
       - name: Publish to npm (same tarball; explicit skip without NPM_TOKEN)
         if: steps.cfg.outputs.mode == 'publish'

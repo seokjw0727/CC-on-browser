@@ -10,12 +10,16 @@
 // --scenario 는 이 프로세스의 FAKE_SCENARIO 를 설정하는 셸 중립적 방법이다.
 // (POSIX: FAKE_SCENARIO=permission node ... / PowerShell: $env:FAKE_SCENARIO='permission' 도 동작)
 import crypto from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../server/src/server.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
+// bin/cc-on-browser.mjs와 같은 방식으로 자기 버전을 읽는다 — 아래 startServer의
+// version 인자를 위해서다(그 자리의 주석 참조).
+const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
 
 const args = process.argv.slice(2);
 const portIdx = args.indexOf('--port');
@@ -33,6 +37,13 @@ const handle = await startServer({
   cliPath: process.execPath,
   cliArgsPrefix: [path.join(root, 'server', 'test', 'fake-cli.mjs')],
   staticDir: path.join(root, 'client', 'dist'),
+  // 실물 진입점(bin/cc-on-browser.mjs)과 같은 계약 — 이걸 빠뜨리면 server.js의 기본값
+  // version=null이 그대로 /api/bootstrap에 실리고, 클라이언트는 "서버 버전을 모른다"를
+  // 곧 스큐의 증거로 읽어(app-version.js의 versionSkew 참조) 페이지를 열 때마다 거짓
+  // 버전 스큐 에러 토스트를 띄운다. 그 토스트는 화면 상단 중앙에 6초간 떠서 채팅
+  // 최상단의 "이전 메시지 더 보기" 버튼을 덮고, E2E의 클릭을 흔들어 윈도잉 테스트를
+  // 간헐 실패시켰다(v1.9.5~v1.10.1 릴리스 3회 차단). 픽스처는 실물과 같아야 한다.
+  version: pkg.version,
   // FAKE_PROJECTS_ROOT: E2E 전용 — 세션 히스토리 루트를 임시 디렉터리로 갈아 끼운다.
   // 미설정 시 실제 ~/.claude/projects. "지난 세션" 목록·삭제를 테스트하려면 반드시
   // 격리해야 한다 — 그러지 않으면 테스트가 사용자의 진짜 대화 기록을 지운다.

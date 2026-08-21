@@ -8,6 +8,29 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+### Fixed
+- **개발·E2E용 가짜 스택(`scripts/dev-fake.mjs`)이 자기 버전을 서버에 알려 주지 않던 것.**
+  실제 진입점(`bin/cc-on-browser.mjs`)은 처음부터 `startServer`에 `version`을 넘겼지만 이
+  스크립트는 빠뜨려, `/api/bootstrap`이 `version: null`을 돌려줬습니다. 화면은 "서버 버전을
+  모른다"를 곧 버전 스큐의 증거로 읽으므로(의도된 설계), 가짜 스택으로 띄운 화면에는 페이지를
+  열 때마다 붉은 스큐 경고 토스트가 떴습니다. 그 토스트는 상단 중앙에 6초간 떠 채팅 최상단의
+  "이전 메시지 더 보기" 버튼을 덮었고, Playwright의 클릭 대상 검사가 실패·재시도하며 스크롤을
+  흔들어 윈도잉 테스트가 간헐 실패했습니다(v1.9.5·v1.10.0·v1.10.1 릴리스 3회 차단).
+  윈도잉·앵커 보정 로직 자체는 정상이었고 손대지 않았습니다.
+  덤으로, 이 가짜 경고가 가려 놓던 **진짜** 에러 토스트가 이제 보입니다.
+  (The fake dev/E2E stack now reports its own version like the real entry point does.)
+- **릴리스 워크플로의 재실행 경로.** 이전 실행이 체크섬(`.sha256`)만 올리고 tarball 업로드에서
+  죽은 경우, 자산 두 개를 한 번에 올리던 마지막 단계가 남아 있는 체크섬과 충돌해 재실행이
+  영영 실패했습니다. 이제 tarball과 체크섬을 나눠 올립니다 — tarball은 `--clobber` 없이
+  (같은 태그의 배포 산출물을 말없이 갈아치우지 않는다는 계약 유지), 체크섬만 덮어씁니다.
+  (Release re-runs no longer dead-lock on a leftover checksum asset.)
+
+### Added
+- **버전 배선 회귀 가드(E2E).** 정보 모달에서 "데몬 버전"이 채워져 있고 번들 버전과 같으며
+  스큐 배너가 없음을 단언합니다. 토스트가 아니라 bootstrap이 채운 값을 보므로 토스트의
+  6초 수명과 경합하지 않습니다.
+  (An E2E guard that asserts the daemon version actually arrives from `/api/bootstrap`.)
+
 ## [1.10.1] - 2026-08-21
 
 > 탭을 모두 닫으면 실행 중이던 `claude` 세션도 확실히 함께 끝납니다. 데몬이 내려가기 전에

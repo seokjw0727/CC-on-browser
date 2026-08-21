@@ -161,6 +161,30 @@ test('정보 모달 — 앱·데몬·CLI 버전을 bootstrap 한 번으로 채�
   // 포트는 실제로 떠 있는 서버의 것이라 반드시 값이 있다 — '알 수 없음'이면 배선이 끊긴 것.
   const port = new URL(servers.echo.url).port;
   await expect(info.locator('.info-value', { hasText: new RegExp(`^${port}$`) })).toBeVisible();
+
+  // ----- 버전 배선 회귀 가드 -----
+  // 왜 여기인가: 이 모달은 /api/bootstrap 응답으로만 채워지므로 **열람 자체가 bootstrap
+  // 완료와 동기**다. 스큐를 토스트로 관측하지 않는 것도 의도적이다 — 에러 토스트는 6초
+  // 뒤 스스로 사라져(Toasts.jsx의 TOAST_MS), 언제 재느냐에 따라 결과가 뒤집힌다.
+  const valueOf = (label) =>
+    info.locator('.info-row').filter({ has: page.getByText(label, { exact: true }) }).locator('.info-value');
+
+  // ㉠ 서버가 자기 버전을 아예 안 실었는가 — 이번 회귀의 정확한 모양이다.
+  //    실측: scripts/dev-fake.mjs가 startServer에 version을 넘기지 않아 bootstrap이
+  //    version:null을 돌려줬고, 클라이언트가 그걸 "구버전 데몬"으로 판정해 매 페이지
+  //    로드마다 거짓 스큐 에러 토스트를 띄웠다. 그 토스트가 채팅 상단 "이전 메시지 더
+  //    보기" 버튼을 덮어 윈도잉 E2E의 클릭을 흔들었다(릴리스 3회 차단).
+  //    이 단언은 번들 신선도와 무관하다 — 값의 존재만 본다.
+  await expect(valueOf('데몬 버전')).not.toHaveText(/^알 수 없음$/);
+
+  // ㉡ 사용자에게 보이는 결과까지: 스큐 경고가 없어야 한다. 배너는 토스트와 달리
+  //    사라지지 않으므로 시간 경합이 없다. 다만 이 단언은 client/dist가 지금
+  //    package.json 버전으로 빌드돼 있음을 전제한다 — 번들 버전은 빌드 시각에 박힌다.
+  //    (ci.yml은 e2e 앞에 npm run build를, release.yml은 npm pack을 먼저 돌리므로 CI는
+  //     항상 만족한다. 로컬에서 버전을 올린 뒤 빌드를 건너뛰면 여기서 걸린다 — 의도된 신호다.)
+  await expect(valueOf('데몬 버전')).toHaveText(await valueOf('앱(번들) 버전').innerText());
+  await expect(info.locator('.info-skew')).toHaveCount(0);
+
   await expect(info.getByRole('link', { name: /GitHub/ })).toHaveAttribute('rel', /noopener/);
   await info.getByRole('button', { name: '닫기' }).click();
   await expect(info).toBeHidden();
