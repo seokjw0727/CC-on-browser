@@ -40,6 +40,7 @@ import { MAX_TITLE_LEN, saveTitle, titleFor } from '../lib/session-titles.js';
 import { fmtAgo, fmtBytes, fmtReset, fmtTok } from '../lib/format.js';
 import { buildHeatmap } from '../lib/usage-grid.js';
 import { MODE_CLASS, PERMISSION_MODES } from '../lib/permission-modes.js';
+import { SHAPES, SHAPE_LABEL } from '../lib/ui-shape.js';
 import {
   DEFAULT_MODEL_KEY,
   DEFAULT_MODE_KEY,
@@ -743,7 +744,7 @@ const SETTINGS_TABS = [
   { id: 'update', label: '업데이트' },
 ];
 
-function ThemeSettings({ theme, onSetTheme }) {
+function ThemeSettings({ theme, onSetTheme, shape, onSetShape }) {
   return (
     <div className="settings-panel">
       <div className="setting-row">
@@ -765,6 +766,24 @@ function ThemeSettings({ theme, onSetTheme }) {
           >
             <Icon name="moon" /> 다크
           </button>
+        </div>
+      </div>
+      {/* 색과 독립된 축 — 이 세그먼트 컨트롤 자체도 --r-pill을 쓰므로 누르는 즉시
+          자기 모서리가 바뀌어 결과가 그 자리에서 보인다. */}
+      <div className="setting-row">
+        <span className="setting-label">모서리</span>
+        <div className="seg" role="group" aria-label="모서리 스타일 선택">
+          {SHAPES.map((s) => (
+            <button
+              key={s}
+              type="button"
+              className={shape === s ? 'on' : ''}
+              aria-pressed={shape === s}
+              onClick={() => onSetShape(s)}
+            >
+              {SHAPE_LABEL[s]}
+            </button>
+          ))}
         </div>
       </div>
     </div>
@@ -1068,7 +1087,7 @@ function UpdateSettings() {
 // 실재하는 요소를 가리켜야 하기 때문(Config 편집기와 같은 규칙). 다만 저장 중 탭을
 // 잠그는 편집기와 달리 여기서는 잠그지 않는다: 다른 탭(테마·세션)은 저장 대상과
 // 무관하고, 패널이 계속 마운트돼 있어 저장은 안전하게 끝난다.
-function SettingsPanel({ theme, onSetTheme, onEditConfig, configEditorOpen }) {
+function SettingsPanel({ theme, onSetTheme, shape, onSetShape, onEditConfig, configEditorOpen }) {
   const [tab, setTab] = useState('theme');
   const tabRefs = useRef(new Map());
   const goTab = (id) => {
@@ -1126,7 +1145,14 @@ function SettingsPanel({ theme, onSetTheme, onEditConfig, configEditorOpen }) {
           hidden={tab !== t.id}
           tabIndex={0}
         >
-          {t.id === 'theme' && <ThemeSettings theme={theme} onSetTheme={onSetTheme} />}
+          {t.id === 'theme' && (
+            <ThemeSettings
+              theme={theme}
+              onSetTheme={onSetTheme}
+              shape={shape}
+              onSetShape={onSetShape}
+            />
+          )}
           {t.id === 'session' && <SessionSettings onEditConfig={onEditConfig} />}
           {t.id === 'plugins' && (
             <PluginSettings
@@ -1212,10 +1238,12 @@ const FOOT_PANELS = {
   settings: {
     title: '설정',
     Glyph: SettingsIcon,
-    body: ({ theme, onSetTheme, onEditConfig, configEditorOpen }) => (
+    body: ({ theme, onSetTheme, shape, onSetShape, onEditConfig, configEditorOpen }) => (
       <SettingsPanel
         theme={theme}
         onSetTheme={onSetTheme}
+        shape={shape}
+        onSetShape={onSetShape}
         onEditConfig={onEditConfig}
         configEditorOpen={configEditorOpen}
       />
@@ -1256,8 +1284,8 @@ function SidebarFoot({ openPanel, onToggle }) {
 // 통계·설정·정보 중앙 모달 — 새 세션 모달과 같은 overlay/trap/presence 패턴.
 // 포커스 복원은 useFocusTrap 언마운트 정리가 트리거 버튼으로 되돌린다.
 function FootModal({
-  panel, presenceStatus, onClose, theme, onSetTheme, onEditConfig, inert, configEditorOpen,
-  appInfo, platform, skew,
+  panel, presenceStatus, onClose, theme, onSetTheme, shape, onSetShape,
+  onEditConfig, inert, configEditorOpen, appInfo, platform, skew,
 }) {
   const { state, notify } = useStore();
   const dialogRef = useFocusTrap(true);
@@ -1297,7 +1325,7 @@ function FootModal({
             타입이 되면 렌더마다 새 타입으로 보여 하위 상태(설정 탭 선택 등)가 날아간다. */}
         <div className="modal-body foot-body">
           {body({
-            state, notify, theme, onSetTheme, onEditConfig, configEditorOpen,
+            state, notify, theme, onSetTheme, shape, onSetShape, onEditConfig, configEditorOpen,
             appInfo, platform, skew,
           })}
         </div>
@@ -1318,7 +1346,7 @@ function FootModalPresence({ panel, ...rest }) {
 }
 
 // ----- 사이드바 본체 -----
-export default function Sidebar({ onCollapse, theme, onSetTheme }) {
+export default function Sidebar({ onCollapse, theme, onSetTheme, shape, onSetShape }) {
   const {
     state, dispatch, startSession, stopSession, renameSession, setRemoteControl, notify,
   } = useStore();
@@ -1814,8 +1842,9 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
       />
       </aside>
 
-      {/* 모달은 aside 밖에 렌더 — 사이드바 접힘(.sidebar{display:none}) 시에도
-          컴포저 레포 pill로 열 수 있어야 하므로 display:none 서브트리를 피한다. */}
+      {/* 모달은 aside 밖에 렌더 — 화면 중앙 오버레이라 사이드바 크롬이 아니고,
+          접힘(.sidebar{display:none}) 서브트리 안에 두면 표시 여부가 무관한 상태에
+          묶인다(열린 채 접거나 닫힘 페이드 도중 접으면 통째로 사라진다). */}
       <NewSessionPresence
         open={modalOpen}
         defaultCwd={defaultCwd}
@@ -1891,6 +1920,8 @@ export default function Sidebar({ onCollapse, theme, onSetTheme }) {
         onClose={() => setFootPanel(null)}
         theme={theme}
         onSetTheme={onSetTheme}
+        shape={shape}
+        onSetShape={onSetShape}
         appInfo={bootInfo}
         platform={platform}
         skew={skew}

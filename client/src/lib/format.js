@@ -121,7 +121,7 @@ export function fmtClock(ms) {
   return `${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
 
-// 경로 꼬리 2단 축약 — 세션 이름 표기 관례 (레포 pill·사이드바·접힘 배지 공통)
+// 경로 꼬리 2단 축약 — 세션 이름 표기 관례 (사이드바·접힘 배지 공통)
 export function shortPath(p) {
   if (!p) return '';
   const parts = String(p).split(/[\\/]/).filter(Boolean);

@@ -101,12 +101,18 @@
   --font-mono: 'Monoplex KR', ui-monospace, 'Cascadia Code', Consolas, 'D2Coding',
     monospace;
 
-  /* Radii */
+  /* Radii — 여기 값이 '둥근(pill)' 모서리 스타일이고, :root[data-shape='square']가
+     같은 이름을 각진 값으로 덮는다(lib/ui-shape.js). 새 규칙은 리터럴 대신 이 토큰을
+     써야 두 스타일 모두에 반영된다. */
   --r-pill: 999px;
   --r-lg: 18px;
   --r-md: 12px;
   --r-sm: 8px;
+  --r-xs: 4px; /* 인라인 코드·잔디 칸처럼 아주 작은 모서리 */
   --radius: 12px; /* legacy alias */
+  /* 원형 컨트롤(전송 버튼·스위치 손잡이 등)이 square에서 따라 각지게 하는 토큰.
+     상태 점(.conn-dot/.pulse-dot/.sess-dot)은 '점'이 곧 의미라 50% 리터럴로 남긴다. */
+  --r-round: 50%;
 
   /* Elevation */
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.28);
@@ -123,6 +129,45 @@
   --dur-fast: 120ms;
   --dur-base: 180ms;
   --dur-slow: 220ms;
+}
+
+/* ===== 모서리 스타일: 각진(square) =====
+   색 테마와 독립된 축이라 data-theme 어느 쪽과도 조합된다(선택자가 겹치지 않으므로
+   라이트/다크 규칙과 충돌하지 않는다). 완전한 0이 아니라 아주 작은 반경을 남기는데,
+   0은 안티앨리어싱 없이 픽셀이 튀어 테두리가 거칠어 보이기 때문이다. */
+:root[data-shape='square'] {
+  --r-pill: 6px;
+  --r-lg: 6px;
+  --r-md: 4px;
+  --r-sm: 3px;
+  --r-xs: 2px;
+  --radius: 4px;
+  --r-round: 6px;
+}
+
+/* 토큰으로 환원되지 않는 전용 반경 보정 — 슬라이더 트랙/손잡이처럼 높이에 맞춰
+   손으로 계산한 값들이라 토큰으로 바꾸면 둥근 모드의 생김새가 달라진다. 그래서
+   pill 값은 각 컴포넌트 CSS에 그대로 두고, 각진 모드에서만 여기서 눌러 준다.
+   새로 전용 반경을 쓰는 규칙을 추가하면 이 목록에도 넣어야 한다. */
+:root[data-shape='square'] .effort-slider,
+:root[data-shape='square'] .effort-thumb,
+:root[data-shape='square'] .ir-btn,
+:root[data-shape='square'] .past-del,
+:root[data-shape='square'] .load-earlier.done:focus-visible {
+  border-radius: var(--r-sm);
+}
+:root[data-shape='square'] .effort-fill {
+  border-radius: var(--r-sm) 0 0 var(--r-sm);
+}
+:root[data-shape='square'] .interrupt-recover {
+  border-radius: var(--r-md);
+}
+/* 말풍선은 꼬리 쪽(오른쪽 아래)만 각진 비대칭이라 균일하게 덮으면 꼬리가 사라진다 */
+:root[data-shape='square'] .clawd-bubble {
+  border-radius: var(--r-md) var(--r-md) var(--r-xs) var(--r-md);
+}
+:root[data-shape='square'] .grass-cell {
+  border-radius: var(--r-xs);
 }
 
 :root[data-theme='light'] {
@@ -260,7 +305,7 @@ select:focus {
 }
 *::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   border: 3px solid transparent;
   background-clip: padding-box;
 }
@@ -349,13 +394,46 @@ select:focus {
   border-color: var(--border-strong);
 }
 
-/* 사이드바 접힘 시 우측 상단의 현재 세션 이름 배지 */
-.session-name-badge {
+/* 메인 우측 상단에 떠 있는 컨트롤 묶음 — 권한 모드 셀렉트 + (접힘 시) 세션 이름 배지.
+   절대 위치는 이 래퍼만 갖는다: 공용 .pill-select / .session-name-badge를 직접
+   띄우면 다른 화면(새 세션 모달 등)의 같은 클래스까지 따라 움직인다.
+   shrink-to-fit이라 여백이 클릭을 가로채지 않는다. */
+.main-top-right {
   position: absolute;
   top: 14px;
   right: 14px;
   z-index: 5;
-  max-width: min(40%, 340px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 28px); /* 좌우 14px 여백 */
+  /* 항목 사이 gap은 여전히 이 상자의 일부라 아래 채팅의 클릭·휠을 삼킨다 —
+     상자는 통과시키고 자식만 받는다(.toast-stack과 같은 패턴). */
+  pointer-events: none;
+}
+.main-top-right > * {
+  pointer-events: auto;
+}
+/* 사이드바가 접혔을 때만 좌측 상단 .sidebar-reopen(34px + 14px 여백) 자리를 비운다 —
+   펼쳐져 있으면 그 버튼이 없어서 미리 빼 두면 좁은 창에서 괜히 잘린다. */
+.sidebar-collapsed .main-top-right {
+  max-width: calc(100% - 76px);
+}
+/* 좁은 창에서 미리보기는 3열이 아니라 fixed 오버레이로 뜬다(App.jsx의 overlay) —
+   그 패널이 우측 상단을 통째로 덮어 권한 모드 셀렉트를 클릭할 수 없게 된다.
+   배지만 있던 시절엔 미관 문제였지만 지금은 조작 컨트롤이라 기능이 막힌다.
+   폭 식은 아래 .app.preview-overlay .preview-col과 글자 그대로 같아야 한다. */
+.app.preview-overlay .main-top-right {
+  right: calc(min(var(--preview-width, 480px), 100vw) + 14px);
+  max-width: calc(100% - min(var(--preview-width, 480px), 100vw) - 28px);
+}
+
+/* 사이드바 접힘 시 현재 세션 이름 배지 (.main-top-right가 위치를 잡는다).
+   좁아지면 권한 모드보다 이름 배지가 먼저 줄어든다(shrink 3 vs 1). */
+.session-name-badge {
+  flex: 0 3 auto;
+  min-width: 0;
+  max-width: 340px;
   height: 34px;
   /* flex면 익명 flex item에 ellipsis가 안 걸린다 — block + line-height 정렬 */
   display: block;
@@ -371,6 +449,29 @@ select:focus {
   text-overflow: ellipsis;
   white-space: nowrap;
   animation: enter-fade var(--dur-base) var(--ease-out) both;
+}
+
+/* 떠 있는 권한 모드 셀렉트. mode-* 색은 반투명 틴트라(color-mix … transparent)
+   채팅 위에 그냥 얹으면 글자가 비쳐 읽히지 않는다 — 래퍼에 불투명 surface를 깔아
+   그 위에서 합성되게 한다. 배지와 높이(34px)를 맞춘다. */
+.perm-mode-float {
+  /* 아주 좁은 창에서는 화면 밖으로 넘치는 대신 줄어든다(최소 96px는 남긴다) */
+  flex: 0 1 auto;
+  min-width: 96px;
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  animation: enter-fade var(--dur-base) var(--ease-out) both;
+}
+.perm-mode-float .pill-select {
+  height: 34px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 떠 있는 컨트롤이 첫 메시지를 가리지 않게 스크롤 영역 위를 비워 둔다(14+34+8). */
+.main.has-top-controls .chat-scroll {
+  padding-top: 56px;
 }
 
 /* ===== Shared bits ===== */
@@ -461,10 +562,6 @@ select:focus {
 .pill:hover:not(:disabled):not([aria-disabled='true']) {
   color: var(--text);
   border-color: var(--border-strong);
-}
-.pill .pill-ico {
-  opacity: 0.75;
-  flex: none;
 }
 .pill .truncate {
   overflow: hidden;

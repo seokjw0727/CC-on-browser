@@ -64,21 +64,23 @@ function iconNamesReferencedIn(rawSrc) {
 }
 
 /**
- * 설계도 §3-1이 확정한 29종. 이름 자체를 여기 박아 두지 않으면 "29개이고 kebab-case이며
- * 전부 참조된다"만 지켜진 채 승인되지 않은 이름으로 갈아치워도 통과한다(codex 지적).
+ * 설계도 §3-1이 확정한 29종에서 'cloud'가 빠진 28종 — 컴포저의 workspace(레포) pill이
+ * 유일한 사용처였고, 그 pill이 사라지면서 아이콘도 함께 내렸다.
+ * 이름 자체를 여기 박아 두지 않으면 "N개이고 kebab-case이며 전부 참조된다"만 지켜진 채
+ * 승인되지 않은 이름으로 갈아치워도 통과한다(codex 지적).
  */
 const APPROVED_ICON_NAMES = [
   'menu', 'chevron-left', 'chevron-down', 'chevron-up', 'close', 'check',
   'arrow-up', 'arrow-down', 'stop', 'retry', 'undo', 'edit', 'external', 'trash', 'folder-open',
-  'warning', 'info', 'blocked', 'compress', 'cloud', 'bolt',
+  'warning', 'info', 'blocked', 'compress', 'bolt',
   'folder', 'document', 'phone', 'bot', 'broom', 'command', 'sun', 'moon',
 ];
 
-test('아이콘이 정확히 29종 정의돼 있다', () => {
-  assert.equal(ICON_NAMES.length, 29);
+test('아이콘이 정확히 28종 정의돼 있다', () => {
+  assert.equal(ICON_NAMES.length, 28);
 });
 
-test('정의된 이름이 설계도가 승인한 29종과 정확히 일치한다', () => {
+test('정의된 이름이 설계도가 승인한 28종과 정확히 일치한다', () => {
   assert.deepEqual([...ICON_NAMES].sort(), [...APPROVED_ICON_NAMES].sort());
 });
 
@@ -110,7 +112,7 @@ test('Sidebar.jsx 세션 메뉴가 내보내는 icon 값은 전부 ICON_PATHS에
   }
 });
 
-test('정의된 29종 중 어디서도 쓰이지 않는 이름이 없다', () => {
+test('정의된 28종 중 어디서도 쓰이지 않는 이름이 없다', () => {
   const used = new Set();
   for (const file of walk(SRC)) {
     for (const name of iconNamesReferencedIn(readFileSync(file, 'utf8'))) used.add(name);

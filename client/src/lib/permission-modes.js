@@ -1,4 +1,5 @@
-// 권한 모드의 한국어 표기·색 클래스 — 컴포저 pill과 새 세션 모달이 공유한다.
+// 권한 모드의 한국어 표기·색 클래스 — 메인 우측 상단 셀렉트(PermissionModeBar)와
+// 새 세션 모달이 공유한다.
 // 색 규약(사용자 지정): 기본모드 무색, 자동모드 파랑, 플랜모드 초록, 신뢰모드 빨강
 // (select.mode-* 규칙은 interact.css).
 export const MODES = ['default', 'acceptEdits', 'plan', 'bypassPermissions'];

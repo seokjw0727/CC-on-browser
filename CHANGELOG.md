@@ -8,6 +8,37 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+### Added
+- **모서리 스타일(둥근/각진)을 고를 수 있습니다.** 설정 → 테마에 '모서리' 항목이 생겼습니다.
+  기본값은 지금까지와 같은 **둥근(pill)**이고, **각진(square)**을 고르면 버튼·칩·카드·입력창·
+  모달까지 화면 전체가 함께 각져집니다. 색 테마와는 완전히 독립된 축이라 라이트·다크 어느
+  쪽과도 조합되며, 한쪽을 바꿔도 다른 쪽을 덮어쓰지 않습니다. 선택은 브라우저에 저장되고
+  페이지를 열 때 **첫 그림부터** 적용되므로 새로고침할 때 이전 모양이 한 번 번쩍이지
+  않습니다. 상태 점처럼 '동그라미'가 곧 뜻인 요소는 각진 모드에서도 원형으로 남습니다.
+  (New 모서리 setting in 설정 → 테마 — pill (default, unchanged) or square, applied across
+  the whole UI through the radius tokens and fully independent of light/dark.)
+
+### Changed
+- **권한 모드가 입력창을 떠나 화면 우측 상단으로 갔습니다.** 대화가 길어져 입력창이
+  커지거나 스크롤을 올려도 지금 어떤 권한 모드인지가 늘 같은 자리에 보입니다. 고르는 방법과
+  동작은 그대로입니다 — 신뢰모드는 여전히 세션을 시작할 때만 들어갈 수 있고, 연결이 끊긴
+  상태에서는 화면만 바뀌지 않도록 잠깁니다. 사이드바를 접었을 때 뜨던 세션 이름 배지와 한
+  줄에 나란히 놓이며, 창이 좁아지면 이름 배지가 먼저 줄어듭니다.
+  (The permission-mode selector moved out of the composer to the top-right of the main area,
+  where it stays visible regardless of composer height or scroll position.)
+- **알림 토스트가 조금 아래에서 뜹니다.** 예전 위치(위에서 14px)는 새로 생긴 우측 상단
+  컨트롤과 같은 띠라, 권한 모드를 바꾼 직후 그 변경 토스트가 방금 누른 셀렉트를 덮어
+  연달아 조작할 수 없었습니다.
+  (Toasts now start below the new top control rail instead of overlapping it.)
+
+### Removed
+- **입력창 위의 workspace(레포) pill을 없앴습니다.** 새 세션은 사이드바의 '+ 새 세션'
+  하나로만 들어갑니다 — 같은 일을 하는 입구가 둘이었고, 현재 작업 디렉터리는 사이드바
+  세션 목록과 (접었을 때는) 우측 상단 배지가 이미 보여 주고 있었습니다. 이에 맞춰 세션이
+  없을 때의 빈 화면 안내도 "아래에서 레포를 고르고"에서 사이드바를 가리키도록 고쳤습니다.
+  (The workspace/repo pill is gone from the composer; the sidebar's '+ 새 세션' is now the
+  single entry point, and the empty-state hint points there instead of at the old pill.)
+
 ## [1.10.2] - 2026-08-21
 
 > **이 릴리스는 v1.9.5 · v1.10.0 · v1.10.1의 변경 내용을 모두 함께 담습니다.** 세 버전은

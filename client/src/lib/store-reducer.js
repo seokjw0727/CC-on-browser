@@ -102,7 +102,7 @@ export function createInitialState() {
     // 지원하지 않는 구버전 CLI의 폴백에서만 쓰인다.
     pendingStarts: new Map(),
     toasts: [], // [{id, kind: 'info'|'error', text}] — 설정 변경·오류의 일시 알림(자동 소멸)
-    newSessionOpen: false, // 새 세션(레포 선택) 모달 표시 여부 — Sidebar/Composer 공용
+    newSessionOpen: false, // 새 세션(레포 선택) 모달 표시 여부 — 진입점은 사이드바뿐
     globalUsage: null, // /api/usage 폴링 결과 — 로컬 5h/7d 집계 + 공식 quota(실패 시 null), 상태줄 표시용
     // 디버그 raw 이벤트 표시(사이드바 설정 토글) — localStorage 'ccob-debug' 미러.
     // 리듀서는 순수 유지: localStorage 읽기/쓰기는 store.jsx(초기 동기화·setDebug)의 몫.

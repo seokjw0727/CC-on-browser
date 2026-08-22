@@ -1,6 +1,7 @@
 // App shell: Sidebar (left, collapsible) + main (ChatView + Composer).
-// No persistent top bar — session/model/permission/usage controls live in
-// the composer (reference-faithful). PermissionDialog is a modal.
+// 상시 상단 바는 없지만, 메인 우측 상단에 떠 있는 컨트롤 묶음(.main-top-right)이
+// 권한 모드 셀렉트와 (사이드바가 접혔을 때) 세션 이름 배지를 담는다.
+// 모델·노력·사용량은 여전히 컴포저에 있다. PermissionDialog는 모달.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StoreProvider, useStore, useActiveSession } from './lib/store.jsx';
@@ -8,16 +9,22 @@ import { fetchUsage } from './lib/api.js';
 import { shortPath } from './lib/format.js';
 import { sessionDisplayTitle } from './lib/sessionTree.js';
 import { artifactsOf, findArtifact } from './lib/artifacts.js';
+import { normalizeShape } from './lib/ui-shape.js';
+import { readPref, writePref } from './lib/preferences.js';
 import ChatView from './components/ChatView.jsx';
 import Composer from './components/Composer.jsx';
 import Icon from './components/Icon.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import PermissionDialog from './components/PermissionDialog.jsx';
+import PermissionModeBar from './components/PermissionModeBar.jsx';
 import PreviewPanel from './components/PreviewPanel.jsx';
 import Toasts from './components/Toasts.jsx';
 import TooltipLayer from './components/Tooltip.jsx';
 
 const THEME_KEY = 'ccob-theme';
+// 모서리 스타일(둥근/각진) — 색 테마와 별개의 키로 둔다. 하나를 바꿔도 다른 하나가
+// 덮어써지지 않아야 하기 때문.
+const SHAPE_KEY = 'ccob-shape';
 const USAGE_POLL_MS = 60_000;
 // 미리보기 패널 폭. **열림 상태는 영속하지 않는다** — 새로고침하면 세션 상태가
 // 없어 빈 패널만 남기 때문이다(설계도 §2 App.jsx).
@@ -49,9 +56,10 @@ function maxPreviewWidth(sidebarOpen) {
 function Shell() {
   const { state, dispatch } = useStore();
   const session = useActiveSession();
-  const [theme, setTheme] = useState(
-    () => localStorage.getItem(THEME_KEY) || 'dark',
-  );
+  // 저장소 접근은 차단 컨텍스트(3rd-party 쿠키 차단 등)에서 던진다 — 렌더 중에
+  // 새어 나가면 앱 전체가 뜨지 않으므로 두 축 모두 감싼다.
+  const [theme, setTheme] = useState(() => readPref(THEME_KEY) || 'dark');
+  const [shape, setShape] = useState(() => normalizeShape(readPref(SHAPE_KEY)));
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [previewWidth, setPreviewWidth] = useState(readStoredWidth);
   // 좁은 창에서는 오버레이 — 3열을 유지하면 채팅이 읽을 수 없을 만큼 눌린다.
@@ -59,10 +67,17 @@ function Shell() {
     () => typeof window !== 'undefined' && window.innerWidth < PREVIEW_OVERLAY_MAX_VW,
   );
 
+  // 첫 페인트 값은 index.html의 인라인 부트스트랩이 이미 걸어 뒀다 — 여기서는
+  // 이후 변경만 반영한다(모서리는 radius 토큰만 갈아끼우므로 data-shape 하나로 끝).
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem(THEME_KEY, theme);
+    writePref(THEME_KEY, theme);
   }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.dataset.shape = shape;
+    writePref(SHAPE_KEY, shape);
+  }, [shape]);
 
   // 상태줄용 5h/7d 사용량 폴링 — 실패는 조용히 넘기고 다음 주기에 재시도
   useEffect(() => {
@@ -169,10 +184,16 @@ function Shell() {
       }`}
       style={previewOpen ? { '--preview-width': `${previewWidth}px` } : undefined}
     >
-      {/* 테마 변경은 사이드바 설정 팝업에서 제공한다. */}
-      <Sidebar onCollapse={() => setSidebarOpen(false)} theme={theme} onSetTheme={setTheme} />
+      {/* 테마(색·모서리) 변경은 사이드바 설정 팝업에서 제공한다. */}
+      <Sidebar
+        onCollapse={() => setSidebarOpen(false)}
+        theme={theme}
+        onSetTheme={setTheme}
+        shape={shape}
+        onSetShape={setShape}
+      />
 
-      <main className="main">
+      <main className={`main${session ? ' has-top-controls' : ''}`}>
         {!sidebarOpen && (
           <button
             type="button"
@@ -184,17 +205,23 @@ function Shell() {
             <Icon name="menu" />
           </button>
         )}
-        {/* 사이드바가 접히면 세션 목록이 안 보이므로 우측 상단에 현재 세션 이름을 띄운다.
-            이름 규칙은 사이드바 라이브 행과 같은 함수를 공유한다(사용자가 지정한 이름 →
-            첫 발화 요약 → sessionId 앞 8자 → '새 세션') + 보조로 작업 디렉터리 꼬리. */}
-        {!sidebarOpen && session && (
-          <div className="session-name-badge" data-tip={session.cwd || session.key}>
-            {sessionDisplayTitle({
-              customTitle: session.customTitle,
-              messages: session.messages,
-              sessionId: session.sessionId,
-            })}
-            {shortPath(session.cwd) ? ` · ${shortPath(session.cwd)}` : ''}
+        {/* 떠 있는 우측 상단 컨트롤. 권한 모드는 세션이 있으면 항상, 세션 이름 배지는
+            사이드바가 접혀 세션 목록이 안 보일 때만 — 둘을 한 flex 행에 묶어 서로
+            겹치지 않게 한다. 이름 규칙은 사이드바 라이브 행과 같은 함수를 공유한다
+            (지정한 이름 → 첫 발화 요약 → sessionId 앞 8자 → '새 세션') + 작업 디렉터리 꼬리. */}
+        {session && (
+          <div className="main-top-right">
+            {!sidebarOpen && (
+              <div className="session-name-badge" data-tip={session.cwd || session.key}>
+                {sessionDisplayTitle({
+                  customTitle: session.customTitle,
+                  messages: session.messages,
+                  sessionId: session.sessionId,
+                })}
+                {shortPath(session.cwd) ? ` · ${shortPath(session.cwd)}` : ''}
+              </div>
+            )}
+            <PermissionModeBar />
           </div>
         )}
         <ChatView />

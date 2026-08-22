@@ -8,6 +8,19 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="theme-color" content="#1e1c1a" />
     <title>Claude Code on Browser</title>
+    <!-- 첫 페인트 전에 저장된 테마·모서리를 걸어 둔다. React가 마운트된 뒤 effect에서
+         걸면 라이트/각진을 쓰는 사용자에게 한 프레임 동안 다크·둥근이 번쩍인다.
+         값 검증은 하지 않는다 — 모르는 값은 어느 오버라이드에도 안 걸려 기본값으로
+         떨어지고, 곧바로 App.jsx의 normalizeShape가 정본으로 덮어쓴다. -->
+    <script>
+      try {
+        var d = document.documentElement.dataset;
+        d.theme = localStorage.getItem('ccob-theme') || 'dark';
+        d.shape = localStorage.getItem('ccob-shape') || 'pill';
+      } catch (e) {
+        /* 저장소 차단 — 기본값(다크·둥근)으로 둔다 */
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
