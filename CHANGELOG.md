@@ -8,6 +8,17 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.10.3] - 2026-08-23
+
+> 화면 크롬 정리입니다. 입력창 위의 레포 pill을 걷어내 새 세션 진입을 사이드바
+> 하나로 모으고, 권한 모드는 반대로 입력창 밖 화면 우측 상단으로 꺼내 항상 같은
+> 자리에 두었습니다. 설정 → 테마에는 색(라이트/다크)과 별개로 **모서리 모양**을
+> 고르는 축이 생겨, 지금까지의 둥근 UI를 각진 UI로 통째로 바꿀 수 있습니다.
+> (Screen-chrome cleanup: the repo pill leaves the composer so the sidebar is the single
+> new-session entry point, the permission-mode selector moves out to a fixed spot at the
+> top-right, and 설정 → 테마 gains a corner-shape axis — rounded or square — independent
+> of light/dark.)
+
 ### Added
 - **모서리 스타일(둥근/각진)을 고를 수 있습니다.** 설정 → 테마에 '모서리' 항목이 생겼습니다.
   기본값은 지금까지와 같은 **둥근(pill)**이고, **각진(square)**을 고르면 버튼·칩·카드·입력창·
@@ -699,7 +710,8 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
-[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.2...HEAD
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.3...HEAD
+[1.10.3]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.2...v1.10.3
 [1.10.2]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.1...v1.10.2
 [1.10.1]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.9.5...v1.10.0
