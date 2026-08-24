@@ -295,6 +295,7 @@ function NewSessionModal({
     // 세션을 닫으면 같은 이름 그대로 이 목록에 나타난다.
     const title = sessionDisplayTitle({
       customTitle: titleFor(s.sessionId),
+      cliName: s.cliName,
       title: s.title,
       sessionId: s.sessionId,
       fallback: '(제목 없음)',
@@ -1681,9 +1682,11 @@ export default function Sidebar({ onCollapse, theme, onSetTheme, shape, onSetSha
     const remoteLabel = remoteOn
       ? `원격 제어 ${rowRc.state === 'error' ? '실패' : '켜짐'}`
       : null;
-    // 세션 이름 — 사용자가 지정한 이름이 있으면 그것, 없으면 자동 제목(sessionDisplayTitle).
+    // 세션 이름 — 사용자가 지정한 이름이 있으면 그것, 없으면 CLI가 붙인 이름,
+    // 그것도 없으면 자동 제목(sessionDisplayTitle).
     const label = sessionDisplayTitle({
       customTitle: sess?.customTitle,
+      cliName: sess?.cliName,
       messages: sess?.messages,
       sessionId: row.sessionId,
     });
@@ -1958,6 +1961,7 @@ function ConfirmDeleteModal({ target, presenceStatus, busy, restoreRef, onConfir
   // 어긋난다. 이름이 전혀 없을 때만 sessionId 전체를 노출한다.
   const title = sessionDisplayTitle({
     customTitle: titleFor(target.sessionId),
+    cliName: target.cliName,
     title: target.title,
     sessionId: target.sessionId,
     fallback: '(제목 없음)',

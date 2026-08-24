@@ -161,13 +161,33 @@ test('mergeRecentSessions: dirName/sessionId 없는 항목은 제외, 기본 인
   assert.deepEqual(mergeRecentSessions(), []);
   assert.deepEqual(mergeRecentSessions({}), []);
 });
-test('sessionDisplayTitle: 커스텀 이름 → 서버 제목 → 첫 발화 → id 8자 → 폴백', async () => {
+test('sessionDisplayTitle: 커스텀 이름 → CLI 이름 → 서버 제목 → 첫 발화 → id 8자 → 폴백', async () => {
   const { sessionDisplayTitle } = await import('../src/lib/sessionTree.js');
   const messages = [{ kind: 'user-text', text: '첫 발화 요약' }];
-  // ① 사용자가 지정한 이름이 언제나 이긴다
+  // ① 사용자가 지정한 이름이 언제나 이긴다 — CLI 이름보다도 앞이다
   assert.equal(
-    sessionDisplayTitle({ customTitle: ' 내 이름 ', title: '서버 제목', messages, sessionId: 'abcdefgh12' }),
+    sessionDisplayTitle({
+      customTitle: ' 내 이름 ',
+      cliName: 'cc-on-browser-ca',
+      title: '서버 제목',
+      messages,
+      sessionId: 'abcdefgh12',
+    }),
     '내 이름',
+  );
+  // ①-b CLI가 붙인 이름은 서버 제목·첫 발화보다 앞이다
+  assert.equal(
+    sessionDisplayTitle({ cliName: ' cc-on-browser-ca ', title: '서버 제목', messages, sessionId: 'abcdefgh12' }),
+    'cc-on-browser-ca',
+  );
+  // ①-c CLI 이름이 비면 없는 것으로 치고 다음 후보로 내려간다
+  assert.equal(
+    sessionDisplayTitle({ cliName: '   ', title: '서버 제목', messages, sessionId: 'abcdefgh12' }),
+    '서버 제목',
+  );
+  assert.equal(
+    sessionDisplayTitle({ cliName: null, messages, sessionId: 'abcdefgh12' }),
+    '첫 발화 요약',
   );
   // ② 히스토리 행처럼 messages가 없을 때는 서버 제목
   assert.equal(sessionDisplayTitle({ title: '서버 제목', sessionId: 'abcdefgh12' }), '서버 제목');

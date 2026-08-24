@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import { startServer } from '../src/server.js';
 import { saveClipboardFile } from '../src/attachments.js';
+import { clearCliSessionNameCache } from '../src/cli-session-names.js';
 
 const fakeCliPath = fileURLToPath(new URL('./fake-cli.mjs', import.meta.url));
 const TOKEN = 'test-token-abc123';
@@ -1979,6 +1980,91 @@ test('(z2) close()가 원격 제어 정리를 기다리는 동안 시작된 세�
   } finally {
     client.close();
     release();
+    await h.close();
+  }
+});
+
+// CLI 세션 이름(~/.claude/sessions의 name) — 목록 endpoint와 라이브 세션이 **같은**
+// sessionsRoot를 봐야 한다. 주입 경로가 한쪽만 배선되면 여기서 잡힌다.
+test('cliName: /api/sessions·/api/recent-sessions가 주입된 sessionsRoot의 이름을 실어 준다', async () => {
+  const sessionsRoot = path.join(tmpRoot, 'cli-sessions-endpoint');
+  await fs.mkdir(sessionsRoot, { recursive: true });
+  await fs.writeFile(
+    path.join(sessionsRoot, '4321.json'),
+    JSON.stringify({
+      pid: 4321,
+      sessionId: '11111111-1111-1111-1111-111111111111',
+      cwd: 'C:\fake',
+      name: 'cc-on-browser-ec',
+      nameSource: 'derived',
+      nameSince: 7,
+      messagingSocketPath: '\\.\pipe\secret',
+    }),
+    'utf8',
+  );
+  // 이웃 .key 파일은 세션 기록이 아니다 — 목록을 깨뜨리지 않아야 한다.
+  await fs.writeFile(path.join(sessionsRoot, '4321.abcdef.key'), 'not json', 'utf8');
+  clearCliSessionNameCache();
+
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    sessionsRoot,
+    staticDir,
+  });
+  const b = `http://127.0.0.1:${h.port}`;
+  const auth = { headers: { 'x-auth-token': TOKEN } };
+  try {
+    const sessions = await (await fetch(`${b}/api/sessions?dir=C--fake-proj`, auth)).json();
+    assert.equal(sessions[0].cliName, 'cc-on-browser-ec');
+    // 기존 필드는 그대로 — cliName은 title을 대체하지 않는다.
+    assert.equal(sessions[0].title, '제목이 될 텍스트');
+
+    const recent = await (await fetch(`${b}/api/recent-sessions`, auth)).json();
+    assert.equal(recent[0].cliName, 'cc-on-browser-ec');
+    // 이름 말고는 아무것도 브라우저로 나가지 않는다 — pid·cwd·소켓 경로·nameSource 금지.
+    // (cwd는 트랜스크립트에서 뽑은 기존 필드라 별개로 존재한다 — 이름 기록에서 온 것이
+    //  아님을 값으로 구분할 수 없으므로, 이름 기록에만 있는 필드들로 확인한다.)
+    for (const row of recent) {
+      assert.equal(row.pid, undefined);
+      assert.equal(row.nameSource, undefined);
+      assert.equal(row.nameSince, undefined);
+      assert.equal(row.messagingSocketPath, undefined);
+    }
+  } finally {
+    await h.close();
+  }
+});
+
+test('cliName: 이름을 못 찾은 라이브 세션은 sessionName을 방송하지 않는다', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  // 빈 디렉터리 — fake CLI의 sessionId('fake-session-1')에 해당하는 이름 기록이 없다.
+  const sessionsRoot = path.join(tmpRoot, 'cli-sessions-empty');
+  await fs.mkdir(sessionsRoot, { recursive: true });
+  clearCliSessionNameCache();
+
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    sessionsRoot,
+    staticDir,
+  });
+  const client = await TestClient.connect(`ws://127.0.0.1:${h.port}/ws?token=${TOKEN}`);
+  try {
+    client.send({ type: 'start', startId: 'sn1', cwd: process.cwd() });
+    const started = await client.next((m) => m.type === 'started' && m.startId === 'sn1');
+    assert.ok(started.key);
+    // 이름이 없으면 조용해야 한다 — 빈 이름을 방송해 표시를 지우면 안 된다.
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(client.messages.some((m) => m.type === 'sessionName'), false);
+  } finally {
+    client.close();
     await h.close();
   }
 });

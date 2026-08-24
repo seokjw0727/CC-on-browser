@@ -86,7 +86,10 @@ if (process.argv.includes('remote-control')) {
 }
 
 const scenario = process.env.FAKE_SCENARIO || 'echo';
-const SESSION_ID = 'fake-session-1';
+// 실 CLI는 /clear·포크에서 새 session_id를 보고한다. FAKE_FORK_SESSION_ID를 주면 첫 턴
+// 이후의 result가 그 id를 실어, 세션 도중 id가 바뀌는 경로를 재현할 수 있다.
+let SESSION_ID = 'fake-session-1';
+const FORK_SESSION_ID = process.env.FAKE_FORK_SESSION_ID || '';
 // 실 CLI v2.1.205 initialize 응답 미러(2026-07-08 E2E 캡처, 2026-07-11 실 캡처로 재확인 —
 // 완전 일치). init/assistant의 모델 해석에도 재사용하므로 상수로 분리.
 const MODELS = [
@@ -166,6 +169,8 @@ function out(obj) {
 // turn: 지연 콜백이 나중에 실행돼도 자기 턴 번호를 보존한다(전역 userCount는
 // 그 사이 다음 send로 증가했을 수 있다 — codex 지적).
 function emitResult(text, extra = {}, turn = userCount) {
+  // 포크 재현: 첫 턴을 넘기면 이후 result는 새 id를 보고한다(실 CLI의 /clear·포크 미러).
+  if (FORK_SESSION_ID && turn >= 2) SESSION_ID = FORK_SESSION_ID;
   out({
     type: 'result',
     subtype: 'success',

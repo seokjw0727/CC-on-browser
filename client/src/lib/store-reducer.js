@@ -78,6 +78,10 @@ export function createSessionState(partial = {}) {
     // 쓴다. 리듀서는 순수 유지: localStorage 읽기/쓰기는 store.jsx의 몫이고, 여기엔
     // 화면에 보일 값만 담긴다(debugRaw와 같은 분업).
     customTitle: '',
+    // CLI가 이 세션에 붙인 이름(~/.claude/sessions의 name) — 서버가 sessionId 확정 후
+    // sessionName 메시지로 알려 준다. 사용자 지정 이름 다음, 첫 발화 요약보다 앞에서
+    // 쓰인다(sessionTree.sessionDisplayTitle). ''이면 아직 모르거나 이름이 없는 세션.
+    cliName: '',
     // 결과물 미리보기 패널 — {open, path, suppressed}. path는 산출물의 **원본 절대경로**
     // (표시·티켓 발급에 그대로 쓴다). 산출물 목록 자체는 상태로 두지 않고 messages에서
     // 파생한다(lib/artifacts.js) — 재개·effort 재시작의 이월 경로마다 시딩을 배선하지
@@ -373,6 +377,20 @@ function handleServerMessage(state, msg) {
         // 재접속 리플레이가 이 세션을 되살릴 때까지 수확이 막힌 채로 남는다.
         modelSwitch: null,
       }));
+
+    case 'sessionName':
+      // CLI가 붙인 세션 이름. 서버가 세션 id를 확정한 뒤 한 번 보내고, 재접속 리플레이가
+      // 다시 보낸다(링버퍼 밖의 정보라 event로 오지 않는다 — session-hub 참조).
+      //
+      // 빈 값은 기본적으로 무시한다 — 알려 주는 채널이지 지우는 채널이 아니다. 지우는
+      // 것은 reset:true로만 한다: /clear처럼 세션 id가 바뀌면 옛 id의 이름은 더 이상
+      // 이 세션의 이름이 아니어서, 남겨 두면 화면만 옛 이름을 붙들고 있게 된다.
+      return updateSession(state, msg.key, (s) => {
+        if (msg.reset === true) return s.cliName ? { ...s, cliName: '' } : s;
+        const cliName = typeof msg.cliName === 'string' ? msg.cliName.trim() : '';
+        if (!cliName || cliName === s.cliName) return s;
+        return { ...s, cliName };
+      });
 
     case 'modelSet':
       // 모델 전환이 실행 중 세션에 **실제로 적용됐다**(CLI가 set_model에 success를 준

@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { listProjects, listSessions, loadTranscript, listRecentSessions, deleteSession } from '../src/history.js';
+import { clearCliSessionNameCache } from '../src/cli-session-names.js';
 
 const J = (o) => JSON.stringify(o);
 
@@ -142,6 +143,41 @@ test('listRecentSessions aggregates across projects, mtime desc, with cwd/title'
 test('listRecentSessions returns [] for missing root', async () => {
   const missing = path.join(os.tmpdir(), `cc-recent-none-${Date.now()}`);
   assert.deepEqual(await listRecentSessions(missing), []);
+});
+
+// CLI가 붙인 이름(~/.claude/sessions)은 트랜스크립트에 없다 — 별도 디렉터리를 읽어
+// sessionId로 이어 붙인다. 이름이 없는 세션은 null이어야 한다(표시가 기존 title로 폴백).
+test('listRecentSessions/listSessions join cliName by sessionId', async () => {
+  const { root } = await makeRoot();
+  const sessionsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'cc-names-'));
+  await fs.writeFile(
+    path.join(sessionsRoot, '4321.json'),
+    J({ pid: 4321, sessionId: 'aaaa-1111', name: 'cc-on-browser-ec', nameSource: 'derived', nameSince: 5 }),
+    'utf8',
+  );
+  clearCliSessionNameCache();
+
+  const recent = await listRecentSessions(root, 12, sessionsRoot);
+  const byId = Object.fromEntries(recent.map((r) => [r.sessionId, r]));
+  assert.equal(byId['aaaa-1111'].cliName, 'cc-on-browser-ec');
+  assert.equal(byId['bbbb-2222'].cliName, null); // 이름 파일이 없는 세션
+  // 기존 필드는 그대로다 — cliName은 title을 대체하지 않고 나란히 실린다.
+  assert.equal(byId['aaaa-1111'].title, '제목이 될 텍스트');
+
+  clearCliSessionNameCache();
+  const sessions = await listSessions(root, 'C--fake-project', sessionsRoot);
+  const s = sessions.find((x) => x.sessionId === 'aaaa-1111');
+  assert.equal(s.cliName, 'cc-on-browser-ec');
+  assert.equal(sessions.find((x) => x.sessionId === 'bbbb-2222').cliName, null);
+});
+
+test('cliName is null when the CLI sessions directory does not exist', async () => {
+  const { root } = await makeRoot();
+  clearCliSessionNameCache();
+  const absent = path.join(os.tmpdir(), `cc-names-absent-${process.pid}`);
+  const recent = await listRecentSessions(root, 12, absent);
+  assert.ok(recent.length > 0);
+  assert.ok(recent.every((r) => r.cliName === null));
 });
 
 test('rejects path escape in dirName/sessionId', async () => {

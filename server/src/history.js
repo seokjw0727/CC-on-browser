@@ -2,6 +2,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { readCliSessionNames } from './cli-session-names.js';
 
 const DEFAULT_PROJECTS_ROOT = path.join(os.homedir(), '.claude', 'projects');
 const CWD_SCAN_BYTES = 64 * 1024;
@@ -126,7 +127,9 @@ export async function listProjects(projectsRoot = DEFAULT_PROJECTS_ROOT) {
 
 // 모든 프로젝트 디렉터리의 세션을 모아 mtime 내림차순 상위 N개를 반환한다(새 세션 모달의
 // "최근 세션" 목록용). 상위 N개에 대해서만 head를 읽어 cwd/title을 추출한다(비용 절감).
-export async function listRecentSessions(projectsRoot = DEFAULT_PROJECTS_ROOT, limit = 12) {
+// cliName은 CLI가 붙인 이름(cli-session-names.js) — title(첫 발화 요약)과 별개의 필드로
+// 내려보내고, 어느 쪽을 보여줄지는 클라이언트의 sessionDisplayTitle이 정한다.
+export async function listRecentSessions(projectsRoot = DEFAULT_PROJECTS_ROOT, limit = 12, sessionsRoot) {
   let entries;
   try {
     entries = await fs.readdir(projectsRoot, { withFileTypes: true });
@@ -147,14 +150,17 @@ export async function listRecentSessions(projectsRoot = DEFAULT_PROJECTS_ROOT, l
     for (const file of files) all.push({ dirName: entry.name, dirPath, file });
   }
   all.sort((a, b) => b.file.mtime - a.file.mtime);
+  const cliNames = await readCliSessionNames(sessionsRoot);
   const sessions = [];
   for (const item of all.slice(0, limit)) {
     const head = await readHead(path.join(item.dirPath, item.file.name), TITLE_SCAN_BYTES).catch(() => '');
+    const sessionId = item.file.name.slice(0, -'.jsonl'.length);
     sessions.push({
       dirName: item.dirName,
       cwd: extractCwd(head),
-      sessionId: item.file.name.slice(0, -'.jsonl'.length),
+      sessionId,
       title: extractTitle(head),
+      cliName: cliNames.get(sessionId) ?? null,
       mtime: item.file.mtime,
       fileSize: item.file.size, // listSessionFiles의 stat 재사용 — 추가 I/O 없음
     });
@@ -162,7 +168,7 @@ export async function listRecentSessions(projectsRoot = DEFAULT_PROJECTS_ROOT, l
   return sessions;
 }
 
-export async function listSessions(projectsRoot, dirName) {
+export async function listSessions(projectsRoot, dirName, sessionsRoot) {
   assertSafeName(dirName, 'dirName');
   const root = projectsRoot ?? DEFAULT_PROJECTS_ROOT;
   const dirPath = path.join(root, dirName);
@@ -173,12 +179,15 @@ export async function listSessions(projectsRoot, dirName) {
     if (err && err.code === 'ENOENT') return [];
     throw err;
   }
+  const cliNames = await readCliSessionNames(sessionsRoot);
   const sessions = [];
   for (const file of sessionFiles) {
     const head = await readHead(path.join(dirPath, file.name), TITLE_SCAN_BYTES).catch(() => '');
+    const sessionId = file.name.slice(0, -'.jsonl'.length);
     sessions.push({
-      sessionId: file.name.slice(0, -'.jsonl'.length),
+      sessionId,
       title: extractTitle(head),
+      cliName: cliNames.get(sessionId) ?? null,
       mtime: file.mtime,
       fileSize: file.size,
     });

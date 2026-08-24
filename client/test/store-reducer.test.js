@@ -700,3 +700,35 @@ test('event: 보고 있던 파일이 이번 턴에도 수정되면 선택을 바
   s = reducer(s, serverMsg({ type: 'event', key: 'a', seq: seq++, payload: { type: 'result', subtype: 'success' } }));
   assert.equal(s.sessions.get('a').preview.path, '/repo/notes.md', '우선순위(html)보다 사용자의 선택이 앞선다');
 });
+
+test('sessionName: CLI가 붙인 이름을 세션 상태에 담는다', () => {
+  let s = stateWithSession('k');
+  assert.equal(s.sessions.get('k').cliName, '');
+  s = reducer(s, serverMsg({ type: 'sessionName', key: 'k', sessionId: 'sid-1', cliName: ' cc-on-browser-ca ' }));
+  assert.equal(s.sessions.get('k').cliName, 'cc-on-browser-ca');
+  // 빈 이름은 무시한다 — 이름을 지우는 채널이 아니라 알려 주는 채널이다.
+  s = reducer(s, serverMsg({ type: 'sessionName', key: 'k', cliName: '   ' }));
+  assert.equal(s.sessions.get('k').cliName, 'cc-on-browser-ca');
+  s = reducer(s, serverMsg({ type: 'sessionName', key: 'k' }));
+  assert.equal(s.sessions.get('k').cliName, 'cc-on-browser-ca');
+  // 같은 값이면 세션 객체를 새로 만들지 않는다(불필요한 리렌더 방지)
+  const same = reducer(s, serverMsg({ type: 'sessionName', key: 'k', cliName: 'cc-on-browser-ca' }));
+  assert.equal(same.sessions.get('k'), s.sessions.get('k'));
+  // 세션 탭이 없는 방송은 무해한 무동작
+  assert.equal(reducer(s, serverMsg({ type: 'sessionName', key: 'ghost', cliName: 'x' })), s);
+});
+
+test('sessionName: reset은 옛 세션 id의 이름을 지운다(/clear 등 id 교체)', () => {
+  let s = stateWithSession('k');
+  s = reducer(s, serverMsg({ type: 'sessionName', key: 'k', sessionId: 'sid-1', cliName: 'old-name' }));
+  assert.equal(s.sessions.get('k').cliName, 'old-name');
+  // id가 바뀌면 서버가 reset을 보낸다 — 빈 이름 무시 규칙에 걸리지 않고 지워져야 한다.
+  s = reducer(s, serverMsg({ type: 'sessionName', key: 'k', sessionId: 'sid-2', cliName: null, reset: true }));
+  assert.equal(s.sessions.get('k').cliName, '');
+  // 이미 비어 있으면 새 객체를 만들지 않는다
+  const same = reducer(s, serverMsg({ type: 'sessionName', key: 'k', reset: true }));
+  assert.equal(same.sessions.get('k'), s.sessions.get('k'));
+  // 새 id의 이름이 오면 그것이 들어온다
+  s = reducer(s, serverMsg({ type: 'sessionName', key: 'k', sessionId: 'sid-2', cliName: 'new-name' }));
+  assert.equal(s.sessions.get('k').cliName, 'new-name');
+});

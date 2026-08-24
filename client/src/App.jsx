@@ -208,13 +208,15 @@ function Shell() {
         {/* 떠 있는 우측 상단 컨트롤. 권한 모드는 세션이 있으면 항상, 세션 이름 배지는
             사이드바가 접혀 세션 목록이 안 보일 때만 — 둘을 한 flex 행에 묶어 서로
             겹치지 않게 한다. 이름 규칙은 사이드바 라이브 행과 같은 함수를 공유한다
-            (지정한 이름 → 첫 발화 요약 → sessionId 앞 8자 → '새 세션') + 작업 디렉터리 꼬리. */}
+            (지정한 이름 → CLI 이름 → 첫 발화 요약 → sessionId 앞 8자 → '새 세션')
+            + 작업 디렉터리 꼬리. */}
         {session && (
           <div className="main-top-right">
             {!sidebarOpen && (
               <div className="session-name-badge" data-tip={session.cwd || session.key}>
                 {sessionDisplayTitle({
                   customTitle: session.customTitle,
+                  cliName: session.cliName,
                   messages: session.messages,
                   sessionId: session.sessionId,
                 })}

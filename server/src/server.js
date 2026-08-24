@@ -132,6 +132,9 @@ export async function startServer({
   cliPath,
   cliArgsPrefix = [],
   projectsRoot,
+  // CLI가 세션 이름을 적어 두는 디렉터리(기본 ~/.claude/sessions) — 테스트 주입용.
+  // 세션 목록과 라이브 세션의 cliName이 모두 여기서 나온다(cli-session-names.js).
+  sessionsRoot,
   staticDir,
   exitedRetentionMs,
   quotaFetcher, // 테스트 주입용 — 기본은 quota.js의 공식 사용률 조회
@@ -174,7 +177,7 @@ export async function startServer({
   if (!token) throw new TypeError('token is required');
   if (!cliPath) throw new TypeError('cliPath is required');
 
-  const hub = new SessionHub({ cliPath, cliArgsPrefix, exitedRetentionMs });
+  const hub = new SessionHub({ cliPath, cliArgsPrefix, exitedRetentionMs, sessionsRoot });
   const rc = remoteControl ?? createRemoteControl({ cliPath, cliArgsPrefix });
   /** @type {Set<import('ws').WebSocket>} */
   const sockets = new Set();
@@ -371,6 +374,18 @@ export async function startServer({
               resumeSessionId: msg.resumeSessionId,
             });
             sendTo(ws, { type: 'started', startId, key: newKey, initInfo });
+            // 이름 조회는 init 이벤트에서 시작되므로 여기 오기 전에 끝났을 수 있고,
+            // 그때의 방송은 아직 이 세션을 모르는 탭에서 버려진다. started 바로 뒤에
+            // 한 번 더 보내 그 창을 메운다(codex 지적) — 늦게 끝난 조회는 방송이 맡는다.
+            const named = hub.cliNameOf(newKey);
+            if (named) {
+              sendTo(ws, {
+                type: 'sessionName',
+                key: newKey,
+                sessionId: named.sessionId,
+                cliName: named.cliName,
+              });
+            }
             // 시작 시점의 실효 노력 수준을 같은 창구(effortSet)로 알린다 — ultracode를
             // 요청했는데 얹지 못한 세션(구버전 CLI·미지원 모델)에서 UI만 울트라코드로
             // 남는 것을 막는다. 성공한 경우엔 클라이언트가 이미 표시하던 값과 같아
@@ -474,6 +489,16 @@ export async function startServer({
           }
           for (const info of replay.pendingPermissions) {
             sendTo(ws, { type: 'permission_request', key, ...info });
+          }
+          // CLI 세션 이름은 링버퍼에 없다(session-hub.#refreshCliName 참조) — 재접속한
+          // 탭이 이름을 잃지 않도록 여기서 한 번 더 보낸다.
+          if (replay.cliName) {
+            sendTo(ws, {
+              type: 'sessionName',
+              key,
+              sessionId: replay.cliNameSessionId,
+              cliName: replay.cliName,
+            });
           }
           if (replay.exited) sendTo(ws, { type: 'exit', key, code: replay.exitCode });
           return;
@@ -789,7 +814,7 @@ export async function startServer({
           json(res, 200, await listProjects(projectsRoot));
           return;
         case '/api/sessions':
-          json(res, 200, await listSessions(projectsRoot, url.searchParams.get('dir')));
+          json(res, 200, await listSessions(projectsRoot, url.searchParams.get('dir'), sessionsRoot));
           return;
         case '/api/recent-sessions': {
           // 전 프로젝트 세션을 mtime순으로 집계 — 새 세션 모달의 "지난 세션" 목록.
@@ -804,7 +829,7 @@ export async function startServer({
             }
             limit = Math.max(1, Math.min(50, parsed));
           }
-          json(res, 200, await listRecentSessions(projectsRoot, limit));
+          json(res, 200, await listRecentSessions(projectsRoot, limit, sessionsRoot));
           return;
         }
         case '/api/transcript':

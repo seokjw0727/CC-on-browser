@@ -2,30 +2,57 @@
 // WS 지식은 없고 'broadcast' 이벤트로 서버(server.js)에 위임한다.
 import { EventEmitter } from 'node:events';
 import { ClaudeSession } from './claude-session.js';
+import { lookupCliSessionName } from './cli-session-names.js';
 
 const RING_LIMIT = 1000;
 // 종료된 세션 엔트리는 재접속 리플레이(attachReplay)를 위해 잠시 유지한 뒤 소거한다.
 // 그렇지 않으면 세션을 반복 생성/종료하는 장기 구동에서 링버퍼가 무한 누적된다.
 const EXITED_RETENTION_MS = 30 * 60_000;
+// CLI 세션 이름 조회 재시도 상한 — 이름 파일이 init보다 늦게 쓰이는 창을 넘기기 위한
+// 값이다. 세션 하나가 이 횟수를 넘겨도 못 찾으면 이름 없이 간다(기존 제목으로 폴백).
+const CLI_NAME_MAX_TRIES = 10;
+// 재시도 간격. 리더의 캐시 TTL(3초)보다 길어야 한다 — 짧으면 같은 '없음'이 캐시에서
+// 그대로 돌아와 재시도 예산만 태운다. 재시도는 **타이머로** 돈다: CLI 이벤트에만 기대면
+// init 직후 조용해진 세션에서 늦게 쓰인 이름을 영영 못 본다(codex 지적).
+const CLI_NAME_RETRY_MS = 3_500;
 
 export class SessionHub extends EventEmitter {
   #cliPath;
   #cliArgsPrefix;
   #ringLimit;
   #exitedRetentionMs;
+  #lookupSessionName;
+  #cliNameRetryMs;
+  #cliNameMaxTries;
   /** @type {Map<string, {key, session, ring: {seq,payload}[], nextSeq, pendingPermissions: Map, exited, exitCode}>} */
   #sessions = new Map();
   #nextKey = 0;
   // 종료가 시작됐는가 — 서 있으면 새 세션을 받지 않는다. beginClosing() 주석 참조.
   #closing = false;
 
-  constructor({ cliPath, cliArgsPrefix = [], ringLimit = RING_LIMIT, exitedRetentionMs = EXITED_RETENTION_MS } = {}) {
+  constructor({
+    cliPath,
+    cliArgsPrefix = [],
+    ringLimit = RING_LIMIT,
+    exitedRetentionMs = EXITED_RETENTION_MS,
+    // CLI가 세션 이름을 적어 두는 디렉터리 — 목록 endpoint와 **같은 값**이어야 한다.
+    // 서버가 주입한 경로를 여기에 넘기지 않으면 라이브 세션만 기본 경로를 본다.
+    sessionsRoot,
+    // (sessionId) => Promise<string|null> — CLI가 붙인 세션 이름 조회. 테스트 주입용.
+    lookupSessionName = (sessionId) => lookupCliSessionName(sessionId, sessionsRoot),
+    // 이름 재조회의 간격·횟수 — 테스트 주입용(예산 소진 경로를 초 단위로 기다리지 않기 위해).
+    cliNameRetryMs = CLI_NAME_RETRY_MS,
+    cliNameMaxTries = CLI_NAME_MAX_TRIES,
+  } = {}) {
     super();
     if (!cliPath) throw new TypeError('cliPath is required');
     this.#cliPath = cliPath;
     this.#cliArgsPrefix = cliArgsPrefix;
     this.#ringLimit = ringLimit;
     this.#exitedRetentionMs = exitedRetentionMs;
+    this.#lookupSessionName = lookupSessionName;
+    this.#cliNameRetryMs = cliNameRetryMs;
+    this.#cliNameMaxTries = cliNameMaxTries;
   }
 
   /**
@@ -62,6 +89,16 @@ export class SessionHub extends EventEmitter {
       // 재개 원본 id — 초기화 중 session.sessionId가 아직 null인 창에서도
       // isSessionIdLive가 이 파일을 라이브로 취급해 삭제(409 방어)를 막는다.
       resumeSessionId: resumeSessionId || null,
+      // CLI가 이 세션에 붙인 이름 — sessionId가 확정된 뒤 한 번 조회해 채운다.
+      // 재접속 리플레이에 실어야 하므로 방송만 하지 않고 엔트리에도 남긴다.
+      cliName: null,
+      cliNameId: null, // cliName이 어느 sessionId의 이름인가 — 포크로 id가 바뀌면 버린다
+      cliNameFor: null, // 지금 조회 중인 sessionId (중복 조회 방지 래치)
+      cliNameTries: 0, // 못 찾았을 때의 재시도 횟수 (CLI가 이름 파일을 늦게 쓰는 창 대비)
+      cliNameTimer: null, // 예약된 재조회 — 세션이 조용해도 돌게 하는 것이 목적
+      // 마지막으로 **조회를 시도한** sessionId. 성공한 id(cliNameId)와 따로 두어야 한다:
+      // 한 번도 못 찾은 채 id가 바뀌는 경우가 바로 예산을 물려받으면 안 되는 경우다.
+      cliNameAttemptedId: null,
       ring: [],
       nextSeq: 1,
       pendingPermissions: new Map(),
@@ -69,7 +106,13 @@ export class SessionHub extends EventEmitter {
       exitCode: null,
     };
 
-    session.on('event', (payload) => this.#pushEvent(entry, payload));
+    session.on('event', (payload) => {
+      this.#pushEvent(entry, payload);
+      // 이벤트가 sessionId를 확정한 직후가 유일하게 이름을 찾을 수 있는 시점이다
+      // (이름 파일은 sessionId로만 이어진다). 조회는 비동기지만 이벤트 스트림을
+      // 붙잡지 않는다 — 실패하든 늦든 세션 진행에는 아무 영향이 없다.
+      this.#refreshCliName(entry);
+    });
     session.on('raw', (line) => this.#pushEvent(entry, { type: 'raw', line }));
     session.on('permission_request', (info) => {
       entry.pendingPermissions.set(info.requestId, info);
@@ -79,6 +122,8 @@ export class SessionHub extends EventEmitter {
       entry.exited = true;
       entry.exitCode = code;
       entry.pendingPermissions.clear();
+      // 죽은 세션의 이름을 계속 찾을 이유가 없다 — 예약된 재조회를 접는다.
+      this.#clearCliNameTimer(entry);
       this.emit('broadcast', { type: 'exit', key, code });
       // 유예 창(리플레이 계약) 후 엔트리 소거 → 링버퍼 무한 누적 방지.
       // 소거 후 attach는 'unknown session key'로 떨어지고, 클라이언트는
@@ -113,6 +158,109 @@ export class SessionHub extends EventEmitter {
     entry.ring.push({ seq, payload });
     if (entry.ring.length > this.#ringLimit) entry.ring.shift();
     this.emit('broadcast', { type: 'event', key: entry.key, seq, payload });
+  }
+
+  /**
+   * CLI가 붙인 세션 이름을 조회해 sessionName으로 방송한다 — sessionId 하나당 한 번.
+   *
+   * 링버퍼에 넣지 않고 별도 메시지로 보내는 이유: 링은 CLI 이벤트를 그대로 되쏘는
+   * 채널이라, 우리가 만든 메시지를 섞으면 클라이언트의 CLI 이벤트 리듀서가 모르는
+   * payload를 받는다. 대신 엔트리에 남겨 attachReplay가 재접속 때 다시 보낸다.
+   *
+   * 재개 세션에서 옛 이름이 따라붙지 않는 것은 조회 키가 **지금 이 프로세스가 보고한**
+   * sessionId이기 때문이다(entry는 항상 null에서 시작한다).
+   */
+  #refreshCliName(entry) {
+    const sessionId = entry.session.sessionId;
+    if (!sessionId) return;
+    // 포크·/clear 등으로 id가 바뀌면 이전 id에 대해 쌓인 상태를 통째로 버린다 — 이름과
+    // 재시도 예산 둘 다. 판정 기준은 **마지막으로 시도한** id다: 성공한 id로 재면 한 번도
+    // 못 찾은 채 id가 바뀐 경우에 예산이 그대로 넘어가, 새 id는 영영 조회되지 않는다.
+    // 서버 장부만 지우면 이미 옛 이름을 그리고 있는 화면이 남으므로 함께 알린다.
+    if (entry.cliNameAttemptedId !== null && entry.cliNameAttemptedId !== sessionId) {
+      const hadName = entry.cliName;
+      entry.cliName = null;
+      entry.cliNameId = null;
+      entry.cliNameFor = null; // 진행 중이던 옛 id 조회의 결과는 아래 가드에서 버려진다
+      entry.cliNameAttemptedId = null;
+      entry.cliNameTries = 0;
+      this.#clearCliNameTimer(entry);
+      if (hadName) {
+        this.emit('broadcast', { type: 'sessionName', key: entry.key, sessionId, cliName: null, reset: true });
+      }
+    }
+    if (entry.cliName && entry.cliNameId === sessionId) return; // 이미 찾았다
+    if (entry.cliNameFor === sessionId) return; // 같은 id로 조회가 진행 중
+    // 재조회가 이미 예약돼 있으면 이벤트로 앞당기지 않는다. 이 가드가 없으면 스트리밍
+    // 한 턴의 이벤트 폭주가 재시도 예산을 수백 ms 만에 태워 버리는데, 그 시도들은 전부
+    // 리더의 같은 캐시(3초)를 보므로 결과도 같다 — 예산만 잃고 이름은 못 찾는다.
+    if (entry.cliNameTimer) return;
+    if (entry.cliNameTries >= this.#cliNameMaxTries) return;
+    entry.cliNameTries++;
+    entry.cliNameAttemptedId = sessionId;
+    entry.cliNameFor = sessionId; // 먼저 세워 같은 id로 중복 조회하지 않는다
+    // 주입된 조회기가 **동기적으로** 던져도 CLI 이벤트 핸들러로 새어 나가면 안 된다 —
+    // 호출 자체를 promise 체인 안으로 넣는다(codex 지적).
+    Promise.resolve()
+      .then(() => this.#lookupSessionName(sessionId))
+      .then((name) => {
+        const cliName = typeof name === 'string' ? name.trim() : '';
+        // 조회가 도는 사이 세션이 정리됐거나 id가 또 바뀌었으면 버린다.
+        if (this.#sessions.get(entry.key) !== entry) return;
+        if (entry.cliNameFor !== sessionId) return;
+        entry.cliNameFor = null;
+        if (!cliName) {
+          // 이름 파일이 아직 없을 수 있다 — 다음 CLI 이벤트를 기다리지 않고 예약한다.
+          this.#scheduleCliNameRetry(entry);
+          return;
+        }
+        entry.cliName = cliName;
+        entry.cliNameId = sessionId;
+        this.#clearCliNameTimer(entry);
+        this.emit('broadcast', { type: 'sessionName', key: entry.key, sessionId, cliName });
+      })
+      .catch(() => {
+        // 이름은 있으면 좋은 정보다 — 못 찾으면 클라이언트가 기존 제목으로 폴백한다.
+        if (entry.cliNameFor === sessionId) entry.cliNameFor = null;
+        this.#scheduleCliNameRetry(entry);
+      });
+  }
+
+  /**
+   * 다음 이름 조회를 예약한다 — CLI 이벤트가 없어도 도는 유일한 경로.
+   *
+   * 이벤트에만 기대면 init 직후 사용자가 아무것도 하지 않는 세션에서, 그 뒤에 쓰인
+   * 이름을 영영 보지 못한다(codex 지적). 타이머는 unref하므로 이것 때문에 데몬이
+   * 살아 있지는 않고, 종료·정리 경로에서 함께 해제된다.
+   */
+  #scheduleCliNameRetry(entry) {
+    if (entry.cliNameTimer || entry.exited) return;
+    if (entry.cliNameTries >= this.#cliNameMaxTries) return;
+    entry.cliNameTimer = setTimeout(() => {
+      entry.cliNameTimer = null;
+      if (this.#sessions.get(entry.key) !== entry || entry.exited) return;
+      this.#refreshCliName(entry);
+    }, this.#cliNameRetryMs);
+    entry.cliNameTimer.unref?.();
+  }
+
+  #clearCliNameTimer(entry) {
+    if (!entry.cliNameTimer) return;
+    clearTimeout(entry.cliNameTimer);
+    entry.cliNameTimer = null;
+  }
+
+  /**
+   * 지금까지 확인된 CLI 세션 이름과 그 id — 없으면 null.
+   *
+   * 세션 시작 응답(started)을 보낸 **직후** 서버가 읽는다. 이름 조회는 init 이벤트에서
+   * 시작되므로 startSession()이 반환하기 전에 끝날 수 있고, 그때의 broadcast는 아직
+   * 세션을 모르는 탭에서 버려진다(codex 지적). 그 창을 이 접근자가 메운다.
+   */
+  cliNameOf(key) {
+    const entry = this.#sessions.get(key);
+    if (!entry || !entry.cliName) return null;
+    return { sessionId: entry.cliNameId, cliName: entry.cliName };
   }
 
   #require(key) {
@@ -257,6 +405,10 @@ export class SessionHub extends EventEmitter {
       key,
       events: entry.ring.filter((e) => e.seq > after),
       pendingPermissions: [...entry.pendingPermissions.values()],
+      // 이름은 링버퍼 밖에 있으므로 리플레이가 따로 실어 준다 — 안 그러면 재접속한
+      // 탭에서만 세션 이름이 사라진다.
+      cliName: entry.cliName,
+      cliNameSessionId: entry.cliNameId,
       exited: entry.exited,
       exitCode: entry.exitCode,
     };
@@ -281,6 +433,7 @@ export class SessionHub extends EventEmitter {
     const pending = [];
     for (const entry of this.#sessions.values()) {
       if (entry.cleanupTimer) clearTimeout(entry.cleanupTimer);
+      this.#clearCliNameTimer(entry);
       pending.push(entry.session.terminate());
     }
     const results = await Promise.allSettled(pending);

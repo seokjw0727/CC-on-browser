@@ -25,12 +25,16 @@ export function deriveSessionTitle(messages = [], maxLen = 60) {
 // "지난 세션" 목록, 삭제 확인 모달)가 이 한 함수를 쓴다. 각자 폴백을 두면 이름 변경이
 // 어떤 화면에서는 반영되고 어떤 화면에서는 안 되는 어긋남이 생긴다.
 //
-// 우선순위: 사용자가 지정한 이름 → 서버 히스토리 제목(.jsonl에서 뽑은 title) →
-//           라이브 메시지의 첫 발화 요약 → sessionId 앞 8자 → '새 세션'
-// customTitle이 맨 앞인 이유는 자명하고, 히스토리 title이 메시지 요약보다 앞인 이유는
-// 그쪽이 파일 전체를 보고 만든 제목이기 때문이다(지난 세션 행에는 messages가 없다).
+// 우선순위: 사용자가 지정한 이름 → CLI가 붙인 이름(cliName) →
+//           서버 히스토리 제목(.jsonl에서 뽑은 title) → 라이브 메시지의 첫 발화 요약 →
+//           sessionId 앞 8자 → '새 세션'
+// customTitle이 맨 앞인 이유는 자명하다. cliName이 그다음인 이유는 그것이 사용자가
+// 터미널에서 같은 세션을 부르던 이름이어서다 — 두 화면이 다른 이름을 쓰면 같은 세션인지
+// 알아볼 수 없다. 히스토리 title이 메시지 요약보다 앞인 이유는 그쪽이 파일 전체를 보고
+// 만든 제목이기 때문이다(지난 세션 행에는 messages가 없다).
 export function sessionDisplayTitle({
   customTitle = '',
+  cliName = '',
   title = '',
   messages = [],
   sessionId = null,
@@ -38,6 +42,8 @@ export function sessionDisplayTitle({
 } = {}) {
   const custom = typeof customTitle === 'string' ? customTitle.trim() : '';
   if (custom) return custom;
+  const cli = typeof cliName === 'string' ? cliName.trim() : '';
+  if (cli) return cli;
   const serverTitle = typeof title === 'string' ? title.trim() : '';
   if (serverTitle) return serverTitle;
   const derived = deriveSessionTitle(messages);
@@ -137,7 +143,12 @@ export function buildSessionTree({
     node.history = node.historyLoaded
       ? hist
           .filter((h) => !(h.sessionId != null && liveIds.has(h.sessionId)))
-          .map((h) => ({ sessionId: h.sessionId, title: h.title, mtime: h.mtime }))
+          .map((h) => ({
+            sessionId: h.sessionId,
+            title: h.title,
+            cliName: h.cliName ?? null,
+            mtime: h.mtime,
+          }))
       : [];
     node.hasLive = node.live.length > 0;
     node.active = node.cwd != null && node.cwd === activeCwd;
