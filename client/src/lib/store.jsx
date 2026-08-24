@@ -41,6 +41,7 @@ const StoreContext = createContext(null);
 let startCounter = 0;
 let jumpCounter = 0;
 let effortCounter = 0;
+let modelCounter = 0;
 // 이 탭만의 reqId 접두사 — 카운터만 쓰면 모든 탭이 'ef_1'부터 시작해, 성공 방송이
 // 전 소켓에 가는 구조에서 남의 탭 첫 요청이 내 대기표를 결착시킨다(codex 지적).
 const CLIENT_ID = Math.random().toString(36).slice(2, 8);
@@ -50,6 +51,13 @@ const CLIENT_ID = Math.random().toString(36).slice(2, 8);
 // 서버의 제어 요청 타임아웃(30s)보다 짧게 둔다 — 사용자를 그만큼 기다리게 할 수 없고,
 // 늦게 도착한 성공 방송은 리듀서가 그때 반영하므로 표시가 어긋나지 않는다.
 const EFFORT_ACK_TIMEOUT_MS = 5_000;
+
+// 모델 런타임 변경(setModel)의 ack 대기 한도. 노력 수준보다 넉넉하게 잡는다 — 노력
+// 수준은 응답이 없으면 재시작 폴백이라도 있지만, 모델은 응답을 놓치면 "적용됐는지 모름"이
+// 최선이라 성급한 포기가 곧 오보다(실측 v2.1.235: set_model ack는 진행 중 턴에서도 약
+// 170ms). 서버의 제어 요청 상한(30s)보다는 짧다 — 그 사이 늦게 도착한 modelSet 방송은
+// 대기표와 무관하게 리듀서가 표시에 반영하므로, 여기서 포기해도 화면이 어긋나지 않는다.
+const MODEL_ACK_TIMEOUT_MS = 10_000;
 
 // 종료된 세션이 회색 상태 점으로 남아 있다가 사이드바 목록에서 사라지기까지의
 // 유예(사용자 의도: 닫기 → 3초 후 제거). 기준 시점은 CLI exit 확인 시점이며,
@@ -75,18 +83,23 @@ export function StoreProvider({ children }) {
   // 프레임으로 오기 때문에 key만으로는 남의 탭의 성공이나 무관한 error(예: 죽은
   // 세션에 send)를 내 요청의 결론으로 오인할 수 있다.
   const pendingEffortRef = useRef(new Map());
+  // 모델 런타임 변경의 ack 대기표 — reqId -> {key, resolve, timer}. 노력 수준과 같은
+  // 이유로 reqId 상관자를 쓰되 맵은 따로 둔다(접두사 'md_'/'ef_'로 네임스페이스 분리).
+  const pendingModelRef = useRef(new Map());
 
   // ack 결착 — refs만 만지므로 첫 렌더의 클로저로 캡처돼도 안전하다(아래 WS effect).
   // 세션 key까지 대조한다 — reqId 접두사와 이중 방어(다른 세션의 프레임으로는 결착 불가).
-  const settleEffort = (msg, applied) => {
+  const settlePending = (ref, msg, outcome) => {
     const reqId = msg?.reqId;
     if (reqId == null) return;
-    const pending = pendingEffortRef.current.get(reqId);
+    const pending = ref.current.get(reqId);
     if (!pending || pending.key !== msg.key) return;
-    pendingEffortRef.current.delete(reqId);
+    ref.current.delete(reqId);
     clearTimeout(pending.timer);
-    pending.resolve(applied);
+    pending.resolve(outcome);
   };
+  const settleEffort = (msg, applied) => settlePending(pendingEffortRef, msg, applied);
+  const settleModel = (msg, outcome) => settlePending(pendingModelRef, msg, outcome);
 
   // exited 세션마다 제거 타이머를 한 번만 건다(키별로 안정 유지 — 다른 세션의
   // 활동으로 이 effect가 재실행돼도 리셋하지 않는다). 재시작 대체 등으로 세션이
@@ -116,6 +129,18 @@ export function StoreProvider({ children }) {
     () => () => {
       for (const t of removalTimersRef.current.values()) clearTimeout(t);
       removalTimersRef.current.clear();
+      // 대기 중인 ack의 타이머도 함께 거둔다 — 언마운트 뒤에 발화하면 사라진 트리를
+      // 향해 resolve하고, 그 사이 await로 매달린 호출측은 영영 결착되지 않는다.
+      for (const p of pendingEffortRef.current.values()) {
+        clearTimeout(p.timer);
+        p.resolve(false);
+      }
+      pendingEffortRef.current.clear();
+      for (const p of pendingModelRef.current.values()) {
+        clearTimeout(p.timer);
+        p.resolve('unknown');
+      }
+      pendingModelRef.current.clear();
     },
     [],
   );
@@ -175,7 +200,13 @@ export function StoreProvider({ children }) {
         // 노력 수준 변경의 결론(성공 방송 / 실패 error)을 먼저 대기표에 반영한다 —
         // 리듀서는 순수해야 하므로 Promise 결착은 여기서만 한다.
         if (msg?.type === 'effortSet') settleEffort(msg, true);
-        else if (msg?.type === 'error' && msg.reqId != null) settleEffort(msg, false);
+        else if (msg?.type === 'modelSet') settleModel(msg, 'applied');
+        else if (msg?.type === 'error' && msg.reqId != null) {
+          // 어느 창구의 실패인지는 reqId가 어느 대기표에 있는지로 갈린다 — 상대 맵에는
+          // 그 reqId가 없어 아무 일도 일어나지 않는다(접두사와 이중 방어).
+          settleEffort(msg, false);
+          settleModel(msg, 'refused');
+        }
         dispatch({ type: 'server-message', message: msg });
       },
       onStatus: (status) => {
@@ -265,6 +296,33 @@ export function StoreProvider({ children }) {
       },
       /** Stop a session's CLI process (client->server contract 'stop'). Server replies with exit. */
       stopSession: (key) => (wsRef.current ? wsRef.current.send({ type: 'stop', key }) : false),
+      /**
+       * 모델 런타임 변경 — CLI가 실제로 수용했는지 확인될 때까지 화면을 바꾸지 않는다.
+       * 결론은 셋(+전송 실패)으로 갈린다. 둘로 뭉개지 않는 이유: 응답이 없는 것과
+       * 거부당한 것은 사용자에게 해야 할 말이 정반대다.
+       *  · 'applied'  modelSet 방송 도착 = CLI 수용. 표시 갱신은 리듀서가 한다.
+       *  · 'refused'  CLI가 거부(인식 불가 모델·조직 제한 등). 서버 error 프레임이
+       *               사유를 담은 토스트를 이미 띄우므로 호출측은 덧붙이지 않는다.
+       *  · 'unknown'  아무 프레임도 안 옴 — 대개 이 창구를 모르는 **구버전 데몬**이다.
+       *               그 데몬도 set_model 자체는 CLI에 전달하므로 이미 적용됐을 가능성이
+       *               높다: 여기서 "실패"라고 단정하면 적용된 변경을 실패로 보고하는
+       *               반대 방향의 오보가 된다. 표시는 손대지 않고 두면 다음 턴의
+       *               init/assistant 보고가 스스로 맞춘다(수확 경로).
+       *  · 'unsent'   소켓이 닫혀 전송 자체가 실패.
+       * @returns {Promise<'applied'|'refused'|'unknown'|'unsent'>}
+       */
+      setModel: (key, model) => {
+        const reqId = `md_${CLIENT_ID}_${++modelCounter}`;
+        const sent = wsRef.current && wsRef.current.send({ type: 'setModel', key, reqId, model });
+        if (!sent) return Promise.resolve('unsent');
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            pendingModelRef.current.delete(reqId);
+            resolve('unknown');
+          }, MODEL_ACK_TIMEOUT_MS);
+          pendingModelRef.current.set(reqId, { key, resolve, timer });
+        });
+      },
       /**
        * 노력 수준 런타임 변경 — 세션 재시작 없이 실행 중 CLI에 적용한다.
        * @returns Promise<boolean> 적용됐으면 true. false면 이 CLI가 런타임 변경을

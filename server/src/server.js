@@ -402,9 +402,30 @@ export async function startServer({
         case 'interrupt':
           await hub.interrupt(key);
           return;
-        case 'setModel':
-          await hub.setModel(key, msg.model);
+        case 'setModel': {
+          // 모델 런타임 변경 — CLI의 control 응답을 확인한 **뒤에만** 성공을 알린다.
+          // 예전에는 아무 ack도 보내지 않아, 클라이언트가 전송 성공만 보고 낙관적으로
+          // 피커를 바꿨다: CLI가 거부한 모델(인식 불가 id·조직 제한·consent 미승인)에서
+          // 화면만 새 모델로 남아 실제 세션과 어긋났다. setEffort와 같은 reqId 규약으로
+          // 성공은 전 소켓 방송(다른 탭도 같이 맞춰진다), 실패는 요청 소켓에만 돌려준다.
+          const reqId = msg.reqId ?? null;
+          const model = typeof msg.model === 'string' ? msg.model : null;
+          if (!model) {
+            sendError(ws, { key, reqId, message: `invalid model: ${JSON.stringify(msg.model)}` });
+            return;
+          }
+          try {
+            await hub.setModel(key, model);
+          } catch (err) {
+            // 바깥 catch로 새면 reqId가 빠져 요청자가 자기 요청의 결론으로 짝지을 수 없다.
+            sendError(ws, { key, reqId, message: err?.message ?? err });
+            return;
+          }
+          // reqId 없이 온 요청(구버전 클라이언트)도 방송한다 — reqId:null이라 대기표를
+          // 결착시키지 않고, 그쪽은 예전처럼 낙관 갱신으로 동작한다(추가 전용 프로토콜).
+          broadcast({ type: 'modelSet', key, reqId, model });
           return;
+        }
         case 'setPermissionMode':
           await hub.setPermissionMode(key, msg.mode);
           return;

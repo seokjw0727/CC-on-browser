@@ -23,6 +23,12 @@ export function createSessionState(partial = {}) {
     // 달리 불변이며 신뢰모드 UI 노출 자격 판정에 쓴다(spawnModel 패턴과 동일).
     spawnPermissionMode: 'default',
     maxThinkingTokens: null, // 사고 예산 — 서버 setThinking 채널용으로 유지(현재 UI 미노출)
+    // 모델 전환 확정 대기 — {target} (없으면 null). setModel이 CLI에 적용됐다는 ack
+    // (modelSet)를 받은 순간 걸리고, 표적 계열의 모델 보고가 도착하거나 다음 턴이
+    // 끝나면(reduce-cli-event) 풀린다. 대기 중에는 이미 시작된 API 호출이 계속 보고하는
+    // **이전 모델**을 수확하지 않는다 — 그 수확이 사용자가 방금 고른 모델을 저 혼자
+    // 되돌리던 원인이다(reduce-cli-event의 modelSwitch 주석에 실측 근거).
+    modelSwitch: null,
     // 노력 수준 — **UI 티어** 값(low|medium|high|xhigh|max|ultracode). null=CLI 기본(high).
     // 실행 중 변경은 재시작이 아니라 런타임 채널(setEffort)로 하고, 화면 반영은 서버의
     // effortSet 방송이 담당한다(와이어의 {effort, ultracode} → uiEffort로 되돌림).
@@ -363,7 +369,33 @@ function handleServerMessage(state, msg) {
         // 비우지 않으면 세션 탭이 목록에서 사라지기까지(3초) 죽은 작업이 "실행 중"으로
         // 맥동한다 — result 없이 끝난 종료에서 실제로 재현된다(codex 지적).
         backgroundTasks: [],
+        // 프로세스가 죽었으면 확정될 모델 보고도 더는 오지 않는다 — 대기를 풀지 않으면
+        // 재접속 리플레이가 이 세션을 되살릴 때까지 수확이 막힌 채로 남는다.
+        modelSwitch: null,
       }));
+
+    case 'modelSet':
+      // 모델 전환이 실행 중 세션에 **실제로 적용됐다**(CLI가 set_model에 success를 준
+      // 뒤에만 서버가 보낸다). 화면 갱신의 유일한 출처가 이 경로다 — 컴포저는 더 이상
+      // 낙관적으로 바꾸지 않는다. 서버가 전 소켓에 방송하므로 같은 세션을 열어 둔 다른
+      // 탭도 함께 맞춰진다. 요청 대기표(store.jsx)가 이미 타임아웃으로 닫힌 뒤에 늦게
+      // 도착해도 여기서 표시는 바로잡힌다.
+      return updateSession(state, msg.key, (s) => {
+        const model = typeof msg.model === 'string' && msg.model ? msg.model : null;
+        if (!model) return s;
+        return {
+          ...s,
+          model,
+          // 검증된 스폰 계보 — 실제로 CLI가 받아들인 값만 담는다(재시작 --model 인자).
+          spawnModel: model,
+          // 이전 모델의 result가 보고한 창 크기는 새 모델에 무효 — 다음 result까지
+          // 카탈로그 휴리스틱으로 폴백한다.
+          contextWindow: null,
+          // 연속 변경 시 새 표적이 옛 표적을 대체한다(옛 표적이 남으면 최신 선택의
+          // 보고가 "불일치"로 버려진다).
+          modelSwitch: { target: model },
+        };
+      });
 
     case 'effortSet':
       // 노력 수준이 실행 중 세션에 적용됐다(재시작 없음). 서버가 전 소켓에 방송하므로

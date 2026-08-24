@@ -18,6 +18,7 @@ import {
   effortIndexFromRatio,
   effortRatioFromIndex,
   nextEffortIndex,
+  visibleEffortLevels,
 } from '../src/lib/effort.js';
 
 const cmdEcho = (name, args = '') => ({
@@ -204,4 +205,41 @@ test('순수성: goal/lastUserText 갱신이 입력 세션을 변형하지 않�
   assert.equal(s2.lastUserText, 'Y');
   assert.equal(s0.goal, null);
   assert.equal(s0.lastUserText, null);
+});
+
+// ----- visibleEffortLevels — 모델을 바꿨을 뿐인데 노력 수준이 '낮음'으로 뭉개지던 문제 -----
+// 설계 근거: .certify/design/2026-08-23-model-effort-change-desync.html
+test('visibleEffortLevels: 지원 목록으로 거르되 현재 값은 표시에서 잃지 않는다', () => {
+  const values = (ls) => ls.map((l) => l.value);
+
+  // 지원 목록을 보고하지 않는 모델은 전부 노출(기존 동작 — 판단 근거가 없다)
+  assert.equal(visibleEffortLevels(null, 'high'), EFFORT_LEVELS);
+  assert.equal(visibleEffortLevels([], 'high'), EFFORT_LEVELS);
+
+  // 보고하면 그걸로 거른다. ultracode는 목록에 없지만 xhigh를 지원할 때만 노출된다
+  assert.deepEqual(
+    values(visibleEffortLevels(['low', 'medium', 'high'], 'high')),
+    ['low', 'medium', 'high'],
+    'xhigh 미지원 모델에는 울트라코드가 나오지 않는다',
+  );
+  assert.deepEqual(
+    values(visibleEffortLevels(['low', 'high', 'xhigh'], 'high')),
+    ['low', 'high', 'xhigh', 'ultracode'],
+  );
+
+  // 핵심: 현재 값이 지원 목록 밖이어도 표시 목록에는 남는다 — 빠지면 슬라이더가
+  // 사용자 입력 없이 '낮음'(index 0)으로 내려앉는다
+  const kept = visibleEffortLevels(['low', 'medium'], 'max');
+  assert.deepEqual(values(kept), ['low', 'medium', 'max'], '전역 순서를 유지한 채 끼워 넣는다');
+  assert.equal(kept.findIndex((l) => l.value === 'max'), 2, '현재 값의 위치를 특정할 수 있다');
+
+  // 울트라코드가 현재 값이면 xhigh 미지원 모델에서도 표시로는 남는다(값을 잃지 않는다)
+  assert.ok(values(visibleEffortLevels(['low'], 'ultracode')).includes('ultracode'));
+
+  // 값이 실제로 바뀌면 옛 미지원 값은 그 즉시 목록에서 사라진다 —
+  // 이것이 "표시 보존이 미지원 값의 재전송으로 번지지 않는" 근거다
+  assert.deepEqual(values(visibleEffortLevels(['low', 'medium'], 'low')), ['low', 'medium']);
+
+  // EFFORT_LEVELS에 없는 미지의 값은 끼워 넣지 않는다(목록을 오염시키지 않는다)
+  assert.deepEqual(values(visibleEffortLevels(['low'], 'bogus')), ['low']);
 });

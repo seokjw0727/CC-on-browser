@@ -65,6 +65,35 @@ export function effortDesc(effort) {
 
 // ----- 슬라이더 순수 헬퍼 (DOM 없이 단위 테스트되는 부분) -----
 
+/**
+ * 슬라이더에 **표시할** 수준 목록 — 모델이 보고한 지원 목록으로 거르되, 현재 값은
+ * 지원 목록에 없더라도 남긴다.
+ *
+ * 남기는 이유: 빼면 호출측의 findIndex가 -1이 되고, 그걸 0으로 클램프하면 슬라이더가
+ * '낮음'으로 뭉개진다 — 사용자는 모델을 바꿨을 뿐인데 노력 수준이 저 혼자 최하로
+ * 내려간 것처럼 본다(모델마다 supportedEffortLevels가 다르다).
+ *
+ * 보존은 **표시**에 한정된다: 이 목록에 남았다고 미지원 값을 새로 보내게 되지는 않는다.
+ * 커밋은 현재 값과 같으면 건너뛰고, 값이 실제로 바뀌면 이 목록이 그 즉시 다시 계산돼
+ * 옛 값이 사라지기 때문이다.
+ *
+ * UI 티어(ultracode)는 모델의 지원 목록에 없다 — xhigh + 플래그로 나가므로 그 모델이
+ * xhigh를 지원할 때만 노출한다(지원하지 않는 수준을 보내지 않기 위해). 지원 목록 자체를
+ * 보고하지 않는 모델은 판단 근거가 없으니 전부 노출한다(기존 동작).
+ *
+ * @param {string[]|null|undefined} reported 모델이 보고한 supportedEffortLevels
+ * @param {string|null} current 현재 노력 수준(UI 티어)
+ * @returns {Array<object>} EFFORT_LEVELS의 부분집합 — 전역 순서를 유지한다
+ */
+export function visibleEffortLevels(reported, current) {
+  const list = Array.isArray(reported) ? reported : null;
+  if (!list?.length) return EFFORT_LEVELS;
+  return EFFORT_LEVELS.filter((l) => (
+    l.value === current
+    || (isUiEffort(l.value) ? list.includes('xhigh') : list.includes(l.value))
+  ));
+}
+
 /** 트랙 위 비율(0~1) → 가장 가까운 레벨 인덱스. 범위를 벗어난 값도 양끝으로 붙인다. */
 export function effortIndexFromRatio(ratio, count) {
   if (!Number.isFinite(ratio) || !Number.isFinite(count) || count <= 0) return 0;

@@ -52,3 +52,37 @@ test('App이 이 컴포넌트를 우측 상단 묶음 안에 마운트한다', (
   assert.match(app, /className="main-top-right"/);
   assert.match(app, /<PermissionModeBar \/>/);
 });
+
+// ----- 모델 피커 — 낙관 갱신 금지 계약 (같은 파일에 두는 이유: 대상이 Composer.jsx로
+// 같고, 브라우저 없이 렌더할 수 없어 검증 수단도 소스 고정으로 같다) -----
+// 이 계약이 이번 수정의 핵심이다: 예전 changeModel은 소켓 write가 성공하면 곧바로
+// session.model/spawnModel을 바꿨고, CLI가 그 모델을 거부해도 화면만 새 모델로 남았다.
+// e2e 해피패스는 낙관 갱신을 되살려도 그대로 통과하므로(둘 다 끝에는 Sonnet이 보인다)
+// 그 회귀를 잡는 그물이 여기뿐이다. 설계 근거:
+// .certify/design/2026-08-23-model-effort-change-desync.html
+test('모델 변경은 ack를 기다린다 — 표시 갱신을 낙관적으로 하지 않는다', () => {
+  // 전송 결과가 아니라 store.setModel의 **결론**을 기다린다.
+  assert.match(composer, /const outcome = await setModel\(key, model\);/);
+  // 성공 시에도 model/contextWindow를 직접 쓰지 않는다 — 표시는 modelSet 방송을 받은
+  // 리듀서 한 곳에서만 바뀐다. 여기서 dispatch가 되살아나면 desync도 함께 돌아온다.
+  assert.doesNotMatch(
+    composer,
+    /update-session[\s\S]{0,200}?\bcontextWindow: null/,
+    'changeModel의 낙관적 update-session dispatch가 되살아났다',
+  );
+  // 결론별 안내가 모두 살아 있다(어느 하나가 빠지면 사용자가 결과를 모른 채 남는다).
+  assert.match(composer, /outcome === 'applied'/);
+  assert.match(composer, /outcome === 'unsent'/);
+  assert.match(composer, /outcome === 'unknown'/);
+  // 'refused'는 서버 error 토스트가 사유를 알리므로 여기서 또 알리지 않는다(중복 방지).
+  assert.doesNotMatch(composer, /outcome === 'refused'/);
+});
+
+test('적용 여부를 모르면(unknown) 스폰 계보를 비운다 — 재시작이 옛 모델을 되살리지 않게', () => {
+  // 구버전 데몬은 ack 없이도 set_model을 CLI에 전달한다 — 이미 바뀌었을 수 있는데
+  // 옛 spawnModel을 남기면 노력 수준 폴백 재시작이 `--model <옛 모델>`로 되돌린다.
+  assert.match(composer, /spawnModel: null/);
+  // 다만 기다리는 동안 다른 변경이 성공했다면 그쪽이 최신 계보다 — 늦게 끝난 타임아웃이
+  // 그걸 지우지 않도록 보내기 직전 값과 대조한다(연타 경로).
+  assert.match(composer, /s\.spawnModel === spawnBefore/);
+});

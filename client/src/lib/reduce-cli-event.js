@@ -25,6 +25,7 @@
 // 태그를 벗겨 notice로 렌더한다. result.is_error도 채팅 대신 store가 토스트로 알린다.
 //
 // session.streaming = { msgId: string|null, blocks: { [contentBlockIndex]: uid } }
+import { familyOf } from './model-catalog.js';
 
 // CLI가 "모델을 호출하지 않고 스스로 만든" assistant 메시지에 싣는 모델 센티널.
 // 실측(2026-07-30, 실 CLI v2.1.220): /clear 직후 CLI는 정상 모델을 담은 system/init을
@@ -35,6 +36,55 @@
 // 이 센티널 값만 정확 비교로 막는다. 이 모듈 밖에서 참조할 곳이 없어 export하지 않는다.
 const SYNTHETIC_MODEL = '<synthetic>';
 const SYNTHETIC_PLACEHOLDER_TEXT = '(no content)';
+
+// ----- 모델 전환 확정 대기(session.modelSwitch) -----
+// setModel이 CLI에 적용된 직후에도 **이미 시작된 API 호출**의 assistant 이벤트는 이전
+// 모델을 계속 보고한다(전환은 다음 호출부터 걸린다 — 실 CLI v2.1.235 stream-json 실측).
+// 그 보고를 그대로 수확하면 사용자가 방금 고른 모델이 저절로 이전 값으로 되돌아가고,
+// 다음 턴에 새 모델 보고가 오면 또 저 혼자 바뀐다 — 사용자 눈에는 "바꿔도 적용 안 되고,
+// 입력하지도 않았는데 바뀐다"로 보인다. 그래서 modelSet 방송(=CLI가 실제로 수용)이 표적을
+// 걸어 두고, 대기 중에는 표적과 같은 계열의 보고만 채택한다.
+//
+// 고착 방지: 표적 보고가 끝내 오지 않아도(CLI가 조용히 다른 모델로 대체하는 경우) 새로
+// 도착한 result가 대기를 반드시 푼다(reduceResult) — 그러면 다음 턴부터는 실제값이 그대로
+// 표시된다. 세션 종료(store-reducer의 exit)도 같은 이유로 대기를 푼다.
+
+/** '[1m]' 접미사와 대소문자를 접은 비교용 표기 — init은 접미사를 유지하고 assistant는 뗀다. */
+const modelBase = (v) => String(v ?? '').replace(/\[1m\]$/, '').toLowerCase();
+
+/**
+ * 보고된 모델이 전환 표적과 같은 모델인가.
+ * 표적은 카탈로그 value('opus')이고 보고는 해석된 id('claude-opus-5[1m]')라 문자열
+ * 비교로는 절대 맞지 않는다 — 계열(familyOf)이 1차 판정이다. 카탈로그에 없는 모델
+ * (사내 별칭 등)은 판정 근거가 계열에 없으므로 정규화한 base id의 정확 비교로만 확정한다
+ * (유사 이름을 부분 일치로 오인하지 않기 위해).
+ */
+function modelReportMatches(target, reported) {
+  if (!target || !reported) return false;
+  const tf = familyOf(target);
+  const rf = familyOf(reported);
+  if (tf && rf) return tf.family === rf.family;
+  return modelBase(target) === modelBase(reported);
+}
+
+/**
+ * 본선 모델 보고(assistant.message.model) 채택 — 대기 중에는 표적 계열만 받는다.
+ * 대기가 없을 때의 규칙은 종전 그대로다: 실측(2026-07-11, opus[1m] 캡처) assistant는
+ * [1m] 접미사가 탈락한 bare id를 보고하고 init은 접미사를 유지하므로, **base가 다를
+ * 때만** 덮어쓴다(같은 base면 기존 값이 더 정밀해 [1m]을 보존한다). 다른 base면 진짜
+ * 모델 전환이라 이전 모델 기준의 contextWindow도 함께 리셋한다.
+ */
+function adoptReportedModel(session, reported) {
+  const target = session.modelSwitch?.target ?? null;
+  if (target) {
+    if (!modelReportMatches(target, reported)) return session;
+    // 표적이 도착했다 — 카탈로그 value 대신 CLI가 해석한 실제 id로 갈아 끼우고 대기를 푼다.
+    return { ...session, model: reported, contextWindow: null, modelSwitch: null };
+  }
+  if (session.model == null) return { ...session, model: reported };
+  if (modelBase(session.model) === modelBase(reported)) return session;
+  return { ...session, model: reported, contextWindow: null };
+}
 
 // 그 더미 assistant인가 — 모델이 센티널이고 본문이 '(no content)' 텍스트 한 덩어리인
 // 조합만. 그냥 렌더하면 초기화 구분선 바로 아래에 빈 어시스턴트 말풍선이 남는다.
@@ -565,12 +615,9 @@ function reduceAssistant(session, payload, at) {
   }
 
   // 본선 assistant의 message.model 수확 — init 없는 재개 트랜스크립트 복원과
-  // 대역외 모델 전환(채팅 /model, CLI측 폴백) 추적의 출처. 실측(2026-07-11,
-  // opus[1m] 캡처): assistant는 [1m] 접미사가 탈락한 bare id('claude-opus-4-8')를
-  // 보고하고 init은 접미사를 유지('claude-opus-4-8[1m]')한다 — 그래서 **base
-  // (접미사 제거)가 다를 때만 덮어쓴다**: 같은 base면 기존 값이 더 정밀([1m] 보존),
-  // 다른 base면 진짜 모델 전환. 같은 base의 [1m]→비[1m] 전환만은 bare id로 구별
-  // 불가(스트림 고유 모호성 — DA #22). 서브에이전트 모델과 SYNTHETIC_MODEL은 제외.
+  // 대역외 모델 전환(채팅 /model, CLI측 폴백) 추적의 출처. 채택 규칙과 전환 대기 중의
+  // 예외는 adoptReportedModel이 단일 출처다. 같은 base의 [1m]→비[1m] 전환만은 bare id로
+  // 구별 불가(스트림 고유 모호성 — DA #22). 서브에이전트 모델과 SYNTHETIC_MODEL은 제외.
   if (
     parent == null &&
     !payload.isSidechain &&
@@ -578,14 +625,7 @@ function reduceAssistant(session, payload, at) {
     msg.model &&
     msg.model !== SYNTHETIC_MODEL
   ) {
-    const curBase = String(next.model ?? '').replace(/\[1m\]$/, '');
-    if (next.model == null) {
-      next = { ...next, model: msg.model };
-    } else if (curBase !== msg.model) {
-      // 진짜 모델 전환 — 이전 모델의 result가 보고한 창 크기는 무효가 되므로
-      // 함께 리셋한다(다음 result까지 카탈로그 휴리스틱 폴백 — codex 지적).
-      next = { ...next, model: msg.model, contextWindow: null };
-    }
+    next = adoptReportedModel(next, msg.model);
   }
 
   return setStatus(next, hasOpenTool(next) ? 'tool' : 'thinking');
@@ -744,17 +784,27 @@ function reduceUser(session, payload, at) {
 
 function reduceSystem(session, payload) {
   switch (payload.subtype) {
-    case 'init':
+    case 'init': {
+      // init의 모델은 [1m] 접미사까지 보존된 가장 정밀한 출처라 평소엔 그대로 채택한다
+      // (assistant 수확과 달리 base 비교로 거르지 않는다). 예외는 모델 전환 확정 대기
+      // 중일 때뿐이다: 전환 **이전**에 시작된 턴의 init이 구모델을 싣고 늦게 도착하면
+      // 방금 고른 모델이 저 혼자 되돌아간다 — assistant 잔류 보고와 같은 증상이라 같은
+      // 표적 판정으로 막는다(대기는 다음 result가 반드시 푼다 — modelSwitch 주석).
+      const reported = typeof payload.model === 'string' && payload.model ? payload.model : null;
+      const target = session.modelSwitch?.target ?? null;
+      const takeModel = reported != null && (!target || modelReportMatches(target, reported));
       return {
         ...session,
         sessionId: payload.session_id ?? session.sessionId,
         // CLI가 직접 알려 준 id = 최종 id(재개는 여기서 fork된 새 id가 온다).
         // 이 시점부터 세션 이름을 이 id로 영속해도 안전하다(store.jsx).
         idConfirmed: session.idConfirmed || typeof payload.session_id === 'string',
-        model: payload.model ?? session.model,
+        model: takeModel ? reported : session.model,
+        modelSwitch: takeModel && target ? null : session.modelSwitch,
         cwd: payload.cwd ?? session.cwd,
         tools: payload.tools ?? session.tools,
       };
+    }
     case 'status': {
       const next = {
         ...session,
@@ -911,17 +961,30 @@ function reduceResult(session, payload) {
   if (mu && typeof mu === 'object') {
     const entries = Object.entries(mu).filter(([, v]) => Number.isFinite(v?.contextWindow));
     const strip = (v) => String(v ?? '').replace(/\[1m\]$/, '');
+    // 전환 확정 대기 중이라면 이 result는 **이전 모델**로 돈 턴의 것일 수 있다. 그 항목의
+    // 창 크기를 새 모델에 붙이면 CTX% 분모가 통째로 어긋난다 — Opus 1M에서 Sonnet으로
+    // 바꾼 직후라면 200k짜리 세션에 1M 분모가 붙어 사용률이 1/5로 축소 표시된다
+    // (codex 지적). 대기 중에는 표적과 맞는 항목만 채택하고, 없으면 이번 턴의 창 크기는
+    // 건너뛴다 — 다음 result가 새 모델의 값을 싣고 온다.
+    const target = next.modelSwitch?.target ?? null;
+    const usable = target ? entries.filter(([k]) => modelReportMatches(target, k)) : entries;
     // 정확 키 우선, base 일치는 유일할 때만 — 같은 base의 [1m]·비[1m] 키가
     // 공존하면 순서에 따라 오판할 수 있다(codex 지적).
-    const baseHits = entries.filter(([k]) => strip(k) === strip(next.model));
+    const baseHits = usable.filter(([k]) => strip(k) === strip(next.model));
     const match =
-      entries.find(([k]) => k === next.model) ??
+      usable.find(([k]) => k === next.model) ??
       (baseHits.length === 1 ? baseHits[0] : null);
-    const chosen = match ?? (entries.length === 1 ? entries[0] : null);
+    const chosen = match ?? (usable.length === 1 ? usable[0] : null);
     if (chosen && chosen[1].contextWindow > 0) {
       next = { ...next, contextWindow: chosen[1].contextWindow };
     }
   }
+
+  // 모델 전환 확정 대기 해제 — 턴 경계는 "다음 API 호출부터 새 모델"이 확정되는 지점이라,
+  // 여기서부터는 어떤 모델 보고든 실제값으로 믿어도 된다. 표적 보고가 끝내 오지 않는
+  // 경우(CLI가 조용히 다른 모델로 대체)의 고착 방지 안전망이기도 하다. CLI가 자기
+  // 히스토리를 되쏘는 result(isReplay)는 턴 경계가 아니므로 제외한다.
+  if (next.modelSwitch && !payload.isReplay) next = { ...next, modelSwitch: null };
 
   // is_error 결과는 채팅에 남기지 않는다 — store('event' 처리)가 토스트로 알린다.
 

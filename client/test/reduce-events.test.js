@@ -715,3 +715,131 @@ test('session_id 채택: 재개 프리로드의 원본 id는 CLI가 알려 준 f
   assert.equal(fresh.sessionId, 'new-id');
   assert.equal(fresh.idConfirmed, true);
 });
+
+// ----- 모델 전환 확정 대기(modelSwitch) — "바꿔도 적용 안 되고, 입력 없이 바뀐다"의 수정 -----
+// 근거: 실 CLI v2.1.235 stream-json 제어 채널 실측. set_model은 진행 중 턴에서도 약
+// 170ms에 success를 주지만, 전환은 **다음 API 호출**부터 걸리므로 이미 시작된 호출의
+// assistant 이벤트는 이전 모델을 계속 보고한다. 설계 근거:
+// .certify/design/2026-08-23-model-effort-change-desync.html
+const assistantWithModel = (session, model, extra = {}) =>
+  reduceCliEvent(session, {
+    type: 'assistant',
+    message: { id: 'msg_x', role: 'assistant', model, content: [{ type: 'text', text: 'hi' }] },
+    ...extra,
+  });
+
+test('전환 대기 중에는 구모델 assistant 보고가 사용자의 선택을 되돌리지 못한다', () => {
+  // modelSet(=CLI 수용)이 표적을 걸어 둔 직후의 상태
+  const seeded = createSessionState({
+    model: 'sonnet',
+    modelSwitch: { target: 'sonnet' },
+    contextWindow: null,
+  });
+  // 진행 중 턴의 잔류 보고 — 예전에는 이 한 줄이 피커를 opus로 되돌렸다
+  const stale = assistantWithModel(seeded, 'claude-opus-5');
+  assert.equal(stale.model, 'sonnet');
+  assert.deepEqual(stale.modelSwitch, { target: 'sonnet' });
+
+  // 표적 계열의 보고가 오면 채택하고 대기를 푼다 — 표시는 CLI가 해석한 실제 id로 정밀해진다
+  const arrived = assistantWithModel(stale, 'claude-sonnet-5');
+  assert.equal(arrived.model, 'claude-sonnet-5');
+  assert.equal(arrived.modelSwitch, null);
+
+  // 대기가 풀린 뒤에는 종전 규칙 그대로 — 대역외 전환(채팅 /model)은 다시 수확된다
+  const outOfBand = assistantWithModel(arrived, 'claude-opus-5');
+  assert.equal(outOfBand.model, 'claude-opus-5');
+});
+
+test('전환 대기는 표적 보고가 끝내 안 와도 다음 result가 반드시 푼다(고착 방지)', () => {
+  const seeded = createSessionState({ model: 'fable', modelSwitch: { target: 'fable' } });
+  // CLI가 조용히 다른 모델로 대체한 경우 — 표적 보고는 영영 오지 않는다
+  const stale = assistantWithModel(seeded, 'claude-sonnet-5');
+  assert.equal(stale.model, 'fable', '턴 도중에는 아직 표적을 기다린다');
+
+  const ended = reduceCliEvent(stale, { type: 'result', subtype: 'success', usage: {} });
+  assert.equal(ended.modelSwitch, null);
+
+  // 다음 턴부터는 실제값이 그대로 표시된다 — 거짓말을 고집하지 않는다
+  const next = assistantWithModel(ended, 'claude-sonnet-5');
+  assert.equal(next.model, 'claude-sonnet-5');
+});
+
+test('CLI 히스토리 되쏘기(result isReplay)는 턴 경계가 아니라 대기를 풀지 않는다', () => {
+  const seeded = createSessionState({ model: 'sonnet', modelSwitch: { target: 'sonnet' } });
+  const replayed = reduceCliEvent(seeded, {
+    type: 'result', subtype: 'success', usage: {}, isReplay: true,
+  });
+  assert.deepEqual(replayed.modelSwitch, { target: 'sonnet' });
+});
+
+test('전환 대기 중 늦게 도착한 구모델 init도 선택을 되돌리지 못한다', () => {
+  const seeded = createSessionState({ model: 'sonnet', modelSwitch: { target: 'sonnet' } });
+  // 전환 이전에 시작된 턴의 init — 부속 필드(cwd·session_id)는 그대로 받아들인다
+  const stale = reduceCliEvent(seeded, {
+    type: 'system', subtype: 'init', session_id: 'sid', model: 'claude-opus-5[1m]', cwd: '/w',
+  });
+  assert.equal(stale.model, 'sonnet');
+  assert.equal(stale.sessionId, 'sid');
+  assert.equal(stale.cwd, '/w');
+  assert.deepEqual(stale.modelSwitch, { target: 'sonnet' });
+
+  // 표적 계열 init은 채택하고 대기를 푼다 — init은 [1m] 접미사까지 보존된 가장 정밀한 출처다
+  const arrived = reduceCliEvent(stale, {
+    type: 'system', subtype: 'init', model: 'claude-sonnet-5',
+  });
+  assert.equal(arrived.model, 'claude-sonnet-5');
+  assert.equal(arrived.modelSwitch, null);
+});
+
+test('대기가 없으면 init은 종전대로 무조건 채택된다([1m] 접미사 보존)', () => {
+  const seeded = createSessionState({ model: 'claude-opus-5' });
+  const after = reduceCliEvent(seeded, {
+    type: 'system', subtype: 'init', model: 'claude-opus-5[1m]',
+  });
+  assert.equal(after.model, 'claude-opus-5[1m]', 'init이 더 정밀한 출처 — base가 같아도 덮어쓴다');
+});
+
+test('전환 표적 판정은 카탈로그 계열로 하고, 계열 밖 모델은 정규화 base 정확비교로만 맞춘다', () => {
+  // 표적은 카탈로그 value('opus'), 보고는 해석된 id — 문자열로는 절대 같지 않다
+  const byFamily = createSessionState({ model: 'opus', modelSwitch: { target: 'opus' } });
+  assert.equal(assistantWithModel(byFamily, 'claude-opus-5[1m]').model, 'claude-opus-5[1m]');
+
+  // 카탈로그에 없는 사내 별칭 — 부분 일치로 오인하지 않고 정확비교만 통과시킨다
+  const custom = createSessionState({ model: 'acme-x', modelSwitch: { target: 'acme-x' } });
+  assert.equal(assistantWithModel(custom, 'acme-x-mini').model, 'acme-x', '유사 이름은 표적이 아니다');
+  assert.equal(assistantWithModel(custom, 'acme-x').modelSwitch, null, '정확히 같으면 확정');
+});
+
+test('서브에이전트 assistant는 전환 대기와 무관하게 본선 모델을 건드리지 않는다', () => {
+  const seeded = createSessionState({ model: 'sonnet', modelSwitch: { target: 'sonnet' } });
+  const sub = assistantWithModel(seeded, 'claude-haiku-4-5', { parent_tool_use_id: 'tu_1' });
+  assert.equal(sub.model, 'sonnet');
+  assert.deepEqual(sub.modelSwitch, { target: 'sonnet' });
+});
+
+test('전환 대기 중 구모델 result의 컨텍스트 창은 새 모델에 붙지 않는다(CTX 분모 오염 방지)', () => {
+  // Opus 1M → Sonnet 전환 직후, 아직 Opus로 돌던 턴이 끝난다.
+  const seeded = createSessionState({
+    model: 'sonnet',
+    modelSwitch: { target: 'sonnet' },
+    contextWindow: null,
+  });
+  const staleResult = reduceCliEvent(seeded, {
+    type: 'result',
+    subtype: 'success',
+    usage: {},
+    modelUsage: { 'claude-opus-5[1m]': { contextWindow: 1_000_000 } },
+  });
+  // 1M 분모가 200k짜리 세션에 붙으면 사용률이 1/5로 축소 표시된다 — 건너뛰는 게 맞다.
+  assert.equal(staleResult.contextWindow, null);
+  assert.equal(staleResult.modelSwitch, null, '대기 자체는 턴 경계에서 풀린다');
+
+  // 표적과 맞는 항목이면 대기 중이라도 그대로 채택한다(전환이 같은 턴에 걸린 경우).
+  const matched = reduceCliEvent(seeded, {
+    type: 'result',
+    subtype: 'success',
+    usage: {},
+    modelUsage: { 'claude-sonnet-5': { contextWindow: 200_000 } },
+  });
+  assert.equal(matched.contextWindow, 200_000);
+});

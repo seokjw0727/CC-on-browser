@@ -14,11 +14,10 @@ import { openSubagents } from '../lib/subagents.js';
 import { fmtTok, fmtReset, contextWindowFor, hasDisplayableCtx } from '../lib/format.js';
 import { familyOf, buildModelOptions } from '../lib/model-catalog.js';
 import {
-  EFFORT_LEVELS,
   DEFAULT_EFFORT,
   EFFORT_HELP,
   effortLabel,
-  isUiEffort,
+  visibleEffortLevels,
   effortIndexFromRatio,
   effortRatioFromIndex,
   nextEffortIndex,
@@ -201,20 +200,22 @@ function EffortPicker({ session, options, disabled, onSelect }) {
   // xhigh + 플래그로 나가므로, 그 모델이 xhigh를 지원할 때만 노출한다 — 지원하지 않는
   // 수준을 보내지 않기 위한 조건이다(codex 지적). 목록 자체를 보고하지 않는 모델은
   // 판단 근거가 없으니 전부 노출한다(기존 동작).
-  const reported = opt?.cliEntry?.supportedEffortLevels;
-  const levels = reported?.length
-    ? EFFORT_LEVELS.filter((l) => (isUiEffort(l.value)
-      ? reported.includes('xhigh')
-      : reported.includes(l.value)))
-    : EFFORT_LEVELS;
   const cur = session.effort ?? DEFAULT_EFFORT;
-  const curIdx = Math.max(0, levels.findIndex((l) => l.value === cur));
+  // 표시 목록 계산(지원 목록 필터 + 현재 값 보존)은 lib/effort.js가 단일 출처다 —
+  // 순수 함수라 node --test로 직접 검증한다(왜 현재 값을 남기는지는 그쪽 주석).
+  const levels = visibleEffortLevels(opt?.cliEntry?.supportedEffortLevels, cur);
+  const curIdx = levels.findIndex((l) => l.value === cur);
+  // 그래도 -1이면 EFFORT_LEVELS 자체에 없는 미지의 값이다(방어) — 위치를 특정할 수 없으니
+  // 기본값 자리에 두되, 라벨은 원값을 그대로 보여 준다(없는 값을 '낮음'이라 말하지 않는다).
+  const anchorIdx = curIdx >= 0
+    ? curIdx
+    : Math.max(0, levels.findIndex((l) => l.value === DEFAULT_EFFORT));
   // 조작 중(그리고 커밋 결과가 돌아오기 전까지)의 표시값 — 성공하면 cur가 따라오고,
   // 실패하면 onSelect가 끝나는 시점에 놓아 실제값으로 되돌아간다.
   const [previewIdx, setPreviewIdx] = useState(null);
-  const shownIdx = previewIdx == null ? curIdx : Math.min(previewIdx, levels.length - 1);
-  const shown = levels[shownIdx] ?? levels[curIdx];
-  const shownLabel = shown?.label ?? cur;
+  const shownIdx = previewIdx == null ? anchorIdx : Math.min(previewIdx, levels.length - 1);
+  const shown = levels[shownIdx] ?? levels[anchorIdx];
+  const shownLabel = previewIdx == null && curIdx < 0 ? effortLabel(cur) : (shown?.label ?? cur);
   const ultraActive = !!shown?.ultra;
   const railRef = useRef(null);
   const commitTimerRef = useRef(null);
@@ -433,7 +434,7 @@ function readAsBase64(file) {
 
 export default function Composer() {
   const {
-    state, dispatch, send, startSession, stopSession, setEffort, getState, notify, jumpTo,
+    state, dispatch, send, startSession, stopSession, setEffort, setModel, getState, notify, jumpTo,
   } = useStore();
   const session = useActiveSession();
   const [text, setText] = useState('');
@@ -762,18 +763,52 @@ export default function Composer() {
     });
   };
 
-  // 낙관적 UI 갱신은 실제 전송이 성공했을 때만 — 끊긴 상태에서 바꾸면
-  // CLI에 전달되지 않는데 UI만 바뀌어 모델/권한모드가 desync되는 것을 막는다.
-  // 변경 확인은 채팅 기록이 아니라 토스트로 알린다(CLI의 로컬 커맨드 에코는
-  // reduce-cli-event가 채팅에서 걸러낸다).
-  const changeModel = (model) => {
+  // 모델 변경은 **전송 성공이 아니라 CLI의 수용**을 기다린다. 예전에는 소켓 write가
+  // 성공하면 곧바로 피커를 바꿨는데, CLI가 그 모델을 거부해도(인식 불가 id·조직 제한·
+  // consent 미승인) 화면만 새 모델로 남아 실제 세션과 어긋났다 — 사용자에겐 "바꿨는데
+  // 적용이 안 된다"로 보인 증상의 절반이다. 이제 표시 갱신은 modelSet 방송을 받은
+  // 리듀서 한 곳에서만 일어나고, 여기서는 결론을 말로 알린다.
+  // 변경 확인은 채팅 기록이 아니라 토스트로(CLI의 로컬 커맨드 에코는 reduce-cli-event가
+  // 채팅에서 걸러낸다).
+  const changeModel = async (model) => {
     if (!session || !model) return;
-    if (!send({ type: 'setModel', key: session.key, model })) return;
-    // contextWindow도 리셋 — 이전 모델의 result가 보고한 창은 새 모델에 무효,
-    // 다음 result까지 카탈로그 휴리스틱으로 폴백한다.
-    dispatch({ type: 'update-session', key: session.key, fn: (s) => ({ ...s, model, spawnModel: model, contextWindow: null }) });
+    const key = session.key;
     const opt = modelOptions.find((o) => o.value === model);
-    notify(`모델 변경: ${opt ? `Claude ${opt.name} ${opt.version}` : model}`);
+    const label = opt ? `Claude ${opt.name} ${opt.version}` : model;
+    // 이 요청을 보내기 직전의 스폰 계보 — 아래 'unknown' 처리가 "그 사이 다른 변경이
+    // 성공했는가"를 판정하는 기준이다(겹친 변경에서 늦게 끝난 요청이 최신 계보를
+    // 지우지 않도록 — codex 지적).
+    const spawnBefore = getState().sessions.get(key)?.spawnModel ?? null;
+    const outcome = await setModel(key, model);
+    // 왕복을 기다리는 동안 이 세션이 사라졌으면(닫힘·재시작 대체) 조용히 접는다 —
+    // 지금 보고 있는 다른 대화에 남의 세션 소식을 띄우지 않기 위해.
+    if (!getState().sessions.has(key)) return;
+    if (outcome === 'applied') {
+      notify(`모델 변경: ${label}`);
+    } else if (outcome === 'unsent') {
+      notify(`모델을 바꾸지 못했습니다: ${label} — 서버와 연결이 끊겼습니다`, 'error');
+    } else if (outcome === 'unknown') {
+      // 적용됐는지 모른다 = **스폰 계보를 더는 신뢰할 수 없다**. 구버전 데몬은 ack 없이도
+      // set_model을 CLI에 전달하므로 이미 바뀌었을 수 있는데, 그때 옛 spawnModel을 그대로
+      // 두면 이후 노력 수준 폴백 재시작이 `--model <옛 모델>`로 되살려 사용자가 버린
+      // 모델로 되돌아간다 — 이번 수정이 없애려던 "입력 없이 바뀐다" 증상 그대로다.
+      // null은 "계보 모름"이라 재시작이 --model을 생략하고, --resume이면 트랜스크립트의
+      // 실제 모델로 이어진다. 표시(model)는 건드리지 않는다 — 그쪽은 CLI 보고가 고친다.
+      // 단, 기다리는 동안 **다른 변경이 성공했다면** 그쪽 계보가 최신이자 검증된 값이다 —
+      // 그걸 이 늦은 타임아웃이 지우면 안 된다(연타 시 A 대기 중 B 성공 → A 타임아웃).
+      dispatch({
+        type: 'update-session',
+        key,
+        fn: (s) => (s.spawnModel === spawnBefore ? { ...s, spawnModel: null } : s),
+      });
+      // 'refused'는 서버가 사유를 담은 error 프레임을 이미 토스트로 띄웠다 —
+      // 여기서 덧붙이면 같은 실패가 두 번 뜬다. 'unknown'만 우리가 알린다.
+      notify(
+        `모델 변경이 적용됐는지 확인하지 못했습니다: ${label}`
+        + ' — 데몬이 구버전이면 이미 적용됐을 수 있습니다. 다음 응답의 모델 표시를 확인해 주세요',
+        'error',
+      );
+    }
   };
   // 권한 모드 변경은 컴포저를 떠나 메인 우측 상단으로 옮겼다(PermissionModeBar.jsx).
   // effort 변경은 **런타임 채널이 우선**이다 — CLI v2.1.233 실측: apply_flag_settings

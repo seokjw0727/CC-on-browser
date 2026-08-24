@@ -38,6 +38,44 @@ test('effortSet: 런타임 적용 방송이 UI 티어로 역매핑돼 반영된�
   assert.equal(after.pendingStarts.size, 0);
 });
 
+test('modelSet: CLI가 수용한 모델만 반영하고 전환 확정 대기를 건다', () => {
+  let s = stateWithSession('k', {
+    model: 'claude-opus-5[1m]',
+    spawnModel: 'opus[1m]',
+    contextWindow: 1_000_000,
+  });
+  s = reducer(s, serverMsg({ type: 'modelSet', key: 'k', reqId: 'md_x_1', model: 'sonnet' }));
+  const after = s.sessions.get('k');
+  assert.equal(after.model, 'sonnet');
+  // 스폰 계보 — CLI가 실제로 받아들인 값만 담긴다(재시작 --model 인자로 재사용 가능)
+  assert.equal(after.spawnModel, 'sonnet');
+  // 이전 모델 기준의 창 크기는 무효 — 다음 result까지 카탈로그 휴리스틱 폴백
+  assert.equal(after.contextWindow, null);
+  // 표적을 걸어 둬야 진행 중 턴의 구모델 보고가 이 선택을 되돌리지 못한다
+  assert.deepEqual(after.modelSwitch, { target: 'sonnet' });
+
+  // 연속 변경 — 새 표적이 옛 표적을 대체한다(옛 표적이 남으면 최신 보고가 버려진다)
+  s = reducer(s, serverMsg({ type: 'modelSet', key: 'k', reqId: 'md_x_2', model: 'haiku' }));
+  assert.deepEqual(s.sessions.get('k').modelSwitch, { target: 'haiku' });
+
+  // 모델이 빠진 방송은 세션을 건드리지 않는다(형상 방어). updateSession은 세션 객체가
+  // 그대로여도 state·Map은 새로 만들므로, 동일성이 아니라 내용으로 확인한다.
+  const before = s.sessions.get('k');
+  const nulled = reducer(s, serverMsg({ type: 'modelSet', key: 'k', model: null }));
+  assert.equal(nulled.sessions.get('k'), before);
+  // 이 탭에 없는 세션의 방송은 상태 전체가 그대로다(updateSession이 원본을 돌려준다)
+  assert.equal(reducer(s, serverMsg({ type: 'modelSet', key: 'ghost', model: 'opus' })), s);
+});
+
+test('exit: 프로세스가 죽으면 모델 전환 확정 대기도 함께 풀린다(수확 고착 방지)', () => {
+  let s = stateWithSession('k', { modelSwitch: { target: 'sonnet' }, backgroundTasks: [{ task_id: 't' }] });
+  s = reducer(s, serverMsg({ type: 'exit', key: 'k', code: 0 }));
+  const after = s.sessions.get('k');
+  assert.equal(after.status, 'exited');
+  assert.equal(after.modelSwitch, null);
+  assert.deepEqual(after.backgroundTasks, []);
+});
+
 test('remove-session: 세션을 제거하고, 활성이었으면 남은 세션으로 전환(없으면 null)', () => {
   let s = stateWithSession('a');
   s.sessions.set('b', createSessionState({ key: 'b' }));

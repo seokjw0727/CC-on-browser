@@ -502,6 +502,73 @@ test('setEffort: 구버전 CLI(제어 요청 거부)는 reqId를 실은 error로
   }
 });
 
+test('setModel: CLI가 수용한 뒤에만 modelSet을 전 소켓에 방송한다(reqId 상관)', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
+  // 두 번째 탭 — 성공 방송이 요청 소켓만이 아니라 모두에게 가는지 본다(setEffort와 같은 규약)
+  const other = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
+  client.send({ type: 'start', startId: 'cl_md', cwd: tmpRoot });
+  const started = await client.next((m) => m.type === 'started' && m.startId === 'cl_md');
+  const key = started.key;
+
+  // 모델이 문자열이 아니면 CLI에 닿기 전에 거부 — reqId는 실패 응답에도 실려야 한다
+  client.send({ type: 'setModel', key, reqId: 'm_bad', model: null });
+  const bad = await client.next((m) => m.type === 'error' && m.reqId === 'm_bad');
+  assert.match(bad.message, /invalid model/);
+
+  client.send({ type: 'setModel', key, reqId: 'm_ok', model: 'sonnet' });
+  const ack = await client.next((m) => m.type === 'modelSet' && m.reqId === 'm_ok');
+  assert.equal(ack.key, key);
+  assert.equal(ack.model, 'sonnet');
+  const echoed = await other.next((m) => m.type === 'modelSet' && m.reqId === 'm_ok');
+  assert.equal(echoed.model, 'sonnet');
+
+  // 구버전 클라이언트(reqId 없이 보냄)도 그대로 동작한다 — 추가 전용 프로토콜이라
+  // 방송은 나가되 reqId:null이라 어떤 대기표도 결착시키지 않는다(그쪽은 낙관 갱신).
+  client.send({ type: 'setModel', key, model: 'opus' });
+  const legacy = await client.next((m) => m.type === 'modelSet' && m.model === 'opus');
+  assert.equal(legacy.reqId, null);
+  // 되돌려 놓고 아래 종단 검증을 이어간다
+  client.send({ type: 'setModel', key, reqId: 'm_ok2', model: 'sonnet' });
+  await client.next((m) => m.type === 'modelSet' && m.reqId === 'm_ok2');
+
+  // 종단 증거: 다음 턴의 assistant가 실제로 새 모델을 보고한다(픽스처가 --model에서
+  // 자기 보고 모델을 파생하듯, set_model도 같은 값을 갈아 끼운다)
+  client.send({ type: 'send', key, text: 'after model change' });
+  const asst = await client.next(
+    (m) => m.type === 'event' && m.key === key && m.payload?.type === 'assistant',
+  );
+  assert.equal(asst.payload.message.model, 'claude-sonnet-5');
+  // 세션은 재시작되지 않았다 — 같은 key로 대화가 계속된다
+  assert.equal(client.messages.some((m) => m.type === 'exit' && m.key === key), false);
+  client.send({ type: 'stop', key });
+  client.close();
+  other.close();
+});
+
+test('setModel: CLI가 거부하면 modelSet 대신 reqId를 실은 error가 온다(UI 낙관 갱신 금지)', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  process.env.FAKE_REJECT_MODEL = 'haiku';
+  try {
+    const client = await TestClient.connect(`${wsBase}/ws?token=${TOKEN}`);
+    client.send({ type: 'start', startId: 'cl_md_no', cwd: tmpRoot });
+    const started = await client.next((m) => m.type === 'started' && m.startId === 'cl_md_no');
+    const key = started.key;
+    client.send({ type: 'setModel', key, reqId: 'm_no', model: 'haiku' });
+    const err = await client.next((m) => m.type === 'error' && m.reqId === 'm_no');
+    assert.equal(err.key, key);
+    assert.match(err.message, /not a recognized model id/);
+    // 거부는 성공 방송을 만들지 않는다 — 이 한 줄이 "거부당했는데 피커만 바뀌던" 회귀를 막는다
+    assert.equal(client.messages.some((m) => m.type === 'modelSet' && m.key === key), false);
+    // 실패해도 세션은 그대로
+    assert.equal(client.messages.some((m) => m.type === 'exit' && m.key === key), false);
+    client.send({ type: 'stop', key });
+    client.close();
+  } finally {
+    delete process.env.FAKE_REJECT_MODEL;
+  }
+});
+
 test('unknown message type 오류에도 reqId가 실린다 (버전 스큐에서 즉시 폴백하도록)', async () => {
   // 이 프레임을 받는 쪽은 대개 "새 클라이언트 + 구 데몬"이다. 상관자가 없으면
   // 요청자는 ack 타임아웃(5초)을 기다린 뒤에야 폴백을 고른다 — setEffort가 그랬다.

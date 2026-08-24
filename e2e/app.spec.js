@@ -638,6 +638,53 @@ test('노력 수준 변경 — 세션 재시작 없이 즉시 적용된다', asy
   await expect(page.getByText(/echo: 노력 수준 후 메시지/).first()).toBeVisible();
 });
 
+test('모델 변경 — CLI가 수용한 뒤에 피커가 바뀌고, 이후 턴에도 저 혼자 되돌아가지 않는다', async ({ page }) => {
+  // 회귀 못박기: 예전 컴포저는 소켓 write가 성공하면 곧바로 피커를 바꿨다(낙관 갱신).
+  // CLI가 그 모델을 거부해도 화면만 새 모델로 남았고, 반대로 진행 중 턴이 보고하는
+  // 이전 모델을 그대로 수확해 사용자가 고른 값이 저절로 되돌아가기도 했다. 이제 표시는
+  // 서버의 modelSet 방송(=CLI 수용) 하나로만 바뀐다.
+  await startSession(page, servers.echo.url);
+  const input = page.getByLabel('메시지 입력');
+  const modelPill = page.locator('.model-menu-btn').first();
+  // 먼저 한 턴을 돌린다. 모델 라벨은 CLI의 init/assistant 보고가 도착해야 채워지므로
+  // 세션 시작 직후에 바로 단언하면 아직 '모델'인 순간을 잡는다 — 같은 이유로 재개 테스트도
+  // 'ping'을 먼저 보낸다. 겸사겸사 이 메시지가 아래에서 '재시작이 아니었다'의 증거가 된다.
+  await input.fill('모델 변경 전 메시지');
+  await input.press('Enter');
+  await expect(page.getByText(/echo: 모델 변경 전 메시지/).first()).toBeVisible();
+  // 기본 스폰(--model 생략) = 가짜 CLI 카탈로그의 default 행 → Opus.
+  await expect(modelPill).toContainText('Opus');
+
+  await modelPill.click();
+  await page.getByRole('menuitemradio', { name: /Sonnet/ }).click();
+
+  // 성공 토스트는 ack를 받았다는 뜻이고, 라벨 변경은 리듀서가 그 방송을 반영했다는 뜻이다.
+  // 콜론까지 포함해 맞춘다 — 실패 토스트도 '모델 변경이 적용됐는지…'로 시작해 부분 일치로는
+  // 둘을 구별하지 못한다(토스트 종류는 부모 요소에만 붙는다).
+  await expect(
+    page.locator('.toast:not(.error) .toast-text').filter({ hasText: '모델 변경: ' }),
+  ).toBeVisible({ timeout: 15_000 });
+  // 실패 안내가 함께 뜨지 않았는지도 확인한다. 전역 오류 토스트 수를 세면 이 테스트가
+  // 무관한 토스트에 흔들린다(과거 릴리스를 세 번 막은 실패 양상이 정확히 그것이었다) —
+  // 이 창구의 실패 문구만 좁혀서 본다.
+  await expect(
+    page.locator('.toast.error .toast-text')
+      .filter({ hasText: /모델(을 바꾸지 못했습니다| 변경이 적용됐는지)/ }),
+  ).toHaveCount(0);
+  await expect(modelPill).toContainText('Sonnet');
+
+  // 그리고 다음 턴이 끝나도 그대로다 — assistant가 보고하는 모델을 수확하는 경로가
+  // 사용자의 선택을 덮지 않는지 본다(가짜 CLI는 set_model 이후 새 모델을 보고한다).
+  await input.fill('모델 변경 후 메시지');
+  await input.press('Enter');
+  await expect(page.getByText(/echo: 모델 변경 후 메시지/).first()).toBeVisible();
+  await expect(modelPill).toContainText('Sonnet');
+  // 재시작이 아니라 런타임 변경이다 — 재시작이었다면 대화가 새 탭으로 옮겨지며 사이드바
+  // 행이 갈렸을 것이다. 변경 전 대화가 그대로 남아 있고 행은 하나여야 한다.
+  await expect(page.getByText(/echo: 모델 변경 전 메시지/).first()).toBeVisible();
+  await expect(page.locator('.sess-row.live')).toHaveCount(1);
+});
+
 test('메시지 타임스탬프 — 사용자 메시지와 답변에 HH:MM이 붙는다', async ({ page }) => {
   await startSession(page, servers.echo.url);
   const input = page.getByLabel('메시지 입력');

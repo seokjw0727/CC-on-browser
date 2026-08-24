@@ -260,6 +260,21 @@ function handle(msg) {
       // 실 CLI v2.1.206 실측 미러: set_model은 로컬 커맨드 에코(user 이벤트, isReplay),
       // set_permission_mode는 system/status 이벤트를 성공 응답과 함께 방출한다.
       if (request?.subtype === 'set_model') {
+        // 실 CLI v2.1.235 실측: 인식할 수 없는 모델 id는 error 응답으로 거부된다
+        // ('Model "bogus-model-xyz" is not a recognized model id.'). 이 거부를 픽스처가
+        // 재현할 수 있어야 "거부당했는데 UI만 바뀌는" desync의 회귀 테스트가 성립한다.
+        // FAKE_REJECT_MODEL에 담긴 값을 요청하면 거부한다(통합 테스트용 스위치).
+        if (process.env.FAKE_REJECT_MODEL && request.model === process.env.FAKE_REJECT_MODEL) {
+          out({
+            type: 'control_response',
+            response: {
+              subtype: 'error',
+              request_id: requestId,
+              error: `Model "${request.model}" is not a recognized model id.`,
+            },
+          });
+          return;
+        }
         // 이후 턴의 assistant·result가 새 모델을 보고하도록 갱신 —
         // 스테일 모델 경로를 픽스처로 재현 가능하게(DA #22 codex 교차검증).
         currentModel = resolveModel(request.model);
