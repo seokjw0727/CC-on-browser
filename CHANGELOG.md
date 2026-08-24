@@ -8,6 +8,30 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.10.5] - 2026-08-24
+
+> 터미널에서 쓰던 세션 이름이 브라우저에도 그대로 보입니다. Claude Code CLI는
+> 세션마다 이름을 자동으로 만들어 두는데, 지금까지 브라우저는 그걸 모른 채 첫
+> 발화 요약을 제목으로 썼습니다 — 같은 세션을 터미널과 브라우저가 서로 다른
+> 이름으로 부르는 셈이었습니다. 이제 사이드바의 세션 목록, 사이드바를 접었을
+> 때의 이름 배지, 지난 세션 목록, 삭제 확인 창이 모두 CLI가 붙인 그 이름을
+> 보여 줍니다.
+> (Sessions now show the CLI's own auto-generated session name in the browser — the
+> sidebar rows, the collapsed-sidebar name badge, the past-session list and the delete
+> confirmation all use the same name you see in the terminal.)
+
+### Added
+- **CLI가 붙인 세션 이름이 화면에 보입니다.** 직접 지정한 이름이 있으면 여전히 그것이
+  먼저이고, 그다음이 CLI 이름, 그것도 없으면 기존처럼 첫 발화 요약으로 돌아갑니다.
+  라이브 세션은 시작되어 id가 확정되는 즉시 이름을 찾아 반영하고, CLI가 이름을 조금
+  늦게 적는 경우도 잠시 기다렸다가 잡아냅니다. `/clear`처럼 세션 id가 바뀌면 옛 이름을
+  붙들지 않고 새 세션의 이름을 다시 찾으며, 브라우저를 새로고침해 다시 접속해도 이름이
+  사라지지 않습니다.
+  (Display priority is custom title → CLI name → first-utterance summary. Live sessions
+  pick the name up as soon as the session id is known, retry briefly when the CLI writes
+  the name file late, drop the stale name when `/clear` or a fork changes the session id,
+  and keep it across reconnects.)
+
 ## [1.10.4] - 2026-08-24
 
 > 입력창에서 모델이나 노력 수준을 바꿔도 적용되지 않거나, 손대지도 않았는데 저 혼자
@@ -765,7 +789,8 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
-[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.4...HEAD
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.5...HEAD
+[1.10.5]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.4...v1.10.5
 [1.10.4]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.3...v1.10.4
 [1.10.3]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.2...v1.10.3
 [1.10.2]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.1...v1.10.2
