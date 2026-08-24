@@ -8,6 +8,61 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.10.4] - 2026-08-24
+
+> 입력창에서 모델이나 노력 수준을 바꿔도 적용되지 않거나, 손대지도 않았는데 저 혼자
+> 바뀌던 문제를 고쳤습니다. 세 가지 원인이 겹쳐 있었습니다 — 모델 변경을 CLI가 받아들였는지
+> 확인하지 않고 화면만 먼저 바꾸던 것, 진행 중인 답변이 계속 보고하는 **이전** 모델을 그대로
+> 받아 방금 고른 모델을 되돌리던 것, 그리고 모델마다 쓸 수 있는 노력 수준이 다른 탓에
+> 슬라이더가 '낮음'으로 내려앉던 것입니다.
+> (Fixes model / effort-level changes in the composer that either did not take effect or
+> changed by themselves: the model switch was applied to the UI before the CLI accepted it,
+> in-flight turns kept reporting the *previous* model and overwrote the choice, and the
+> effort slider collapsed to '낮음' whenever the current level was outside the new model's
+> supported list.)
+
+### Fixed
+- **모델을 바꿨는데 적용되지 않던 것.** 예전에는 서버로 요청을 보내는 데 성공하기만 하면
+  화면의 모델 피커를 곧바로 바꿨습니다. 그런데 Claude CLI는 모델을 거부할 수 있습니다 —
+  알 수 없는 모델 id, 조직 정책 제한, 동의가 필요한 모델 등. 그때 화면만 새 모델로 남아
+  실제 세션과 어긋났고, 사용자에게는 "바꿨는데 그대로 옛 모델로 답한다"로 보였습니다.
+  이제 CLI가 실제로 받아들인 뒤에야 피커가 바뀝니다. 거부되면 피커는 그대로 있고 CLI가
+  알려 준 사유가 표시됩니다. 응답이 아예 없으면(데몬이 구버전인 경우) 실패로 단정하지 않고
+  "적용됐는지 확인하지 못했다"고 알립니다 — 그 데몬도 변경 자체는 CLI에 전달하므로 이미
+  적용됐을 수 있고, 실패라고 말하면 반대 방향의 거짓이 되기 때문입니다.
+  (Model changes now wait for the CLI's acknowledgement before the picker moves. A refusal
+  leaves the picker untouched and surfaces the CLI's own reason; a missing acknowledgement is
+  reported as "could not confirm" rather than as a failure, because a stale daemon still
+  forwards the change.)
+- **손대지 않았는데 모델 표시가 저 혼자 바뀌던 것.** 모델 전환은 다음 API 호출부터 걸리므로,
+  이미 시작된 답변은 계속 **이전** 모델을 보고합니다. 그 보고를 그대로 받아들여 방금 고른
+  모델이 되돌아갔고, 다음 턴에 새 모델 보고가 오면 또 혼자 바뀌었습니다(왕복). 이제 전환이
+  확정될 때까지는 고른 모델과 같은 계열의 보고만 받아들입니다. 대기가 영구히 걸리지 않도록
+  다음 턴이 끝나는 시점과 세션 종료가 반드시 이 대기를 풀어 주므로, CLI가 조용히 다른 모델로
+  대체한 경우에도 다음 턴부터는 실제 모델이 그대로 보입니다.
+  (An in-flight turn's stale model report no longer overwrites a just-made switch; the pending
+  state is always released at the next turn boundary or on session exit, so a CLI-side
+  substitution still surfaces truthfully from the following turn.)
+- **모델을 바꾸면 CTX 사용률이 실제보다 훨씬 낮게 보이던 것.** 1M 컨텍스트 모델에서 200k
+  모델로 바꾼 직후, 아직 이전 모델로 돌던 답변이 끝나면서 보고한 1M 창 크기가 새 모델에
+  붙어 사용률이 1/5로 축소 표시됐습니다. 전환이 확정되기 전에는 이전 모델의 창 크기를
+  받아들이지 않습니다.
+  (The context-window denominator is no longer taken from the previous model's turn while a
+  switch is pending — a 1M→200k switch used to show CTX% at a fifth of the real value.)
+- **모델을 바꾸면 노력 수준 슬라이더가 '낮음'으로 내려앉던 것.** 쓸 수 있는 노력 수준은
+  모델마다 다른데, 현재 값이 새 모델의 목록에 없으면 슬라이더가 위치를 못 찾아 맨 왼쪽으로
+  뭉개졌습니다. 이제 현재 값을 표시에서 잃지 않습니다. 표시로만 남는 것이라 그 모델이
+  지원하지 않는 수준이 새로 전송되지는 않습니다.
+  (The effort slider keeps the current level visible even when the new model does not list it,
+  instead of collapsing to the lowest tier; retention is display-only and never sends an
+  unsupported level.)
+- **적용 여부를 확인하지 못한 모델 변경 뒤에 세션이 재시작되면 버린 모델로 되살아나던 것.**
+  노력 수준 변경이 구버전 CLI에서 세션 재시작으로 폴백할 때 쓰는 스폰 인자가, 확인되지 않은
+  모델 변경 뒤에도 옛 모델을 가리키고 있었습니다. 이제 확인하지 못한 변경 뒤에는 그 인자를
+  비워, 재시작이 대화의 실제 모델로 이어집니다.
+  (After an unconfirmed model change the spawn lineage is cleared, so the effort-restart
+  fallback no longer respawns the model the user just abandoned.)
+
 ## [1.10.3] - 2026-08-23
 
 > 화면 크롬 정리입니다. 입력창 위의 레포 pill을 걷어내 새 세션 진입을 사이드바
@@ -710,7 +765,8 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
-[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.3...HEAD
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.4...HEAD
+[1.10.4]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.3...v1.10.4
 [1.10.3]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.2...v1.10.3
 [1.10.2]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.1...v1.10.2
 [1.10.1]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.0...v1.10.1
