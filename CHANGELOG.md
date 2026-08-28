@@ -8,6 +8,40 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.10.6] - 2026-08-29
+
+> 지난 세션 목록에서 CLI 이름이 보이지 않던 것을 고쳤습니다. 지난 릴리스에서 터미널의
+> 세션 이름을 브라우저에도 띄웠는데, 정작 목록에서는 여전히 첫 발화 요약만 보이는
+> 경우가 대부분이었습니다. 원인은 Claude Code CLI가 세션이 끝나면 이름을 적어 둔 파일을
+> 스스로 지운다는 데 있었습니다 — 그 이름은 트랜스크립트에도 없어서, 세션이 끝나는
+> 순간 어디에도 남지 않았습니다. 이제 한 번이라도 본 이름을 따로 적어 두었다가 세션이
+> 끝난 뒤에 대신 보여 줍니다. 터미널에서 이름을 바꾸면 살아 있는 이름이 언제나
+> 먼저이므로, 바뀐 이름이 그 즉시 반영됩니다.
+> (Fixes CLI session names disappearing from the past-session list: the CLI deletes its
+> own name file when a session ends, so a finished session's name survived nowhere. Names
+> we have observed are now remembered and used as a fallback once that file is gone; the
+> live file always wins, so renaming in the terminal still shows up immediately.)
+
+### Fixed
+- **끝난 세션의 CLI 이름이 목록에서 사라지던 것.** 관찰한 이름을 앱 소유 디렉터리
+  (`~/.cc-on-browser/session-names.json`)에 적어 두고, CLI가 이름 파일을 지운 뒤의
+  폴백으로 씁니다. 살아 있는 파일이 언제나 우선이라 CLI에서 이름을 바꾸면 곧바로
+  새 이름이 보이고, 저장소는 그 파일이 사라진 뒤만 메웁니다. 저장은 임시 파일에 쓴 뒤
+  이름 바꾸기로 원자 교체하며, 읽지 못한 저장소 위에는 절대 쓰지 않습니다 — 일시적인
+  읽기 실패를 "비어 있음"으로 오해해 기억 전체를 덮어쓰지 않기 위해서입니다. 항목은
+  500개까지만 유지하고 오래된 것부터 버립니다.
+  (Observed names are persisted to `~/.cc-on-browser/session-names.json` and used only as a
+  fallback after the CLI removes its own file. Writes go through a temp file + atomic
+  rename, are serialized per store path, never proceed on top of an unreadable store, and
+  are capped at 500 entries.)
+
+### Changed
+- **이름 저장소는 실제 앱 실행에서만 켜집니다.** 부수효과를 갖는 기능이라 진입점
+  (`bin/cc-on-browser.mjs`)만 옵트인하고, 라이브러리로서의 `startServer` 기본값은
+  "저장소 없음"입니다 — 서버를 띄우는 것만으로 홈 디렉터리에 파일이 생기지 않습니다.
+  (The name store is opt-in from the app entry point only; `startServer`'s default remains
+  side-effect free.)
+
 ## [1.10.5] - 2026-08-24
 
 > 터미널에서 쓰던 세션 이름이 브라우저에도 그대로 보입니다. Claude Code CLI는
@@ -789,7 +823,8 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
-[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.5...HEAD
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.6...HEAD
+[1.10.6]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.5...v1.10.6
 [1.10.5]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.4...v1.10.5
 [1.10.4]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.3...v1.10.4
 [1.10.3]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.2...v1.10.3
