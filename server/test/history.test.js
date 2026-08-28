@@ -171,6 +171,42 @@ test('listRecentSessions/listSessions join cliName by sessionId', async () => {
   assert.equal(sessions.find((x) => x.sessionId === 'bbbb-2222').cliName, null);
 });
 
+// 이 기능의 핵심 회귀 방어 — CLI는 끝나면 자기 이름 파일을 지운다. 저장소가 없으면
+// 지난 세션 목록의 cliName은 언제나 null이고, 그것이 원래의 버그였다.
+test('listRecentSessions/listSessions keep cliName after the CLI name file is gone', async (t) => {
+  const { root } = await makeRoot();
+  const sessionsRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'cc-names-'));
+  const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cc-name-store-'));
+  t.after(() => Promise.all([
+    fs.rm(root, { recursive: true, force: true }).catch(() => {}),
+    fs.rm(sessionsRoot, { recursive: true, force: true }).catch(() => {}),
+    fs.rm(storeDir, { recursive: true, force: true }).catch(() => {}),
+  ]));
+  const nameStore = { storeFile: path.join(storeDir, 'session-names.json') };
+  const nameFile = path.join(sessionsRoot, '4321.json');
+  await fs.writeFile(
+    nameFile,
+    J({ pid: 4321, sessionId: 'aaaa-1111', name: 'cc-on-browser-ec', nameSource: 'derived', nameSince: 5 }),
+    'utf8',
+  );
+
+  clearCliSessionNameCache();
+  const live = await listRecentSessions(root, 12, sessionsRoot, nameStore);
+  assert.equal(live.find((r) => r.sessionId === 'aaaa-1111').cliName, 'cc-on-browser-ec');
+
+  // CLI 종료 — 이름 파일이 사라진다.
+  await fs.rm(nameFile);
+  clearCliSessionNameCache();
+
+  const recent = await listRecentSessions(root, 12, sessionsRoot, nameStore);
+  assert.equal(recent.find((r) => r.sessionId === 'aaaa-1111').cliName, 'cc-on-browser-ec');
+  clearCliSessionNameCache();
+  const sessions = await listSessions(root, 'C--fake-project', sessionsRoot, nameStore);
+  assert.equal(sessions.find((s) => s.sessionId === 'aaaa-1111').cliName, 'cc-on-browser-ec');
+  // 이름을 본 적 없는 세션은 여전히 null이다 — 저장소가 없는 이름을 지어내지 않는다.
+  assert.equal(sessions.find((s) => s.sessionId === 'bbbb-2222').cliName, null);
+});
+
 test('cliName is null when the CLI sessions directory does not exist', async () => {
   const { root } = await makeRoot();
   clearCliSessionNameCache();

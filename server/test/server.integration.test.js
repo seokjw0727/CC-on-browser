@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import { startServer } from '../src/server.js';
 import { saveClipboardFile } from '../src/attachments.js';
-import { clearCliSessionNameCache } from '../src/cli-session-names.js';
+import { clearCliSessionNameCache, defaultNameStoreFile } from '../src/cli-session-names.js';
 
 const fakeCliPath = fileURLToPath(new URL('./fake-cli.mjs', import.meta.url));
 const TOKEN = 'test-token-abc123';
@@ -2037,6 +2037,108 @@ test('cliName: /api/sessions·/api/recent-sessions가 주입된 sessionsRoot의 
   } finally {
     await h.close();
   }
+});
+
+// 배선 회귀 방어 — hub와 목록 endpoint가 **같은 저장소**를 봐야 한다. 라이브에서 본
+// 이름이 저장소에 남지 않으면, CLI가 끝나며 이름 파일을 지운 뒤 목록의 cliName은
+// 영영 null이다(이 기능이 고치려는 바로 그 증상).
+test('cliName: 라이브에서 본 이름이 이름 파일 삭제 뒤에도 목록에 남는다', async () => {
+  process.env.FAKE_SCENARIO = 'echo';
+  const caseRoot = await fs.mkdtemp(path.join(tmpRoot, 'store-'));
+  const sessionsRoot = path.join(caseRoot, 'cli-sessions');
+  const projRoot = path.join(caseRoot, 'projects');
+  const projDir = path.join(projRoot, 'C--fake-proj');
+  await fs.mkdir(sessionsRoot, { recursive: true });
+  await fs.mkdir(projDir, { recursive: true });
+  // fake CLI가 보고하는 sessionId와 같은 이름의 트랜스크립트 — 목록이 이 행을 낸다.
+  await fs.writeFile(
+    path.join(projDir, 'fake-session-1.jsonl'),
+    JSON.stringify({ type: 'user', cwd: 'C:\\fake', message: { role: 'user', content: [{ type: 'text', text: '첫 발화' }] } }) + '\n',
+    'utf8',
+  );
+  const nameFile = path.join(sessionsRoot, '999.json');
+  await fs.writeFile(
+    nameFile,
+    JSON.stringify({ pid: 999, sessionId: 'fake-session-1', name: 'fake-name-x', nameSource: 'derived', nameSince: 9 }),
+    'utf8',
+  );
+  clearCliSessionNameCache();
+
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot: projRoot,
+    sessionsRoot,
+    nameStoreFile: path.join(caseRoot, 'session-names.json'),
+    staticDir,
+  });
+  const auth = { headers: { 'x-auth-token': TOKEN } };
+  const client = await TestClient.connect(`ws://127.0.0.1:${h.port}/ws?token=${TOKEN}`);
+  try {
+    client.send({ type: 'start', startId: 'st1', cwd: process.cwd() });
+    await client.next((m) => m.type === 'sessionName' && m.cliName === 'fake-name-x', 8000);
+
+    // CLI 종료 = 이름 파일 삭제. 이후 목록은 저장소에만 기댄다.
+    await fs.rm(nameFile);
+    clearCliSessionNameCache();
+
+    const recent = await (await fetch(`http://127.0.0.1:${h.port}/api/recent-sessions`, auth)).json();
+    assert.equal(recent.find((r) => r.sessionId === 'fake-session-1').cliName, 'fake-name-x');
+    clearCliSessionNameCache();
+    const sessions = await (await fetch(`http://127.0.0.1:${h.port}/api/sessions?dir=C--fake-proj`, auth)).json();
+    assert.equal(sessions.find((s) => s.sessionId === 'fake-session-1').cliName, 'fake-name-x');
+  } finally {
+    client.close();
+    await h.close();
+  }
+});
+
+// nameStoreFile을 주지 않은 서버는 **아무것도 기억하지 않아야** 한다. 이 파일의
+// startServer 호출 서른 곳 남짓이 그렇게 부르므로, 기본이 켜짐으로 뒤집히면 그것들이
+// 전부 개발자의 실제 ~/.cc-on-browser에 쓴다. 그 회귀를 동작으로 잡는다 —
+// 홈을 들여다보는 대신 "이름이 살아남지 않는다"를 단언한다(codex 지적).
+test('cliName: 이름 저장소를 켜지 않으면 기억하지 않는다(기본 꺼짐)', async () => {
+  const caseRoot = await fs.mkdtemp(path.join(tmpRoot, 'nostore-'));
+  const sessionsRoot = path.join(caseRoot, 'cli-sessions');
+  const projDir = path.join(caseRoot, 'projects', 'C--fake-proj');
+  await fs.mkdir(sessionsRoot, { recursive: true });
+  await fs.mkdir(projDir, { recursive: true });
+  await fs.writeFile(
+    path.join(projDir, 'aaaa-1111.jsonl'),
+    JSON.stringify({ type: 'user', cwd: 'C:\\fake', message: { role: 'user', content: [{ type: 'text', text: '첫 발화' }] } }) + '\n',
+    'utf8',
+  );
+  const nameFile = path.join(sessionsRoot, '998.json');
+  await fs.writeFile(
+    nameFile,
+    JSON.stringify({ pid: 998, sessionId: 'aaaa-1111', name: 'no-store', nameSince: 3 }),
+    'utf8',
+  );
+  clearCliSessionNameCache();
+
+  const h = await startServer({
+    port: 0, token: TOKEN, cliPath: process.execPath, cliArgsPrefix: [fakeCliPath],
+    projectsRoot: path.join(caseRoot, 'projects'), sessionsRoot, staticDir,
+  });
+  const auth = { headers: { 'x-auth-token': TOKEN } };
+  const list = async () => (await (await fetch(`http://127.0.0.1:${h.port}/api/recent-sessions`, auth)).json())
+    .find((r) => r.sessionId === 'aaaa-1111');
+  try {
+    assert.equal((await list()).cliName, 'no-store', '살아 있는 파일은 그대로 읽는다');
+    await fs.rm(nameFile);
+    clearCliSessionNameCache();
+    assert.equal((await list()).cliName, null, '저장소가 꺼져 있으면 이름이 남지 않는다');
+  } finally {
+    await h.close();
+  }
+});
+
+test('defaultNameStoreFile: 앱 소유 디렉터리를 가리키고 스스로 만들지 않는다', async () => {
+  const home = await fs.mkdtemp(path.join(tmpRoot, 'home-'));
+  assert.equal(defaultNameStoreFile(home), path.join(home, '.cc-on-browser', 'session-names.json'));
+  await assert.rejects(fs.stat(path.join(home, '.cc-on-browser')), { code: 'ENOENT' });
 });
 
 test('cliName: 이름을 못 찾은 라이브 세션은 sessionName을 방송하지 않는다', async () => {

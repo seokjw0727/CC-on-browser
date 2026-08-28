@@ -38,8 +38,14 @@ export class SessionHub extends EventEmitter {
     // CLI가 세션 이름을 적어 두는 디렉터리 — 목록 endpoint와 **같은 값**이어야 한다.
     // 서버가 주입한 경로를 여기에 넘기지 않으면 라이브 세션만 기본 경로를 본다.
     sessionsRoot,
+    // 이름 저장소 파일 — 목록 endpoint와 **같은 값**이어야 한다. 끝난 CLI가 자기
+    // 이름 파일을 지우므로, 여기서 본 이름이 저장소에 남아야 지난 세션 목록이 그것을
+    // 다시 찾는다(cli-session-names.js 머리말). 주지 않으면 저장소를 쓰지 않는다.
+    nameStoreFile,
     // (sessionId) => Promise<string|null> — CLI가 붙인 세션 이름 조회. 테스트 주입용.
-    lookupSessionName = (sessionId) => lookupCliSessionName(sessionId, sessionsRoot),
+    lookupSessionName = (sessionId) => (
+      lookupCliSessionName(sessionId, sessionsRoot, { storeFile: nameStoreFile })
+    ),
     // 이름 재조회의 간격·횟수 — 테스트 주입용(예산 소진 경로를 초 단위로 기다리지 않기 위해).
     cliNameRetryMs = CLI_NAME_RETRY_MS,
     cliNameMaxTries = CLI_NAME_MAX_TRIES,

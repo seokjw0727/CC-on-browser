@@ -18,6 +18,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../server/src/server.js';
 import { createLifecycle } from '../server/src/lifecycle.js';
+import { defaultNameStoreFile } from '../server/src/cli-session-names.js';
 import {
   readInstanceFile,
   writeInstanceFile,
@@ -506,6 +507,10 @@ try {
     // 붙여넣기 임시 폴더 청소는 실제 앱 기동에서만 켠다 — 이 부수효과가 startServer의
     // 기본값이면 테스트가 서버를 띄우는 것만으로 사용자 %TEMP%를 지운다.
     pasteCleanup: true,
+    // CLI 세션 이름 저장소도 같은 이유로 여기서만 켠다(cli-session-names.js 참조).
+    // CLI는 프로세스가 끝나면 자기 이름 파일을 지우므로, 이것이 없으면 지난 세션
+    // 목록에는 이름이 하나도 남지 않는다.
+    nameStoreFile: defaultNameStoreFile(),
   });
 } catch (err) {
   if (err?.code === 'EADDRINUSE') {

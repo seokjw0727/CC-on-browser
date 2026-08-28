@@ -129,7 +129,16 @@ export async function listProjects(projectsRoot = DEFAULT_PROJECTS_ROOT) {
 // "최근 세션" 목록용). 상위 N개에 대해서만 head를 읽어 cwd/title을 추출한다(비용 절감).
 // cliName은 CLI가 붙인 이름(cli-session-names.js) — title(첫 발화 요약)과 별개의 필드로
 // 내려보내고, 어느 쪽을 보여줄지는 클라이언트의 sessionDisplayTitle이 정한다.
-export async function listRecentSessions(projectsRoot = DEFAULT_PROJECTS_ROOT, limit = 12, sessionsRoot) {
+//
+// nameStore는 그 조회에 그대로 넘기는 옵션 보따리({storeFile})다. 위치 인자로 하나 더
+// 늘리지 않는 이유: sessionsRoot(디렉터리)와 storeFile(파일)이 나란히 서면 바꿔 넣어도
+// 조용히 통과한다 — 둘 다 검증하지 않는 순수 통과 인자여서다(codex 지적).
+export async function listRecentSessions(
+  projectsRoot = DEFAULT_PROJECTS_ROOT,
+  limit = 12,
+  sessionsRoot,
+  nameStore,
+) {
   let entries;
   try {
     entries = await fs.readdir(projectsRoot, { withFileTypes: true });
@@ -150,7 +159,7 @@ export async function listRecentSessions(projectsRoot = DEFAULT_PROJECTS_ROOT, l
     for (const file of files) all.push({ dirName: entry.name, dirPath, file });
   }
   all.sort((a, b) => b.file.mtime - a.file.mtime);
-  const cliNames = await readCliSessionNames(sessionsRoot);
+  const cliNames = await readCliSessionNames(sessionsRoot, nameStore);
   const sessions = [];
   for (const item of all.slice(0, limit)) {
     const head = await readHead(path.join(item.dirPath, item.file.name), TITLE_SCAN_BYTES).catch(() => '');
@@ -168,7 +177,7 @@ export async function listRecentSessions(projectsRoot = DEFAULT_PROJECTS_ROOT, l
   return sessions;
 }
 
-export async function listSessions(projectsRoot, dirName, sessionsRoot) {
+export async function listSessions(projectsRoot, dirName, sessionsRoot, nameStore) {
   assertSafeName(dirName, 'dirName');
   const root = projectsRoot ?? DEFAULT_PROJECTS_ROOT;
   const dirPath = path.join(root, dirName);
@@ -179,7 +188,7 @@ export async function listSessions(projectsRoot, dirName, sessionsRoot) {
     if (err && err.code === 'ENOENT') return [];
     throw err;
   }
-  const cliNames = await readCliSessionNames(sessionsRoot);
+  const cliNames = await readCliSessionNames(sessionsRoot, nameStore);
   const sessions = [];
   for (const file of sessionFiles) {
     const head = await readHead(path.join(dirPath, file.name), TITLE_SCAN_BYTES).catch(() => '');

@@ -135,6 +135,12 @@ export async function startServer({
   // CLI가 세션 이름을 적어 두는 디렉터리(기본 ~/.claude/sessions) — 테스트 주입용.
   // 세션 목록과 라이브 세션의 cliName이 모두 여기서 나온다(cli-session-names.js).
   sessionsRoot,
+  // 우리가 본 CLI 세션 이름을 적어 두는 파일. **기본 꺼짐**이고 앱 진입점
+  // (bin/cc-on-browser.mjs)만 defaultNameStoreFile()로 켠다 — pasteCleanup과 같은 선택이다.
+  // 켜져 있으면 startServer를 띄우는 것만으로 사용자 홈에 파일이 생기므로, 부수효과를
+  // 갖는 쪽이 옵트인해야 한다. 끝난 CLI가 자기 이름 파일을 지우기 때문에, 이것이 꺼져
+  // 있으면 지난 세션 목록의 cliName은 언제나 null이다(cli-session-names.js 머리말).
+  nameStoreFile,
   staticDir,
   exitedRetentionMs,
   quotaFetcher, // 테스트 주입용 — 기본은 quota.js의 공식 사용률 조회
@@ -177,7 +183,10 @@ export async function startServer({
   if (!token) throw new TypeError('token is required');
   if (!cliPath) throw new TypeError('cliPath is required');
 
-  const hub = new SessionHub({ cliPath, cliArgsPrefix, exitedRetentionMs, sessionsRoot });
+  const hub = new SessionHub({ cliPath, cliArgsPrefix, exitedRetentionMs, sessionsRoot, nameStoreFile });
+  // 목록 endpoint와 hub가 **같은 저장소**를 봐야 라이브에서 본 이름이 지난 세션 목록에
+  // 그대로 나타난다 — 한 벌로 묶어 두 endpoint에 같은 값을 넘긴다.
+  const nameStore = { storeFile: nameStoreFile };
   const rc = remoteControl ?? createRemoteControl({ cliPath, cliArgsPrefix });
   /** @type {Set<import('ws').WebSocket>} */
   const sockets = new Set();
@@ -814,7 +823,7 @@ export async function startServer({
           json(res, 200, await listProjects(projectsRoot));
           return;
         case '/api/sessions':
-          json(res, 200, await listSessions(projectsRoot, url.searchParams.get('dir'), sessionsRoot));
+          json(res, 200, await listSessions(projectsRoot, url.searchParams.get('dir'), sessionsRoot, nameStore));
           return;
         case '/api/recent-sessions': {
           // 전 프로젝트 세션을 mtime순으로 집계 — 새 세션 모달의 "지난 세션" 목록.
@@ -829,7 +838,7 @@ export async function startServer({
             }
             limit = Math.max(1, Math.min(50, parsed));
           }
-          json(res, 200, await listRecentSessions(projectsRoot, limit, sessionsRoot));
+          json(res, 200, await listRecentSessions(projectsRoot, limit, sessionsRoot, nameStore));
           return;
         }
         case '/api/transcript':
