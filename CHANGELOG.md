@@ -8,6 +8,51 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-08-30
+
+> git worktree 현황을 브라우저에서 볼 수 있습니다. 사이드바 아래쪽에 **worktree** 버튼이
+> 생겼고, 누르면 지금 세션이 열려 있는 저장소의 커밋 그래프와 worktree 목록이 뜹니다.
+> 카드마다 브랜치·경로·깨끗함/변경됨·변경 파일 수·최근 커밋이 있고, 그 디렉터리에서
+> 열린 CC-on-browser 세션 이름도 함께 보입니다 — 어느 작업이 어느 갈래에서 돌고 있는지
+> 확인하러 터미널로 나갈 일이 줄어듭니다. 이번 단계는 **보기 전용**입니다: worktree를
+> 만들거나 지우거나 옮겨 다니는 버튼은 없고, 세션 이름도 표시만 될 뿐 눌러도 이동하지
+> 않습니다. 서버가 실행하는 git 명령도 조회형 넷뿐입니다.
+> (Adds a read-only git worktree view. A new sidebar panel shows the commit graph for the
+> repository your session is in, plus one card per worktree — branch, path, clean/dirty,
+> changed-file count, latest commit — and the names of CC-on-browser sessions whose working
+> directory sits inside it. Display only: no create, remove, prune or switch actions, and
+> session names are not clickable.)
+
+### Added
+- **worktree 패널.** 사이드바 하단 버튼 행의 네 번째 항목으로, 기존 통계·설정과 같은
+  중앙 모달로 열립니다. 위쪽 커밋 그래프는 각 worktree의 HEAD가 어느 갈래에 있고 어디서
+  갈라졌는지를 보여 주고, 그래프 옆에는 같은 커밋이 짧은 해시·제목·시각으로 나란히
+  적혀 그림 없이도 읽을 수 있습니다. 지금 세션이 붙어 있는 worktree 카드는 강조됩니다.
+  (A new fourth entry in the sidebar footer opens a center modal: a commit graph marking
+  each worktree's HEAD, with a readable commit list beside it, and one card per worktree.)
+- **세션이 어느 worktree에 있는지 표시.** 라이브 세션과 최근 세션 모두 자기 작업
+  디렉터리가 속한 worktree 카드에 이름으로 실립니다. 이름은 사이드바와 똑같은 우선순위
+  (직접 지정한 이름 → CLI가 붙인 이름 → 첫 발화 요약)를 따르므로, 두 화면이 같은 세션을
+  다른 이름으로 부르지 않습니다.
+  (Live and recent sessions appear on the card for the worktree containing their working
+  directory, named by the same precedence the sidebar uses.)
+- **상태별 안내.** git이 없을 때, 저장소가 아닐 때, git이 저장소를 신뢰하지 않을 때
+  (소유자 불일치), 실행 중인 세션이 없을 때를 각각 다른 문구로 안내합니다 — 어느 경우도
+  빈 화면으로 두지 않습니다.
+  (git missing, not a repository, dubious-ownership refusal, and no live session each get
+  their own message instead of a silent empty panel.)
+
+### Security
+- **조회 경로가 하위 프로세스 창구가 되지 않게 했습니다.** git을 어느 디렉터리에서
+  실행할지는 요청이 아니라 서버가 정합니다 — 조회 API는 경로가 아니라 세션 식별자를
+  받아, 실제 작업 디렉터리를 서버의 세션 장부에서 되찾습니다. git 인자는 항상 배열로
+  넘겨 셸을 거치지 않고, `core.fsmonitor`를 꺼서 저장소 설정에 걸린 훅이 조회만으로
+  실행되는 경로도 함께 막습니다.
+  (The worktree API takes a session id, not a path: the server resolves the working
+  directory from its own session ledger, so a request can never choose where git runs.
+  Arguments are always passed as an array — never through a shell — and `core.fsmonitor`
+  is disabled so a repository-configured hook cannot run during a read.)
+
 ## [1.10.6] - 2026-08-29
 
 > 지난 세션 목록에서 CLI 이름이 보이지 않던 것을 고쳤습니다. 지난 릴리스에서 터미널의
@@ -823,7 +868,8 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
-[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.6...HEAD
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.6...v1.11.0
 [1.10.6]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.5...v1.10.6
 [1.10.5]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.4...v1.10.5
 [1.10.4]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.3...v1.10.4
