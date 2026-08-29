@@ -1,0 +1,332 @@
+/* worktree 패널 — 커밋 그래프(SVG) + worktree 카드.
+   색·모서리·움직임은 전부 theme.css 토큰으로만 쓴다. 리터럴 색을 쓰면 라이트 테마와
+   각진(square) 모드에서 이 패널만 따로 논다. */
+
+.wt-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wt-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wt-root {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  /* 긴 Windows 경로는 앞을 잘라도 뒤(프로젝트 이름)가 남아야 알아볼 수 있다 */
+  direction: rtl;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wt-retry {
+  flex: none;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.wt-retry:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-3);
+}
+.wt-retry:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.wt-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wt-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+}
+.wt-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.wt-note {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.wt-note p { margin: 0; }
+.wt-error { color: var(--danger); }
+.wt-detail {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  word-break: break-all;
+}
+.wt-empty {
+  margin: 0;
+  padding: 10px 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* ----- 커밋 그래프 ----- */
+
+/* SVG(레인)와 커밋 줄글을 가로로 붙여 같은 행 높이(ROW_H=26px)로 정렬한다.
+   좌표는 서버가 배치까지 끝내 내려주므로 여기서는 그리기만 한다. */
+.wt-graph-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 2px 0;
+  background: var(--bg-sink);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+}
+.wt-graph {
+  flex: none;
+  /* SVG 좌표계가 첫 노드를 PAD_Y=14에 두므로, 옆 목록의 첫 줄 중앙과 맞도록 끌어올린다 */
+  margin-top: 1px;
+  overflow: visible;
+}
+.wt-edge {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.wt-edge.faded { opacity: 0.35; }
+.wt-node {
+  stroke: var(--bg-sink);
+  stroke-width: 1.5;
+}
+.wt-node.head {
+  stroke: var(--text);
+  stroke-width: 1.8;
+}
+
+/* 레인 색 — 브랜치를 구분하는 용도이므로 의미색(성공/위험)을 그대로 쓰지 않고
+   accent·info를 축으로 섞는다. color-mix가 테마 전환 때 알아서 다시 계산된다. */
+.wt-lane-0 { --wt-lane: var(--accent); }
+.wt-lane-1 { --wt-lane: var(--info); }
+.wt-lane-2 { --wt-lane: var(--success); }
+.wt-lane-3 { --wt-lane: color-mix(in srgb, var(--accent) 45%, var(--info)); }
+.wt-lane-4 { --wt-lane: var(--warning); }
+.wt-lane-5 { --wt-lane: color-mix(in srgb, var(--info) 50%, var(--success)); }
+.wt-edge { stroke: var(--wt-lane, var(--border-strong)); }
+.wt-node { fill: var(--wt-lane, var(--text-dim)); }
+code.wt-sha { color: var(--wt-lane, var(--text-faint)); }
+
+.wt-commits {
+  flex: 1 1 auto;
+  min-width: 0;
+  list-style: none;
+  margin: 0;
+  /* SVG의 PAD_Y(14) − 행높이(26)/2 = 1px 만큼만 내려 첫 노드와 첫 줄을 맞춘다 */
+  padding: 1px 10px 0 2px;
+}
+.wt-commit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px; /* = ROW_H */
+  font-size: 12px;
+}
+.wt-sha {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.wt-subject {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wt-when {
+  flex: none;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.wt-head-tags {
+  flex: none;
+  display: flex;
+  gap: 4px;
+}
+.wt-tag {
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+}
+
+/* ----- worktree 카드 ----- */
+
+.wt-cards {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wt-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+/* 지금 세션이 붙어 있는 worktree — 목록에서 눈이 먼저 가야 할 카드다 */
+.wt-card.has-live {
+  border-color: var(--accent-line);
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface-2);
+}
+
+.wt-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.wt-branch {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wt-state {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.wt-state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-round);
+  background: var(--text-faint);
+}
+.wt-state.clean .wt-state-dot { background: var(--success); }
+.wt-state.dirty .wt-state-dot { background: var(--warning); }
+.wt-state.dirty { color: var(--warning); }
+.wt-state.unknown { color: var(--text-faint); }
+
+.wt-path {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+  direction: rtl;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wt-badges,
+.wt-counts,
+.wt-sessions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.wt-counts { font-size: 11px; gap: 10px; }
+
+.wt-badge {
+  padding: 1px 7px;
+  font-size: 10px;
+  color: var(--text-dim);
+  background: var(--surface-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-pill);
+}
+.wt-badge.main {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+.wt-badge.warn {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+}
+
+.wt-last {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.wt-session {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wt-session.live {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.wt-session-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-round);
+  background: var(--success);
+}
+.wt-session-tag {
+  flex: none;
+  font-size: 9.5px;
+  color: var(--text-faint);
+}
+
+/* 사이드바가 좁아지는 폭에서는 그래프를 가로로도 스크롤시킨다 —
+   레인이 많은 repo에서 커밋 제목이 0폭으로 눌리는 것을 막는다. */
+@media (max-width: 520px) {
+  .wt-graph-wrap { overflow-x: auto; }
+  .wt-commits { min-width: 180px; }
+}

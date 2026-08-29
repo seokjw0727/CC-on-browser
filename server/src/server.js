@@ -10,6 +10,7 @@ import { WebSocketServer } from 'ws';
 import { SessionHub } from './session-hub.js';
 import { listProjects, listSessions, loadTranscript, listRecentSessions, deleteSession } from './history.js';
 import { listDirs, pickDirectory, searchFiles } from './fs-api.js';
+import { attachSessions, collectWorktrees, unavailableResult } from './git-api.js';
 import { aggregateDailyUsage, aggregateUsage, MAX_DAILY_DAYS } from './usage.js';
 import { defaultConfigPath, readClaudeConfig, writeClaudeConfig } from './claude-config.js';
 import { defaultPluginsDir, listInstalledPlugins } from './claude-plugins.js';
@@ -26,6 +27,11 @@ const CLOSE_REMOTE_GRACE_MS = 12_000;
 // (우아한 종료 3초 + 강제 킬 확인 2초)보다 넉넉하게 잡는다 — 상한이 강제 킬보다
 // 먼저 걸리면 "기다렸다"는 사실만 남고 고아는 그대로 남아, 이 기능이 무의미해진다.
 const CLOSE_SESSIONS_GRACE_MS = 10_000;
+// worktree 패널이 세션을 배정할 때 훑는 최근 세션 수. listRecentSessions는 상위 N개에
+// 대해서만 파일 머리를 읽어 cwd를 뽑으므로(비용이 N에 비례) 상한을 둔다. 새 세션 모달의
+// "더 보기"(50)보다 살짝 넉넉하게 잡아, worktree가 여럿인 프로젝트에서도 각 카드에
+// 최소 몇 개씩은 걸리게 한다.
+const WORKTREE_RECENT_SESSIONS = 60;
 const USAGE_CACHE_MS = 30_000;
 const QUOTA_CACHE_MS = 60_000;
 // 일별 집계(돌아보기 잔디)는 최대 1년치 스캔이라 5h/7d보다 캐시를 길게 둔다
@@ -887,6 +893,49 @@ export async function startServer({
             const status = err?.status ?? (err?.code === 'ENOENT' ? 404 : 500);
             json(res, status, { error: String(err?.message ?? err) });
           }
+          return;
+        }
+        case '/api/worktrees': {
+          // git worktree 조회(읽기 전용). git을 **어느 디렉터리에서 돌릴지**는 클라이언트가
+          // 아니라 서버가 정한다 — preview-ticket과 같은 원칙으로, 기준 cwd는 세션 key로
+          // 서버 장부에서 되찾는다. 임의 경로 문자열을 받으면 이 창구가 "아무 디렉터리에서나
+          // 하위 프로세스를 띄우는 창구"가 된다.
+          const key = url.searchParams.get('key');
+          const cwd = key ? hub.cwdOf(key) : null;
+          if (!cwd) {
+            // 라이브 세션이 아니다 — 실패가 아니라 "보여줄 것이 없는" 정상 상태다.
+            json(res, 200, unavailableResult('no-session'));
+            return;
+          }
+          const result = await collectWorktrees(cwd);
+          // 세션 목록 조회가 실패해도 worktree 자체는 보여 준다. 이 블록이 던지면
+          // 아래 공통 catch가 그것을 400("클라이언트 잘못")으로 보고하는데, 히스토리
+          // 디렉터리를 못 읽은 것은 요청의 잘못이 아니다(codex 지적). 대신 세션 칸이
+          // 비었다는 사실을 flag로 알려, 화면이 "세션 없음"과 혼동하지 않게 한다.
+          result.sessionsUnavailable = false;
+          if (result.available) {
+            try {
+              // 세션↔디렉터리 판정은 서버만 할 수 있다(realpath). 다만 최근 세션 목록은
+              // mtime 상위 N개만 cwd를 읽으므로, 그보다 오래된 세션은 카드에 실리지 않는다 —
+              // 이 패널은 "지금 무엇이 어디서 돌고 있나"를 보는 곳이라 그 절단을 감수한다.
+              const recent = await listRecentSessions(
+                projectsRoot, WORKTREE_RECENT_SESSIONS, sessionsRoot, nameStore,
+              );
+              attachSessions(result.worktrees, {
+                // cliName을 함께 실어 준다 — 이 탭이 아직 모르는 세션(다른 탭에서 연
+                // 세션, 동기화 전)도 사용자가 터미널에서 부르던 이름으로 보이게 하는
+                // 유일한 경로다. 아직 이름이 없으면 null이고, 그때는 sessionId로 내려간다.
+                live: hub.liveSessionCwds().map((s) => ({
+                  ...s,
+                  cliName: hub.cliNameOf(s.key)?.cliName ?? null,
+                })),
+                past: recent.filter((s) => !hub.isSessionIdLive(s.sessionId)),
+              });
+            } catch {
+              result.sessionsUnavailable = true;
+            }
+          }
+          json(res, 200, result);
           return;
         }
         case '/api/pick-directory':

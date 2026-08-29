@@ -62,9 +62,42 @@ test('infoValue — 포트 0은 진짜 값이라 접지 않는다', async () => 
   assert.equal(infoValue(NaN), UNKNOWN_LABEL);
 });
 
-test('하단 패널이 표 하나로 정의되고 삼항 분기가 되살아나지 않았다', () => {
-  // 제목·아이콘·본문이 다시 흩어지면 네 번째 패널을 넣을 때 또 하나를 빠뜨린다.
+test('하단 패널이 표 하나로 정의되고 패널별 분기가 되살아나지 않았다', () => {
+  // 제목·아이콘·본문이 다시 흩어지면 다섯 번째 패널을 넣을 때 또 하나를 빠뜨린다.
   const src = readFileSync(join(__dirname, '..', 'src', 'components', 'Sidebar.jsx'), 'utf8');
-  assert.match(src, /FOOT_PANEL_ORDER\s*=\s*\['stats',\s*'settings',\s*'info'\]/);
-  assert.doesNotMatch(src, /panel === 'stats' \?/);
+
+  // ① 화면 순서 배열과 표의 키가 정확히 같은 집합이어야 한다. 순서 배열에만 있는 키는
+  //    빈 모달을 띄우고, 표에만 있는 키는 영영 화면에 나오지 않는다 — 문자열 하나를
+  //    통째로 비교하던 예전 방식은 어느 쪽도 잡지 못했다(codex 지적).
+  const orderSrc = src.match(/FOOT_PANEL_ORDER\s*=\s*\[([^\]]*)\]/);
+  assert.ok(orderSrc, 'FOOT_PANEL_ORDER 배열을 찾지 못했다');
+  const order = [...orderSrc[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  assert.deepEqual(order, ['stats', 'worktree', 'settings', 'info']);
+
+  const tableSrc = src.match(/const FOOT_PANELS = \{([\s\S]*?)\n\};/);
+  assert.ok(tableSrc, 'FOOT_PANELS 표를 찾지 못했다');
+  // 표의 최상위 항목만 — 들여쓰기 두 칸의 `키: {`가 항목의 시작이다.
+  const entries = [...tableSrc[1].matchAll(/^ {2}(\w+): \{$/gm)].map((m) => m[1]);
+  assert.deepEqual([...entries].sort(), [...order].sort());
+
+  // ② 모든 항목이 세 필수 필드를 갖는다 — 하나라도 빠지면 제목 없는 모달이 뜬다.
+  //    항목 블록은 다음 항목의 시작(들여쓰기 두 칸 + `키: {`)까지로 자른다.
+  const table = tableSrc[1];
+  const starts = entries.map((key) => ({ key, at: table.search(new RegExp(`^ {2}${key}: \\{$`, 'm')) }));
+  starts.forEach(({ key, at }, i) => {
+    const end = i + 1 < starts.length ? starts[i + 1].at : table.length;
+    const block = table.slice(at, end);
+    for (const field of ['title:', 'Glyph:', 'body:']) {
+      assert.ok(block.includes(field), `${key}에 ${field}가 없다`);
+    }
+  });
+
+  // ③ 패널별 예외를 표 밖 분기로 되돌리는 것이 이 테스트가 막는 회귀다. 따옴표 종류·
+  //    비교 방향·if/switch까지 함께 막는다(예전 정규식은 작은따옴표 삼항 하나만 봤다).
+  for (const key of order) {
+    const q = `["']${key}["']`;
+    assert.doesNotMatch(src, new RegExp(`panel\\s*===\\s*${q}`), `panel === ${key} 분기 부활`);
+    assert.doesNotMatch(src, new RegExp(`${q}\\s*===\\s*panel`), `${key} === panel 분기 부활`);
+    assert.doesNotMatch(src, new RegExp(`case\\s+${q}\\s*:`), `case ${key} 분기 부활`);
+  }
 });

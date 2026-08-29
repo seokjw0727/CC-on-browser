@@ -305,11 +305,24 @@ export class SessionHub extends EventEmitter {
     return entry.cwd || null;
   }
 
-  /** 라이브 세션의 [key, cwd] 목록 — 원격 제어 상태를 세션에 이어 붙일 때 쓴다. */
+  /**
+   * 라이브 세션의 {key, cwd, sessionId} 목록 — 원격 제어 상태를 세션에 이어 붙일 때와
+   * worktree 패널이 디렉터리별 세션을 묶을 때 쓴다.
+   *
+   * sessionId가 함께 나가는 이유: key는 이 데몬 프로세스 안에서만 뜻이 있어, 그 key를
+   * 모르는 화면(방금 연 탭, 동기화 전)은 세션을 이름 없이 그릴 수밖에 없다. sessionId는
+   * 디스크의 트랜스크립트와 같은 값이라 그런 화면도 최소한의 식별자를 얻는다.
+   * 아직 CLI가 id를 알려주기 전이면 null이다.
+   */
   liveSessionCwds() {
     const out = [];
     for (const entry of this.#sessions.values()) {
-      if (!entry.exited) out.push({ key: entry.key, cwd: entry.cwd || null });
+      if (entry.exited) continue;
+      out.push({
+        key: entry.key,
+        cwd: entry.cwd || null,
+        sessionId: entry.session?.sessionId ?? null,
+      });
     }
     return out;
   }

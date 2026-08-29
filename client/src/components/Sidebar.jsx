@@ -54,6 +54,7 @@ import SessionMenu from './SessionMenu.jsx';
 import ConfigEditorModal from './ConfigEditorModal.jsx';
 import PluginsForm from './PluginsForm.jsx';
 import TrustModeWarning from './TrustModeWarning.jsx';
+import WorktreePanel from './WorktreePanel.jsx';
 import { useFocusTrap } from '../lib/useFocusTrap.js';
 import { usePresence } from '../lib/usePresence.js';
 import './interact.css';
@@ -529,6 +530,21 @@ function SettingsIcon() {
     <svg className="foot-icon" viewBox="0 0 20 20" aria-hidden="true">
       <path d="M7.9 3.1 8.5 2h3l.6 1.1 1.3.8 1.3-.1 1.5 2.6-.7 1.1v1.6l.7 1.1-1.5 2.6-1.3-.1-1.3.8-.6 1.1h-3l-.6-1.1-1.3-.8-1.3.1-1.5-2.6.7-1.1V7.5l-.7-1.1 1.5-2.6 1.3.1 1.3-.8Z" />
       <circle cx="10" cy="8.3" r="2.2" />
+    </svg>
+  );
+}
+
+// 브랜치가 갈라지는 모양 — worktree 패널이 보여 주는 것이 곧 이 모양이다.
+// StatsIcon·SettingsIcon과 같은 20 격자 직접 그림(Icon.jsx 세트를 늘리지 않는 이유는
+// 바로 아래 InfoIcon 주석과 같다).
+function WorktreeIcon() {
+  return (
+    <svg className="foot-icon" viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M6 5.2v9.6" />
+      <path d="M13.8 7.5h-3.3A4.5 4.5 0 0 0 6 12" />
+      <circle cx="6" cy="3.6" r="1.6" />
+      <circle cx="6" cy="16.4" r="1.6" />
+      <circle cx="15.4" cy="7.5" r="1.6" />
     </svg>
   );
 }
@@ -1225,6 +1241,11 @@ function InfoPanel({ appInfo, platform, skew }) {
 // 때 그중 하나를 빠뜨린 채 배포된다 — '정보'를 넣으며 실제로 세 곳을 따로 고쳐야 했다.
 // 키를 Glyph로 둔 것은 의도적: Icon으로 구조분해하면 파일 상단에서 import한 Icon
 // 컴포넌트를 가린다.
+//
+// modalClass는 폭이 기본형(.foot-modal 400px)과 달라야 하는 패널이 자기 클래스를 직접
+// 들고 있게 한다. 예전에는 FootModal 안에서 패널 키를 삼항으로 비교해 설정에만 클래스를
+// 붙였는데, 그 방식은 패널을 하나 더 넣을 때마다 표 밖의 분기가 자라 이 표의 존재
+// 이유를 지운다. app-version.test.js가 그 분기의 부활을 막는다.
 const FOOT_PANELS = {
   stats: {
     title: '통계',
@@ -1236,9 +1257,18 @@ const FOOT_PANELS = {
       </>
     ),
   },
+  worktree: {
+    title: 'worktree',
+    Glyph: WorktreeIcon,
+    // 커밋 그래프와 경로가 들어가 통계·설정보다 넓어야 한다.
+    modalClass: 'worktree-modal',
+    body: ({ state }) => <WorktreePanel state={state} />,
+  },
   settings: {
     title: '설정',
     Glyph: SettingsIcon,
+    // 플러그인 목록 행이 400px에서 잘려 설정만 조금 넓힌다(interact.css의 배경 주석 참조).
+    modalClass: 'settings-modal',
     body: ({ theme, onSetTheme, shape, onSetShape, onEditConfig, configEditorOpen }) => (
       <SettingsPanel
         theme={theme}
@@ -1259,7 +1289,7 @@ const FOOT_PANELS = {
   },
 };
 // 화면 순서는 따로 적는다 — Object.keys에 기대면 표의 정의 순서를 옮기는 순간 UI가 바뀐다.
-const FOOT_PANEL_ORDER = ['stats', 'settings', 'info'];
+const FOOT_PANEL_ORDER = ['stats', 'worktree', 'settings', 'info'];
 
 // 하단 고정 버튼 행 — 패널 자체는 화면 중앙 모달(FootModalPresence, aside 밖)로 뜬다.
 function SidebarFoot({ openPanel, onToggle }) {
@@ -1291,7 +1321,7 @@ function FootModal({
   const { state, notify } = useStore();
   const dialogRef = useFocusTrap(true);
   // 알 수 없는 panel로도 제목·아이콘 없는 빈 모달이 뜨지 않게 폴백을 둔다.
-  const { title, Glyph, body } = FOOT_PANELS[panel] ?? FOOT_PANELS.stats;
+  const { title, Glyph, body, modalClass } = FOOT_PANELS[panel] ?? FOOT_PANELS.stats;
   return (
     <div
       className={`modal-overlay${presenceStatus === 'closing' ? ' closing' : ''}`}
@@ -1308,7 +1338,7 @@ function FootModal({
     >
       <div
         ref={dialogRef}
-        className={`modal foot-modal${panel === 'settings' ? ' settings-modal' : ''}`}
+        className={`modal foot-modal${modalClass ? ` ${modalClass}` : ''}`}
         role="dialog"
         aria-modal="true"
         id={`sidebar-${panel}-modal`}
@@ -1362,7 +1392,8 @@ export default function Sidebar({ onCollapse, theme, onSetTheme, shape, onSetSha
   // 갈라 담는다 — 모달 쪽에서 다시 부르면 데몬이 죽은 뒤 이미 알던 값까지 잃는다.
   // 조회 실패 시 null로 남고, 그때는 모든 행이 '알 수 없음'으로 정상 표시된다.
   const [bootInfo, setBootInfo] = useState(null); // {claudeVersion, daemonVersion, port} | null
-  const [footPanel, setFootPanel] = useState(null); // null | 'stats' | 'settings' | 'info'
+  // null | 'stats' | 'worktree' | 'settings' | 'info' — 값의 출처는 FOOT_PANEL_ORDER다.
+  const [footPanel, setFootPanel] = useState(null);
   // 세션 컨텍스트 메뉴 — {rowKey, x, y}. 행 데이터는 매 렌더에 스토어에서 다시 읽어
   // 메뉴가 열린 사이 세션이 종료·제거돼도 낡은 정보로 동작하지 않게 한다.
   const [menu, setMenu] = useState(null);

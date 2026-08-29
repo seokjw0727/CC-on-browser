@@ -78,6 +78,27 @@ export const searchFiles = (cwd, q = '') =>
   get(`/api/files?cwd=${encodeURIComponent(cwd)}${q ? `&q=${encodeURIComponent(q)}` : ''}`);
 
 /**
+ * git worktree 조회(읽기 전용) — worktree 패널의 유일한 재료.
+ *
+ * 인자가 cwd가 아니라 세션 key인 이유: git을 돌릴 디렉터리는 서버가 자기 세션 장부에서
+ * 되찾는다(preview-ticket과 같은 원칙). 클라이언트가 경로를 부르면 이 창구가 "아무
+ * 디렉터리에서나 하위 프로세스를 띄우는 창구"가 된다.
+ *
+ * **실패해도 대부분 200이다.** git이 없거나 repo가 아닌 것은 오류가 아니라 상태이므로
+ * available=false + reason으로 온다(no-session|no-cwd|git-missing|not-a-repo|git-failed).
+ * throw는 이 로컬 서버에 닿지 못했을 때만 일어난다.
+ * @returns {Promise<{available: boolean, reason: string|null, message: string|null,
+ *   root: string|null, truncated: boolean,
+ *   worktrees: [{path, name, branch, head, detached, bare, locked, lockReason, prunable,
+ *     isMain, unreadable, status: {total, staged, unstaged, untracked, capped, clean}|null,
+ *     lastCommit: {sha, short, subject, author, at}|null,
+ *     sessions: {live: [{key}], past: [{dirName, sessionId, title, cliName, mtime}]}}],
+ *   graph: {rows: [{sha, short, parents, subject, author, at, row, lane, edges}], lanes: number}}>}
+ */
+export const fetchWorktrees = (key) =>
+  get(`/api/worktrees?key=${encodeURIComponent(key ?? '')}`);
+
+/**
  * 결과물 미리보기 티켓 발급 — 반환된 url은 인증 없이 열 수 있는 단명 capability라
  * iframe/img에 그대로 실을 수 있다(메인 토큰은 URL에 절대 싣지 않는다).
  * 실패 시 err.status: 403(세션 작업 디렉터리 밖) / 404(없는 파일·세션 아님) /
