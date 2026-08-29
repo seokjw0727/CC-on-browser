@@ -44,11 +44,14 @@ test('worktree 패널이 실제 저장소의 커밋 그래프와 카드를 그�
 
   // ② 커밋 그래프: 노드 수와 목록 줄 수가 서로 맞아야 한다. 하나라도 어긋나면
   //    SVG 좌표와 옆 줄글이 다른 커밋을 가리키고 있다는 뜻이다.
+  //
+  //    이력 깊이는 가정하지 않는다 — CI는 actions/checkout의 기본 얕은 클론이라
+  //    커밋이 정확히 하나다. 그것도 패널이 다뤄야 할 정상적인 저장소 모양이다.
   const nodes = modal.locator('.wt-graph .wt-node');
   const commits = modal.locator('.wt-commit');
   await expect(nodes.first()).toBeVisible();
   expect(await nodes.count()).toBe(await commits.count());
-  expect(await commits.count()).toBeGreaterThan(1);
+  expect(await commits.count()).toBeGreaterThan(0);
 
   // 첫 줄은 최신 커밋이고, 짧은 sha와 제목을 모두 갖는다.
   const firstSha = modal.locator('.wt-commit').first().locator('.wt-sha');
@@ -63,9 +66,14 @@ test('worktree 패널이 실제 저장소의 커밋 그래프와 카드를 그�
   // 상태는 색만으로 말하지 않는다 — 점 옆에 반드시 글자가 선다.
   await expect(cards.first().locator('.wt-state')).toHaveText(/깨끗함|변경 \d+\+?/);
 
-  // ④ HEAD 커밋에는 브랜치 태그가 붙고, 그 태그가 카드의 브랜치명과 같다.
-  const branch = (await cards.first().locator('.wt-branch').innerText()).trim();
-  await expect(modal.locator('.wt-tag').first()).toHaveText(branch);
+  // ④ HEAD 커밋에는 태그가 붙고, 그 태그가 카드 제목과 같은 것을 가리킨다.
+  //    같음이 아니라 포함으로 보는 이유: 브랜치가 없는 detached 상태(CI는 태그를
+  //    체크아웃하므로 항상 이쪽이다)에서는 카드가 'abc1234 (detached)'로 쓰고
+  //    그래프 태그는 'abc1234'만 단다.
+  const label = (await cards.first().locator('.wt-branch').innerText()).trim();
+  const tag = (await modal.locator('.wt-tag').first().innerText()).trim();
+  expect(tag.length).toBeGreaterThan(0);
+  expect(label).toContain(tag);
 });
 
 test('지금 열려 있는 세션이 그 worktree 카드에 실행 중으로 실린다', async ({ page }) => {

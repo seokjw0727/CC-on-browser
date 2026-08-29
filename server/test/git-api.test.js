@@ -680,6 +680,28 @@ describe('collectWorktrees (실제 git repo)', { skip: gitAvailable ? false : 'g
     }
   });
 
+  test('얕은 클론 + detached HEAD(=CI 체크아웃 모양)에서도 온전히 답한다', async () => {
+    // actions/checkout은 기본이 depth 1이고 태그를 체크아웃하면 detached다 — 커밋이
+    // 하나뿐이고 브랜치가 없는 이 모양이 CI에서는 정상이며, 실제로 릴리스 빌드가
+    // 여기서 두 번 걸렸다. 이력 깊이나 브랜치 존재를 전제하지 않는지 못박는다.
+    const shallow = path.join(root, 'shallow ci');
+    await git(['clone', '--depth', '1', '--no-local', `file://${main.split(path.sep).join('/')}`, shallow], root);
+    await git(['checkout', '--detach', 'HEAD'], shallow);
+    const r = await collectWorktrees(shallow);
+    assert.equal(r.available, true, r.message ?? '');
+    assert.equal(r.worktrees.length, 1);
+    const wt = r.worktrees[0];
+    assert.equal(wt.detached, true);
+    assert.equal(wt.branch, null, 'detached에는 브랜치가 없다');
+    assert.ok(wt.head, '브랜치가 없어도 head sha는 있어야 한다');
+    assert.ok(wt.lastCommit, '얕은 클론에도 최근 커밋은 있다');
+    assert.equal(r.graph.rows.length, 1, '깊이 1이면 커밋도 하나');
+    assert.equal(r.graphFailed, false);
+    // 창 밖의 부모를 가리키는 간선이 있어도 레이아웃이 무너지지 않는다.
+    assert.equal(r.graph.rows[0].lane, 0);
+    assert.ok(r.graph.lanes >= 1);
+  });
+
   test('bare 저장소도 오류가 아니라 정상 목록으로 답한다', async () => {
     // bare에는 작업트리가 없어 --show-toplevel이 실패한다. 그것을 판정 기준으로 삼으면
     // bare 저장소에서 연 세션이 "저장소가 아님"으로 잘못 안내된다.
