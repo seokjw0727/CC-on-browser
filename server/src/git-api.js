@@ -326,15 +326,22 @@ export function normalizePath(p) {
 }
 
 /**
- * dir이 root와 같거나 그 **하위**인가. 순수 문자열 startsWith를 쓰지 않는 이유는
- * `/a/project`가 `/a/project-2`를 자기 하위로 삼기 때문이다 — 경계에서 구분자를
- * 요구해 그 오탐을 막는다.
+ * 이미 정규화된 두 경로에 대한 포함 판정. 경계에서 구분자를 요구하는 이유는 순수
+ * startsWith가 `/a/project`를 `/a/project-2`의 상위로 오인하기 때문이다.
+ *
+ * 접두사를 만들 때 root가 이미 '/'로 끝나는지 봐야 한다 — POSIX 루트('/')에 구분자를
+ * 덧붙이면 '//'가 되어 그 아래 무엇도 하위로 인정되지 않는다. Windows에서는 루트가
+ * 'c:'로 정규화되어 이 경우가 생기지 않아, 리눅스 CI가 먼저 잡아냈다.
  */
+export function containsNormalized(root, target) {
+  if (!root || !target) return false;
+  if (target === root) return true;
+  return target.startsWith(root.endsWith('/') ? root : `${root}/`);
+}
+
+/** dir이 root와 같거나 그 **하위**인가. */
 export function isInside(root, dir) {
-  const a = normalizePath(root);
-  const b = normalizePath(dir);
-  if (!a || !b) return false;
-  return b === a || b.startsWith(`${a}/`);
+  return containsNormalized(normalizePath(root), normalizePath(dir));
 }
 
 /**
@@ -352,7 +359,7 @@ export function assignToWorktree(worktrees, cwd) {
   let bestLen = -1;
   worktrees.forEach((wt, i) => {
     const root = normalizePath(wt.path);
-    if (!root || !(target === root || target.startsWith(`${root}/`))) return;
+    if (!containsNormalized(root, target)) return;
     if (root.length > bestLen) { best = i; bestLen = root.length; }
   });
   return best;

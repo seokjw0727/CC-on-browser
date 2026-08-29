@@ -15,6 +15,7 @@ import {
   attachSessions,
   classifyRevParseError,
   collectWorktrees,
+  containsNormalized,
   isInside,
   layoutCommits,
   mapLimit,
@@ -316,6 +317,31 @@ describe('classifyRevParseError', () => {
 });
 
 // ----- 경로 판정 -----
+
+// 정규화된 문자열만 받는 순수 판정 — 여기서만 플랫폼과 무관하게 POSIX 루트를 시험할 수
+// 있다. isInside를 통해서는 Windows에서 루트가 'c:'로 정규화되어 '//' 버그가 드러나지
+// 않는다(실제로 리눅스 CI가 먼저 잡았다).
+describe('containsNormalized', () => {
+  test('POSIX 루트 아래의 모든 경로를 하위로 인정한다', () => {
+    assert.equal(containsNormalized('/', '/tmp/x'), true);
+    assert.equal(containsNormalized('/', '/'), true);
+  });
+
+  test('Windows 드라이브 루트도 마찬가지다', () => {
+    assert.equal(containsNormalized('c:', 'c:/users/x'), true);
+    assert.equal(containsNormalized('c:', 'd:/users/x'), false);
+  });
+
+  test('형제 경로의 접두 일치는 하위가 아니다', () => {
+    assert.equal(containsNormalized('/a/project', '/a/project-2'), false);
+    assert.equal(containsNormalized('/a/project', '/a/project/src'), true);
+  });
+
+  test('빈 값은 항상 거짓', () => {
+    assert.equal(containsNormalized('', '/a'), false);
+    assert.equal(containsNormalized('/a', ''), false);
+  });
+});
 
 describe('isInside / assignToWorktree', () => {
   const abs = (...p) => path.resolve(os.tmpdir(), ...p);
