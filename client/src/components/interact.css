@@ -2268,6 +2268,8 @@ select.mode-trust:focus {
   font-size: 11.5px;
   line-height: 1.45;
 }
+/* 안내 문구 안에 붙는 인라인 조치 버튼(알림 권한 재요청) — 문장에 달라붙지 않게 띄운다. */
+.setting-note .past-retry { margin-left: 6px; vertical-align: middle; }
 .switch {
   position: relative;
   width: 34px;

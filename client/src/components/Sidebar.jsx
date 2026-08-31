@@ -48,6 +48,12 @@ import {
   resolveDefaultModel,
   writePref,
 } from '../lib/preferences.js';
+import {
+  limitNotifyEnabled,
+  notificationPermission,
+  requestNotificationPermission,
+  setLimitNotifyEnabled,
+} from '../lib/limit-notify.js';
 import { Sparkle, Mascot } from './Brand.jsx';
 import Icon from './Icon.jsx';
 import SessionMenu from './SessionMenu.jsx';
@@ -825,6 +831,36 @@ function SessionSettings({ onEditConfig }) {
     writePref(DEFAULT_MODE_KEY, value);
   };
 
+  // 한도 알림 토글. 권한은 여기서 한 번 읽어 두고 요청 결과로만 갱신한다 — 브라우저
+  // 설정에서 밖으로 바꾼 값은 이 모달을 다시 열 때(=이 컴포넌트 재마운트) 따라온다.
+  const [limitNotify, setLimitNotify] = useState(() => limitNotifyEnabled());
+  const [permission, setPermission] = useState(() => notificationPermission());
+  const [notifySaveFailed, setNotifySaveFailed] = useState(false);
+  const notifyUnsupported = permission === 'unsupported';
+
+  const toggleLimitNotify = async () => {
+    const next = !limitNotify;
+    // 발송 관문(App.jsx)은 저장소를 다시 읽어 판단한다 — 저장이 막힌 컨텍스트에서
+    // 스위치만 켜 두면 켜진 것처럼 보이는데 알림은 영영 오지 않는다. 그래서 켜진
+    // 모습은 저장에 성공했을 때만 보여 준다(writePref의 반환값이 그 판정이다).
+    const saved = setLimitNotifyEnabled(next);
+    setLimitNotify(saved && next);
+    setNotifySaveFailed(!saved);
+    // 권한 요청은 이 클릭(사용자 제스처) 안에서만 통한다. 거절당해도 켬 설정은
+    // 그대로 남긴다 — 나중에 브라우저에서 허용으로 바꾸면 곧바로 동작한다.
+    if (saved && next && permission === 'default') {
+      setPermission(await requestNotificationPermission());
+    }
+  };
+
+  // 권한 프롬프트는 Esc/X로 닫으면 'denied'가 아니라 'default'로 남는다. 그러면 설정은
+  // 켜져 있는데 알림은 한 건도 나가지 않고, 위 토글은 '꺼짐 → 켜짐'에서만 권한을 묻기
+  // 때문에 스스로는 영영 복구되지 않는다. 그 막다른 길을 여는 것이 이 버튼이다 —
+  // 브라우저가 제스처 밖의 요청을 거절하므로, 다시 묻는 길은 사용자의 클릭뿐이다.
+  const askNotifyPermission = async () => {
+    setPermission(await requestNotificationPermission());
+  };
+
   return (
     <div className="settings-panel">
       <div className="setting-row">
@@ -889,6 +925,55 @@ function SessionSettings({ onEditConfig }) {
         >
           편집
         </button>
+      </div>
+
+      {/* 사용량 한도 알림 — 이미 도는 60초 사용량 폴링에 얹혀 간다(추가 조회 없음). */}
+      <div className="setting-row">
+        <span
+          className="setting-label"
+          data-tip="5시간·7일 사용량이 한도에 걸리거나 다시 풀릴 때 브라우저 알림을 띄웁니다"
+        >
+          사용량 한도 알림
+          <span className="setting-sub dim">5시간 / 7일 창</span>
+        </span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={limitNotify}
+          disabled={notifyUnsupported}
+          className={`switch${limitNotify ? ' on' : ''}`}
+          onClick={toggleLimitNotify}
+          aria-label="사용량 한도 알림"
+        >
+          <span className="switch-knob" aria-hidden="true" />
+        </button>
+      </div>
+      {/* 아래 안내는 스위치를 누른 **결과**를 설명한다 — 눌렀는데 기대와 다르게 동작한
+          이유가 여기에만 있으므로, 시각 표시만으로 전달되면 안 된다. 라이브 영역은 내용이
+          바뀌기 전부터 자리를 지키고 있어야 읽히므로 조건부로 감싸지 않는다. */}
+      <div role="status">
+        {notifyUnsupported && (
+          <div className="dim setting-note">이 브라우저는 알림(Notification)을 지원하지 않습니다.</div>
+        )}
+        {notifySaveFailed && (
+          <div className="dim setting-note">
+            브라우저가 저장소를 막고 있어 이 설정을 유지할 수 없습니다 — 알림도 동작하지 않습니다.
+          </div>
+        )}
+        {limitNotify && permission === 'denied' && (
+          <div className="dim setting-note">
+            브라우저가 이 사이트의 알림을 차단해 두었습니다 — 주소창의 자물쇠 아이콘에서 알림을
+            허용으로 바꾸면 이 설정이 그대로 살아납니다.
+          </div>
+        )}
+        {limitNotify && permission === 'default' && (
+          <div className="dim setting-note">
+            아직 알림 권한을 받지 못했습니다 — 권한 없이는 설정이 켜져 있어도 알림이 오지 않습니다.
+            <button type="button" className="past-retry" onClick={askNotifyPermission}>
+              권한 요청
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="setting-row">

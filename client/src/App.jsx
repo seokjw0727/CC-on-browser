@@ -11,6 +11,7 @@ import { sessionDisplayTitle } from './lib/sessionTree.js';
 import { artifactsOf, findArtifact } from './lib/artifacts.js';
 import { normalizeShape } from './lib/ui-shape.js';
 import { readPref, writePref } from './lib/preferences.js';
+import { notifyLimitTransitions } from './lib/limit-notify.js';
 import ChatView from './components/ChatView.jsx';
 import Composer from './components/Composer.jsx';
 import Icon from './components/Icon.jsx';
@@ -79,15 +80,25 @@ function Shell() {
     writePref(SHAPE_KEY, shape);
   }, [shape]);
 
-  // 상태줄용 5h/7d 사용량 폴링 — 실패는 조용히 넘기고 다음 주기에 재시도
+  // 상태줄용 5h/7d 사용량 폴링 — 실패는 조용히 넘기고 다음 주기에 재시도.
+  //
+  // 응답 도착 순서는 보장되지 않는다. 한 요청이 주기보다 오래 끌면 뒤늦게 온 옛 응답이
+  // 새 값을 덮어써 사용률이 뒷걸음질친다(99 → 100 → 99). 아래 한도 알림이 그 뒷걸음을
+  // "해제"로 읽어 거짓 알림을 띄우므로(codex 지적), 순번을 붙여 뒤처진 응답은 버린다.
   useEffect(() => {
     let alive = true;
-    const tick = () =>
-      fetchUsage()
+    let issued = 0;
+    let applied = 0;
+    const tick = () => {
+      const seq = ++issued;
+      return fetchUsage()
         .then((usage) => {
-          if (alive) dispatch({ type: 'set-usage', usage });
+          if (!alive || seq <= applied) return;
+          applied = seq;
+          dispatch({ type: 'set-usage', usage });
         })
         .catch(() => {});
+    };
     tick();
     const id = setInterval(tick, USAGE_POLL_MS);
     return () => {
@@ -95,6 +106,25 @@ function Shell() {
       clearInterval(id);
     };
   }, [dispatch]);
+
+  // 한도 체결·해제 알림 — 위 폴링에 얹혀 간다(새 요청 없음, 토큰 소모 없음).
+  //
+  // 보는 값은 **reducer를 통과한 뒤의** quota다. 원본 응답은 창 하나만 조회에 실패해도
+  // 그 창을 통째로 빼고 오는데, reducer가 직전 값으로 메워 주기 전의 그것을 보면
+  // 빠진 창이 해제 → 체결로 깜빡인다(store-reducer의 set-usage 주석).
+  const prevQuotaRef = useRef(null);
+  useEffect(() => {
+    const quota = state.globalUsage?.quota ?? null;
+    // 조회 실패 구간에는 기준선을 그대로 둔다 — 끊긴 동안 실제로 넘어간 전이를
+    // 다음 성공에서 잡아내기 위해서다(기준선을 새로 세우면 그 전이를 놓친다).
+    if (!quota) return;
+    const prev = prevQuotaRef.current;
+    prevQuotaRef.current = quota;
+    // 켠 직후 첫 값은 기준선만 세운다. 안 그러면 이미 한도에 걸린 채 새로고침할
+    // 때마다 같은 알림이 다시 뜬다.
+    if (!prev) return;
+    notifyLimitTransitions(prev, quota);
+  }, [state.globalUsage]);
 
   // ----- 결과물 미리보기 -----
   // 산출물 목록은 상태가 아니라 대화 메시지에서 파생한다(lib/artifacts.js) —
