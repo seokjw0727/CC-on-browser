@@ -1,6 +1,7 @@
 // 컴포저(레퍼런스 충실) — 입력, 하단 컨트롤(모델 피커 + 노력 수준 진행 바 + 전송),
 // 그 아래 상태줄(컨텍스트·5h/7d 사용량·연결). 레포 pill은 없어졌고(새 세션은 사이드바),
-// 권한 모드는 메인 우측 상단으로 나갔다(PermissionModeBar.jsx).
+// 권한 모드 셀렉트는 입력 상자 안쪽 우측 상단에 겹쳐 둔다(PermissionModeBar.jsx —
+// 메인 우측 상단에 떠 있던 것을 사용자 요청으로 입력창 안으로 들였다).
 // 설정 변경(모델·노력)은 채팅 기록 대신 토스트로 알린다.
 // 턴별 토큰(입/출력)은 상태줄이 아니라 채팅에 usage 아이템으로 표시(reduce-cli-event).
 // Enter 전송/Shift+Enter 개행, `/` 커맨드 드롭다운, Esc/버튼 interrupt,
@@ -24,6 +25,7 @@ import {
 } from '../lib/effort.js';
 import ActiveModes from './ActiveModes.jsx';
 import Icon from './Icon.jsx';
+import PermissionModeBar from './PermissionModeBar.jsx';
 import RunningWork from './RunningWork.jsx';
 import Clawd from './Clawd.jsx';
 import './interact.css';
@@ -810,7 +812,8 @@ export default function Composer() {
       );
     }
   };
-  // 권한 모드 변경은 컴포저를 떠나 메인 우측 상단으로 옮겼다(PermissionModeBar.jsx).
+  // 권한 모드 변경 로직은 PermissionModeBar.jsx가 스토어에서 직접 읽어 처리한다 —
+  // 위치만 이 컴포넌트 안(입력 상자 우측 상단)이고, 상태·전송은 여기로 오지 않는다.
   // effort 변경은 **런타임 채널이 우선**이다 — CLI v2.1.233 실측: apply_flag_settings
   // 제어 요청으로 실행 중 세션의 노력 수준을 바꿀 수 있어(store.setEffort → 서버
   // setEffort) 재시작이 필요 없다. 표시 갱신은 서버의 effortSet 방송이 한다.
@@ -1056,7 +1059,11 @@ export default function Composer() {
           </div>
         )}
 
-        {/* 입력 */}
+        {/* 입력 — 권한 모드 셀렉트는 이 상자 **안쪽** 우측 상단에 겹쳐 둔다.
+            기준을 .composer-shell이 아니라 .composer-input으로 잡는 이유: 셸 맨 위에는
+            GOAL 배지(ActiveModes)와 인터럽트 복구 바가 조건부로 들어와, 셸 기준으로
+            띄우면 그것들 위에 얹혀 서로를 가린다. 입력 영역 기준이면 항상 첫 줄 옆이다.
+            글자가 셀렉트 밑으로 흐르지 않게 textarea가 우측 여백을 비워 둔다(interact.css). */}
         <div className="composer-input">
           <textarea
             ref={taRef}
@@ -1081,6 +1088,12 @@ export default function Composer() {
             onClick={syncCaret}
             onSelect={syncCaret}
           />
+          {/* 절대 배치라 화면 위치는 소스 순서와 무관하다 — 그래서 **탭 순서**가 좋은
+              쪽으로 둔다: 입력창이 먼저, 그다음 권한 모드(그다음이 하단 모델·전송).
+              셀렉트가 앞에 있으면 컴포저에 처음 탭으로 들어올 때 입력창을 지나친다.
+              세션이 없을 때 숨기는 판단은 컴포넌트 자신이 한다(스토어를 직접 읽는다) —
+              여기서 한 번 더 걸면 같은 규칙이 두 곳에 생겨 한쪽만 바뀔 수 있다. */}
+          <PermissionModeBar />
         </div>
 
         {/* 하단 컨트롤 — 모델 + 전송/중단 */}

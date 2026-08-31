@@ -1,4 +1,6 @@
-// PermissionModeBar — 컴포저에서 옮겨 온 권한 모드 셀렉트의 계약을 소스로 고정한다.
+// PermissionModeBar — 권한 모드 셀렉트의 계약을 소스로 고정한다. 이 셀렉트는 컴포저
+// 하단 pill 행 → 메인 우측 상단 → 입력 상자 안쪽 우측 상단으로 두 번 옮겨 다녔다.
+// 옮겨도 로직은 이 컴포넌트 하나가 소유한다는 것이 아래 계약들의 축이다.
 // 브라우저 없이 렌더할 수 없는 컴포넌트라(스토어 컨텍스트 의존) 동작 검증은
 // e2e/ui-chrome.spec.mjs와 e2e/app.spec.js가 맡고, 여기서는 "옮기는 과정에서
 // 조용히 빠질 수 있는 것"만 잡는다 — 특히 신뢰모드 게이팅.
@@ -12,6 +14,11 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
 const bar = readFileSync(join(SRC, 'components/PermissionModeBar.jsx'), 'utf8');
 const composer = readFileSync(join(SRC, 'components/Composer.jsx'), 'utf8');
 const app = readFileSync(join(SRC, 'App.jsx'), 'utf8');
+// CSS 계약은 주석을 걷어낸 뒤 본다 — 안 그러면 주석 안의 설명("…position: absolute로
+// 띄운다")이 규칙으로 오인돼 단언이 헛통과한다(codex 지적).
+const stripCssComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
+const interactCss = stripCssComments(readFileSync(join(SRC, 'components/interact.css'), 'utf8'));
+const themeCss = stripCssComments(readFileSync(join(SRC, 'theme.css'), 'utf8'));
 
 test('신뢰모드는 스폰 시에만 진입 가능하다는 가드가 살아 있다', () => {
   // 서버가 권위 경계지만 UI에서도 먼저 막는다 — 옮기면서 이 가드를 흘리면
@@ -41,16 +48,96 @@ test('접근 가능한 이름 "권한 모드"는 앱 전체에서 이 컴포넌�
 });
 
 test('권한 모드 변경 로직이 컴포저에 남아 있지 않다', () => {
-  // 복붙이 아니라 이사여야 한다 — 양쪽에 남으면 한쪽만 고치는 사고가 난다.
+  // 컴포저는 자리만 내준다 — 상태·전송 로직까지 따라오면 한쪽만 고치는 사고가 난다.
+  // (컴포넌트를 import해 마운트하는 것은 로직 복제가 아니다.)
   assert.doesNotMatch(composer, /setPermissionMode/);
   assert.doesNotMatch(composer, /composer-top/);
   assert.doesNotMatch(composer, /repo-pill/);
 });
 
-test('App이 이 컴포넌트를 우측 상단 묶음 안에 마운트한다', () => {
-  assert.match(app, /import PermissionModeBar from/);
-  assert.match(app, /className="main-top-right"/);
-  assert.match(app, /<PermissionModeBar \/>/);
+// ----- 마운트 위치: 메인 우측 상단 → 입력 상자 안쪽 우측 상단 (사용자 요청, 2026-08-31)
+// 설계 근거: .certify/design/2026-08-31-perm-mode-into-composer.html
+test('Composer가 입력 상자(.composer-input) 안에 이 컴포넌트를 마운트한다', () => {
+  assert.match(composer, /import PermissionModeBar from '\.\/PermissionModeBar\.jsx';/);
+  // 셸이 아니라 **입력 상자** 안이어야 한다 — 셸 최상단은 GOAL 배지·인터럽트 복구 바가
+  // 조건부로 차지하는 자리라, 거기 얹으면 서로를 가린다.
+  // 사이 구간에서 </div>를 금지해 "상자 밖에 나란히 놓기"를 배제한다 — 글자 수 창으로만
+  // 재면 상자를 닫고 뒤에 둔 배치도 통과한다(codex 지적). textarea와의 앞뒤 순서는
+  // 묶지 않는다 — 절대 배치라 소스 순서가 화면을 바꾸지 않는데 묶으면 무해한 재배열에
+  // 테스트만 깨진다(codex 지적).
+  assert.match(
+    composer,
+    /<div className="composer-input">(?:(?!<\/div>)[\s\S])*?<PermissionModeBar\s*\/>/,
+    'PermissionModeBar는 .composer-input 안에 있어야 한다',
+  );
+  // 마운트는 정확히 하나 — 컴포저 안에서 두 번 렌더돼도 aria-label이 둘이 된다.
+  assert.equal((composer.match(/<PermissionModeBar\b/g) ?? []).length, 1);
+});
+
+test('App은 더 이상 이 컴포넌트를 마운트하지 않는다 — 이중 마운트 방지', () => {
+  // 두 곳에서 렌더되면 aria-label '권한 모드'가 둘이 되어 e2e가 strict mode로 깨지고,
+  // 사용자에게는 같은 셀렉트가 두 개 보인다. 이름을 언급하는 주석까지 막지 않도록
+  // import 문과 실제 태그만 못박는다(codex 지적).
+  assert.doesNotMatch(app, /import PermissionModeBar\b/);
+  assert.doesNotMatch(app, /<PermissionModeBar\b/);
+  // 이름만 막으면 `import Bar from './components/PermissionModeBar.jsx'` 같은 별칭
+  // 재도입이 그대로 빠져나간다 — 모듈 경로 자체를 막는다(codex 지적).
+  assert.doesNotMatch(app, /from '\.\/components\/PermissionModeBar\.jsx'/);
+});
+
+test('우측 상단 배지 띠는 배지가 실제로 보일 때만 만들어진다', () => {
+  // 권한 모드가 빠져나간 뒤 .main-top-right에 남은 것은 세션 이름 배지뿐이다.
+  // 래퍼와 채팅 상단 여백(has-top-controls)이 같은 조건을 봐야 사이드바가 펼쳐진
+  // 평소에 빈 상자와 56px 여백만 남지 않는다.
+  assert.match(app, /const sessionBadge = !!session && !sidebarOpen;/);
+  // 조건 블록이 닫히기( `)}` ) 전에 래퍼가 나와야 실제로 그 조건 안에 든 것이다.
+  assert.match(app, /\{sessionBadge && \((?:(?!\)\})[\s\S])*?className="main-top-right"/);
+  assert.match(app, /`main\$\{sessionBadge \? ' has-top-controls' : ''\}`/);
+  // 조건부 래퍼 하나만 있는지까지 세지 않으면, 무조건 렌더되는 두 번째 래퍼가 옆에
+  // 생겨도 위 단언은 그대로 통과한다(codex 지적).
+  assert.equal((app.match(/className="main-top-right"/g) ?? []).length, 1);
+  // 주석의 언급까지 세지 않도록 클래스로 붙는 형태(`' has-top-controls'`)만 센다.
+  assert.equal((app.match(/' has-top-controls'/g) ?? []).length, 1);
+  // 래퍼 안에 실제로 배지가 들어 있어야 "배지가 보일 때만"이 의미를 갖는다.
+  assert.match(app, /className="main-top-right">(?:(?!<\/div>)[\s\S])*?className="session-name-badge"/);
+});
+
+test('인라인 셀렉트의 절대 위치는 .composer-input으로 한정해 선언한다', () => {
+  // 공용 .pill-select-wrap이 같은 특이도(0,1,0)로, 그것도 **나중에**
+  // position:relative를 선언한다 — 클래스 하나로 쓰면 그쪽이 이겨 셀렉트가 흐름에
+  // 남는다(codex가 잡은 회귀). 앵커가 될 .composer-input의 relative도 함께 고정한다.
+  assert.match(
+    interactCss,
+    /\.composer-input \.perm-mode-inline\s*\{[^}]*position:\s*absolute;/,
+  );
+  // 이 작업의 요구사항 자체가 "우측 상단"이다 — position만 보면 좌하단으로 옮겨도
+  // 통과한다(codex 지적). 값은 묶지 않고 두 축을 잡는다는 것만 못박는다.
+  assert.match(interactCss, /\.composer-input \.perm-mode-inline\s*\{[^}]*\btop:/);
+  assert.match(interactCss, /\.composer-input \.perm-mode-inline\s*\{[^}]*\bright:/);
+  // 한정하지 않은 규칙이 position을 잡으면 그 회귀가 그대로 돌아온다. 들여쓰기·공백
+  // 변형까지 걸리도록 규칙 경계에서 찾는다 — 경계에는 `}`(직전 블록)뿐 아니라
+  // `{`(@media 안 첫 규칙)와 `,`(콤마 선택자 목록의 뒤쪽 항목)도 넣는다(codex 지적).
+  assert.doesNotMatch(
+    interactCss,
+    /(^|[{},])\s*\.perm-mode-inline\s*[,{][^}]*position\s*:/,
+    '한정하지 않은 .perm-mode-inline 규칙은 .pill-select-wrap에 덮인다',
+  );
+  assert.match(interactCss, /\.composer-input\s*\{[^}]*position:\s*relative;/);
+  // 셀렉트 폭과 textarea가 비우는 폭은 반드시 같은 변수여야 한다 — 따로 두면 한쪽만
+  // 바뀌어 글자가 셀렉트 밑으로 파고든다. 그래서 양쪽 사용처를 모두 못박는다.
+  assert.match(interactCss, /\.composer-input\s*\{[^}]*--perm-inline-w:\s*\d/);
+  assert.match(
+    interactCss,
+    /\.composer-input \.perm-mode-inline\s*\{[^}]*width:\s*var\(--perm-inline-w\)/,
+  );
+  assert.match(
+    interactCss,
+    /\.composer-input:has\(\.perm-mode-inline\) textarea\s*\{[^}]*padding-right:\s*calc\(var\(--perm-inline-w\)\s*\+/,
+  );
+  // 떠 있던 시절의 규칙은 실제 **선언**으로 남아 있으면 안 된다. 이 이름을 설명하는
+  // 주석은 theme.css에 일부러 남겨 뒀는데(왜 없어졌는지의 기록), stripCssComments가
+  // 매칭 대상에서 걷어내므로 여기 걸리지 않는다. 이름이 겹치는 다른 클래스는 막지 않는다.
+  assert.doesNotMatch(themeCss, /(^|[{},])\s*\.perm-mode-float[\s,{]/);
 });
 
 // ----- 모델 피커 — 낙관 갱신 금지 계약 (같은 파일에 두는 이유: 대상이 Composer.jsx로

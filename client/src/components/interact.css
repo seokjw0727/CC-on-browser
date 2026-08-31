@@ -225,6 +225,39 @@
   border-color: var(--accent-line);
 }
 
+/* ----- 입력 상자 안쪽 우측 상단의 권한 모드 셀렉트 (PermissionModeBar) -----
+   기준을 .composer-shell이 아니라 이 상자로 잡는다: 셸 맨 위에는 GOAL 배지
+   (ActiveModes)와 인터럽트 복구 바가 조건부로 들어와, 셸 기준으로 띄우면 그것들 위에
+   얹혀 서로를 가린다. 입력 영역 기준이면 조건과 무관하게 항상 첫 줄 옆이다.
+   폭을 고정하는 이유: 아래 textarea가 비워 둘 오른쪽 여백과 한 값을 공유해야 하는데,
+   내용 폭(auto)에 맡기면 글꼴 메트릭에 따라 둘이 어긋나 글자가 셀렉트 밑으로 파고든다.
+   라벨은 모두 네 글자(기본모드·자동모드·플랜모드·신뢰모드)라 한 폭으로 충분하다. */
+.composer-input {
+  position: relative;
+  --perm-inline-w: 86px;
+}
+/* .composer-input을 앞에 붙여 특이도를 0,2,0으로 올린다 — 이 파일 아래쪽의 공용
+   .pill-select-wrap이 position:relative를 같은 특이도(0,1,0)로, 그것도 **나중에**
+   선언한다. 클래스 하나로 쓰면 그쪽이 이겨 셀렉트가 흐름에 남고, textarea 위가 아니라
+   앞줄을 차지한 채 오른쪽 여백만 비는 상태가 된다(codex 지적). */
+.composer-input .perm-mode-inline {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  width: var(--perm-inline-w);
+}
+.perm-mode-inline .pill-select {
+  width: 100%;
+  max-width: none;
+  height: 26px;
+  padding: 0 22px 0 10px;
+  font-size: 12px;
+}
+.perm-mode-inline .pill-select-caret {
+  right: 8px;
+}
+
 .composer-input textarea {
   width: 100%;
   border: none;
@@ -236,6 +269,13 @@
   line-height: 1.5;
   max-height: 200px;
   color: var(--text);
+}
+/* 셀렉트가 겹쳐 있는 만큼 오른쪽을 비운다. 첫 줄만 좁히는 CSS 수단이 없어 모든 줄이
+   같은 여백을 지지만, 글자가 셀렉트 밑으로 흘러 읽히지 않는 것보다 낫다.
+   :has()로 셀렉트가 실제로 있을 때만 — 세션이 없으면 컴포넌트가 null을 반환하므로
+   그때는 안내 문구가 상자 전체를 쓴다. */
+.composer-input:has(.perm-mode-inline) textarea {
+  padding-right: calc(var(--perm-inline-w) + 10px);
 }
 .composer-input textarea::placeholder {
   color: var(--text-faint);
@@ -1675,8 +1715,9 @@ select.mode-trust:focus {
 /* ===== 토스트 알림 — 설정 변경·오류의 일시 표시(자동 소멸, 클릭 닫기) ===== */
 .toast-stack {
   position: fixed;
-  /* 상단 컨트롤 띠(.main-top-right: 14px + 34px + 8px) 아래로 내린다 — 같은 높이면
-     방금 권한 모드를 바꾼 셀렉트를 그 변경 토스트가 덮어 연속 조작을 막는다. */
+  /* 상단 배지 띠(.main-top-right: 14px + 34px + 8px) 아래로 내린다 — 같은 높이면
+     사이드바를 접었을 때 세션 이름 배지를 토스트가 덮는다. (권한 모드 셀렉트가 그
+     자리에 있던 시절엔 방금 바꾼 컨트롤을 그 변경 토스트가 가리는 문제였다.) */
   top: 56px;
   left: 50%;
   transform: translateX(-50%);

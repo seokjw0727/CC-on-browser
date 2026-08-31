@@ -394,9 +394,10 @@ select:focus {
   border-color: var(--border-strong);
 }
 
-/* 메인 우측 상단에 떠 있는 컨트롤 묶음 — 권한 모드 셀렉트 + (접힘 시) 세션 이름 배지.
-   절대 위치는 이 래퍼만 갖는다: 공용 .pill-select / .session-name-badge를 직접
-   띄우면 다른 화면(새 세션 모달 등)의 같은 클래스까지 따라 움직인다.
+/* 메인 우측 상단에 떠 있는 묶음 — 이제 세션 이름 배지 하나뿐이다(권한 모드 셀렉트는
+   입력 상자 안으로 갔다). 배지는 사이드바가 접혔을 때만 뜨므로 App이 그 조건에서만
+   래퍼를 만든다. 자식이 하나여도 래퍼는 남긴다: 절대 위치를 공용
+   .session-name-badge에 직접 주면 다른 화면의 같은 클래스까지 따라 움직인다.
    shrink-to-fit이라 여백이 클릭을 가로채지 않는다. */
 .main-top-right {
   position: absolute;
@@ -405,10 +406,10 @@ select:focus {
   z-index: 5;
   display: flex;
   align-items: center;
-  gap: 8px;
   max-width: calc(100% - 28px); /* 좌우 14px 여백 */
-  /* 항목 사이 gap은 여전히 이 상자의 일부라 아래 채팅의 클릭·휠을 삼킨다 —
-     상자는 통과시키고 자식만 받는다(.toast-stack과 같은 패턴). */
+  /* 자식이 배지 하나뿐이라도 상자 자체는 max-width만큼 자리를 차지해, 배지가 짧으면
+     그 오른쪽 빈 폭이 아래 채팅의 클릭·휠을 삼킨다 — 상자는 통과시키고 자식만
+     받는다(.toast-stack과 같은 패턴). */
   pointer-events: none;
 }
 .main-top-right > * {
@@ -420,16 +421,21 @@ select:focus {
   max-width: calc(100% - 76px);
 }
 /* 좁은 창에서 미리보기는 3열이 아니라 fixed 오버레이로 뜬다(App.jsx의 overlay) —
-   그 패널이 우측 상단을 통째로 덮어 권한 모드 셀렉트를 클릭할 수 없게 된다.
-   배지만 있던 시절엔 미관 문제였지만 지금은 조작 컨트롤이라 기능이 막힌다.
-   폭 식은 아래 .app.preview-overlay .preview-col과 글자 그대로 같아야 한다. */
+   그 패널이 우측 상단을 통째로 덮어 세션 이름 배지가 가려진다. 권한 모드 셀렉트가
+   여기 있던 동안엔 클릭이 막히는 기능 문제였고, 셀렉트가 입력 상자로 옮겨 간 지금은
+   배지 가독성만 걸린 미관 문제다 — 그래도 값이 공짜라 그대로 둔다.
+   (입력 상자 안의 셀렉트는 오버레이 밑에 들어간다. 같은 상황의 전송 버튼과 마찬가지로
+   좁은 창 + 미리보기에서만 생기는 기존 제약이라, 컴포저에는 이 보정을 두지 않는다.)
+   폭 식은 위 .app.preview-overlay .preview-col과 글자 그대로 같아야 한다. */
 .app.preview-overlay .main-top-right {
   right: calc(min(var(--preview-width, 480px), 100vw) + 14px);
   max-width: calc(100% - min(var(--preview-width, 480px), 100vw) - 28px);
 }
 
 /* 사이드바 접힘 시 현재 세션 이름 배지 (.main-top-right가 위치를 잡는다).
-   좁아지면 권한 모드보다 이름 배지가 먼저 줄어든다(shrink 3 vs 1). */
+   이제 이 배지가 래퍼의 유일한 자식이라 shrink 비율은 서로 겨룰 상대가 없다 —
+   그래도 0 3 auto를 남긴다: 좁은 창에서 max-width(340px)를 넘기지 않고 줄어들어야
+   ellipsis가 걸린다(1 0 auto면 넘쳐 잘린다). */
 .session-name-badge {
   flex: 0 3 auto;
   min-width: 0;
@@ -451,25 +457,12 @@ select:focus {
   animation: enter-fade var(--dur-base) var(--ease-out) both;
 }
 
-/* 떠 있는 권한 모드 셀렉트. mode-* 색은 반투명 틴트라(color-mix … transparent)
-   채팅 위에 그냥 얹으면 글자가 비쳐 읽히지 않는다 — 래퍼에 불투명 surface를 깔아
-   그 위에서 합성되게 한다. 배지와 높이(34px)를 맞춘다. */
-.perm-mode-float {
-  /* 아주 좁은 창에서는 화면 밖으로 넘치는 대신 줄어든다(최소 96px는 남긴다) */
-  flex: 0 1 auto;
-  min-width: 96px;
-  border-radius: var(--r-pill);
-  background: var(--surface);
-  box-shadow: var(--shadow-1);
-  animation: enter-fade var(--dur-base) var(--ease-out) both;
-}
-.perm-mode-float .pill-select {
-  height: 34px;
-  flex: 1 1 auto;
-  min-width: 0;
-}
+/* 권한 모드 셀렉트가 여기 떠 있던 시절의 .perm-mode-float는 없어졌다 — 셀렉트는 입력
+   상자 안쪽 우측 상단으로 들어갔고, 그 자리 스타일은 .perm-mode-inline(interact.css)이다.
+   불투명 배경을 깔던 이유(mode-* 색이 반투명 틴트라 채팅 위에서 글자가 비친다)는
+   새 자리에서 저절로 해결된다: 입력 상자 자체가 불투명 --surface다. */
 
-/* 떠 있는 컨트롤이 첫 메시지를 가리지 않게 스크롤 영역 위를 비워 둔다(14+34+8). */
+/* 떠 있는 배지가 첫 메시지를 가리지 않게 스크롤 영역 위를 비워 둔다(14+34+8). */
 .main.has-top-controls .chat-scroll {
   padding-top: 56px;
 }

@@ -1,7 +1,8 @@
 // App shell: Sidebar (left, collapsible) + main (ChatView + Composer).
-// 상시 상단 바는 없지만, 메인 우측 상단에 떠 있는 컨트롤 묶음(.main-top-right)이
-// 권한 모드 셀렉트와 (사이드바가 접혔을 때) 세션 이름 배지를 담는다.
-// 모델·노력·사용량은 여전히 컴포저에 있다. PermissionDialog는 모달.
+// 상시 상단 바는 없다. 메인 우측 상단에 떠 있는 묶음(.main-top-right)은 사이드바가
+// 접혔을 때의 세션 이름 배지 하나만 담는다 — 권한 모드 셀렉트는 입력 상자 안쪽 우측
+// 상단으로 옮겨 갔다(Composer → PermissionModeBar, 2026-08-31).
+// 모델·노력·사용량도 컴포저에 있다. PermissionDialog는 모달.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StoreProvider, useStore, useActiveSession } from './lib/store.jsx';
@@ -17,7 +18,6 @@ import Composer from './components/Composer.jsx';
 import Icon from './components/Icon.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import PermissionDialog from './components/PermissionDialog.jsx';
-import PermissionModeBar from './components/PermissionModeBar.jsx';
 import PreviewPanel from './components/PreviewPanel.jsx';
 import Toasts from './components/Toasts.jsx';
 import TooltipLayer from './components/Tooltip.jsx';
@@ -62,6 +62,9 @@ function Shell() {
   const [theme, setTheme] = useState(() => readPref(THEME_KEY) || 'dark');
   const [shape, setShape] = useState(() => normalizeShape(readPref(SHAPE_KEY)));
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // 우측 상단 세션 이름 배지의 표시 조건 — 래퍼와 채팅 상단 여백이 같은 값을 봐야
+  // 배지가 없는데 자리만 비어 있는 상태가 생기지 않는다.
+  const sessionBadge = !!session && !sidebarOpen;
   const [previewWidth, setPreviewWidth] = useState(readStoredWidth);
   // 좁은 창에서는 오버레이 — 3열을 유지하면 채팅이 읽을 수 없을 만큼 눌린다.
   const [overlay, setOverlay] = useState(
@@ -223,7 +226,11 @@ function Shell() {
         onSetShape={setShape}
       />
 
-      <main className={`main${session ? ' has-top-controls' : ''}`}>
+      {/* 우측 상단 띠에 남은 것은 세션 이름 배지뿐이다(권한 모드는 입력창 안으로 갔다) —
+          배지는 사이드바가 접혔을 때만 뜨므로, 래퍼도 채팅 상단 여백(has-top-controls)도
+          그 조건에서만 만든다. 세션만 보고 붙이면 사이드바가 펼쳐진 평소에 빈 상자와
+          쓸데없는 56px 여백이 남는다. */}
+      <main className={`main${sessionBadge ? ' has-top-controls' : ''}`}>
         {!sidebarOpen && (
           <button
             type="button"
@@ -235,25 +242,23 @@ function Shell() {
             <Icon name="menu" />
           </button>
         )}
-        {/* 떠 있는 우측 상단 컨트롤. 권한 모드는 세션이 있으면 항상, 세션 이름 배지는
-            사이드바가 접혀 세션 목록이 안 보일 때만 — 둘을 한 flex 행에 묶어 서로
-            겹치지 않게 한다. 이름 규칙은 사이드바 라이브 행과 같은 함수를 공유한다
+        {/* 떠 있는 우측 상단 배지 — 사이드바가 접혀 세션 목록이 안 보일 때만 뜬다.
+            이름 규칙은 사이드바 라이브 행과 같은 함수를 공유한다
             (지정한 이름 → CLI 이름 → 첫 발화 요약 → sessionId 앞 8자 → '새 세션')
-            + 작업 디렉터리 꼬리. */}
-        {session && (
+            + 작업 디렉터리 꼬리. 래퍼(.main-top-right)는 배지 하나만 남았어도 유지한다:
+            절대 위치를 공용 .session-name-badge에 직접 주면 다른 화면의 같은 클래스까지
+            따라 움직인다. */}
+        {sessionBadge && (
           <div className="main-top-right">
-            {!sidebarOpen && (
-              <div className="session-name-badge" data-tip={session.cwd || session.key}>
-                {sessionDisplayTitle({
-                  customTitle: session.customTitle,
-                  cliName: session.cliName,
-                  messages: session.messages,
-                  sessionId: session.sessionId,
-                })}
-                {shortPath(session.cwd) ? ` · ${shortPath(session.cwd)}` : ''}
-              </div>
-            )}
-            <PermissionModeBar />
+            <div className="session-name-badge" data-tip={session.cwd || session.key}>
+              {sessionDisplayTitle({
+                customTitle: session.customTitle,
+                cliName: session.cliName,
+                messages: session.messages,
+                sessionId: session.sessionId,
+              })}
+              {shortPath(session.cwd) ? ` · ${shortPath(session.cwd)}` : ''}
+            </div>
           </div>
         )}
         <ChatView />

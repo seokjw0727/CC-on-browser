@@ -1,7 +1,7 @@
-// 권한 모드 셀렉트 — 메인 영역 우측 상단에 떠 있는 단독 컨트롤.
-// 원래 컴포저 상단 pill 행에 있었으나, 입력창은 "지금 무엇을 보낼까"만 담고
-// 세션 설정은 화면 상단에 상주하도록 분리했다. 스토어에서 직접 읽으므로
-// App.jsx는 위치만 잡아 주고 props를 흘려보내지 않는다.
+// 권한 모드 셀렉트 — 입력 상자(.composer-input) 안쪽 우측 상단에 겹쳐 두는 단독 컨트롤.
+// 이력: 컴포저 상단 pill 행 → 메인 우측 상단 플로팅 → (사용자 요청) 입력창 안 우측 상단.
+// 자리만 컴포저에 얹혀 있을 뿐 스토어에서 직접 읽으므로, Composer.jsx는 위치만 잡아
+// 주고 props를 흘려보내지 않는다.
 import { useStore, useActiveSession } from '../lib/store.jsx';
 import { MODES, MODE_LABEL, MODE_CLASS } from '../lib/permission-modes.js';
 import Icon from './Icon.jsx';
@@ -29,7 +29,7 @@ export default function PermissionModeBar() {
   };
 
   return (
-    <span className="pill-select-wrap perm-mode-float">
+    <span className="pill-select-wrap perm-mode-inline">
       <select
         aria-label="권한 모드"
         className={`pill-select ${MODE_CLASS[session.permissionMode] ?? ''}`.trim()}
