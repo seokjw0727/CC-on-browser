@@ -8,6 +8,48 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-08-31
+
+> 5시간·7일 사용량 한도가 걸리거나 다시 풀릴 때 브라우저 알림을 받을 수 있습니다.
+> 한도에 걸린 줄 모르고 쓰다가 막히는 일을 줄이려는 것으로, 설정 → 세션 탭의
+> **사용량 한도 알림**을 켜면 동작하고 기본값은 꺼짐입니다. 처음 켤 때 브라우저가 알림
+> 권한을 묻습니다. 사용률은 이미 60초마다 받아 오던 값을 그대로 쓰므로 새로 조회하는
+> 것이 없고, 따라서 이 기능은 구독을 한 톨도 쓰지 않습니다. 알림은 창이 한도에 닿는
+> 순간과 다시 풀리는 순간에만 한 번씩 오고, 앱을 켤 때나 조회가 잠시 실패할 때는 오지
+> 않습니다 — 잘못 오는 알림 하나가 기능 자체를 꺼 버리게 만들기 때문입니다.
+> (Adds optional browser notifications when the 5-hour or 7-day usage window hits its limit
+> or frees up again. Off by default; enable it under Settings → 세션. It reads the usage
+> figures the app already polls every 60 seconds, so it makes no extra request and consumes
+> no subscription quota. Notifications fire only on an actual threshold crossing — never on
+> app start, a repeated value, or a failed poll.)
+
+### Added
+- **사용량 한도 알림.** 5시간 창과 7일 창을 각각 따로 보고, 사용률이 100%에 닿으면
+  "5시간 사용량 한도 도달", 다시 100% 아래로 내려가면 "5시간 사용량 한도 해제"를
+  띄웁니다. 본문에는 사용률과 초기화 시각이 함께 들어갑니다. 창 이름을 제목에 넣은
+  것은 두 창이 한꺼번에 걸렸을 때 무엇이 걸렸는지 알림 목록에서 바로 보이게 하기
+  위해서입니다. 창마다 알림을 하나로 유지하므로, 해제 알림이 앞선 도달 알림을 대신하고
+  브라우저 탭을 여러 개 열어 두어도 같은 알림이 여러 번 쌓이지 않습니다.
+  (Per-window notifications on crossing 100% in either direction, titled by window so
+  simultaneous 5h/7d events stay distinguishable, and collapsed to one live notification
+  per window so releases replace hits and extra tabs do not multiply them.)
+- **설정 → 세션 탭의 켬/끔 스위치.** 기본값은 꺼짐입니다. 브라우저가 알림을 지원하지
+  않을 때, 이 사이트의 알림을 차단해 두었을 때, 권한 요청 창을 닫아 아직 권한이 없을
+  때를 각각 다른 문구로 안내합니다. 마지막 경우에는 **권한 요청** 버튼이 함께 나와
+  스위치를 껐다 켜지 않고도 다시 물어볼 수 있습니다 — 브라우저는 사용자가 직접 누른
+  경우에만 권한 창을 띄우기 때문입니다.
+  (A switch under Settings → 세션, off by default, with distinct notes for unsupported,
+  blocked, and not-yet-granted permission — the last carrying a 권한 요청 button, since
+  browsers only surface the prompt from a user gesture.)
+
+### Fixed
+- **사용량 폴링의 응답 순서.** 한 요청이 폴링 주기보다 오래 걸리면 뒤늦게 도착한 옛
+  응답이 새 값을 덮어써 사용률이 잠깐 뒷걸음질칠 수 있었습니다. 이제 순번을 붙여 뒤처진
+  응답을 버립니다. 상태줄 수치가 튀지 않고, 새 알림이 그 뒷걸음을 "한도 해제"로 잘못
+  읽지도 않습니다.
+  (Usage poll responses are now sequence-guarded, so a slow request arriving out of order
+  can no longer roll the displayed utilization backwards — or fake a limit-release event.)
+
 ## [1.11.0] - 2026-08-30
 
 > git worktree 현황을 브라우저에서 볼 수 있습니다. 사이드바 아래쪽에 **worktree** 버튼이
@@ -869,6 +911,7 @@ dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
 [Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.0...HEAD
+[1.11.1]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.6...v1.11.0
 [1.10.6]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.5...v1.10.6
 [1.10.5]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.4...v1.10.5
