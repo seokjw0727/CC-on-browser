@@ -8,6 +8,39 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.11.2] - 2026-08-31
+
+> 권한 모드 선택창이 화면 우측 상단에서 **입력창 안쪽 우측 상단**으로 들어왔습니다.
+> 무엇을 보낼지 쓰는 자리와 어떤 권한으로 보낼지 고르는 자리가 화면 양 끝으로 떨어져
+> 있어서, 보내기 직전에 모드를 확인하려면 시선을 반대편까지 옮겨야 했습니다. 이제
+> 입력하는 첫 줄 옆에 붙어 있어 쓰면서 그대로 보이고, 대화 위에 떠 있던 컨트롤이
+> 사라져 답변의 오른쪽 위 모서리를 가리지도 않습니다. 고를 수 있는 모드와 동작은
+> 그대로이고 자리만 바뀝니다.
+> (Moves the permission-mode select from the screen's top-right corner into the composer's
+> message box, pinned to its inner top-right. It now sits beside the first line you type,
+> so the current mode stays in view while writing, and it no longer floats over the
+> top-right corner of the conversation. The modes and their behaviour are unchanged —
+> this is a placement change only.)
+
+### Changed
+- **권한 모드 선택창이 입력창 안으로 들어왔습니다.** 컴포저 상자 전체가 아니라 글을
+  쓰는 입력 영역을 기준으로 얹었습니다. 상자 맨 윗줄에는 GOAL 배지와 인터럽트 복구
+  안내가 상황에 따라 들어오는데, 상자 기준으로 띄우면 그것들 위에 겹쳐 서로를 가리기
+  때문입니다. 입력 영역 기준이면 그런 안내가 있든 없든 언제나 첫 줄 옆입니다.
+  (The select is anchored to the text input rather than the whole composer shell, so the
+  conditionally-rendered GOAL badge and interrupt-recovery bar at the shell's top row can
+  never collide with it.)
+- **긴 문장이 선택창 밑으로 흐르지 않습니다.** 입력창이 선택창 너비만큼 오른쪽 여백을
+  비워 두고, 그 너비를 두 곳이 같은 값으로 공유합니다 — 한쪽만 바뀌어 글자와 선택창이
+  겹치는 일이 없습니다. 세션이 없어 선택창이 뜨지 않을 때는 입력창이 원래 너비를 씁니다.
+  (The textarea reserves right padding from the same CSS variable that sets the select's
+  width, so text wraps before the control instead of sliding under it — and the padding
+  disappears when no session is open and the select is not rendered.)
+- **화면 우측 상단에는 세션 이름 배지만 남습니다.** 세션이 열려 있고 사이드바를 접었을
+  때만 나오며, 그 조건이 아닐 때는 배지 띠도 채팅 위쪽 여백도 만들지 않습니다.
+  (The floating top-right strip now carries only the session-name badge, and both the strip
+  and the chat's top offset are created only when that badge is actually shown.)
+
 ## [1.11.1] - 2026-08-31
 
 > 5시간·7일 사용량 한도가 걸리거나 다시 풀릴 때 브라우저 알림을 받을 수 있습니다.
@@ -910,7 +943,8 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
-[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.2...HEAD
+[1.11.2]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.1...v1.11.2
 [1.11.1]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.6...v1.11.0
 [1.10.6]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.5...v1.10.6
