@@ -1,9 +1,13 @@
-// WorktreePanel — git worktree 전경(하단 고정 패널의 네 번째 칸). **조회 전용**이다:
+// WorktreePanel — git worktree 전경. 입력창 아래 브랜치 칩(WorktreeButton)이 여는
+// 모달의 본문이다. **조회 전용**이다:
 // 생성·삭제·정리·전환 버튼은 없고, 앞으로 넣더라도 이 컴포넌트의 계약이 아니다.
 //
 // 화면은 위아래 두 층이다. 위는 커밋 그래프(SVG) — 브랜치들이 어디서 갈라져 어디서
 // 만나는지를 보여 준다. 아래는 worktree 카드 — 각각의 브랜치·상태·최근 커밋과, 그
 // 디렉터리에서 열렸던 세션 이름을 담는다.
+//
+// 조회·새로고침·오류 안내는 전부 이 컴포넌트가 스스로 한다(activeKey가 바뀌면 다시
+// 읽는다) — 감싸는 쪽은 위치와 여닫음만 정하고 데이터에는 관여하지 않는다.
 //
 // 세션 이름을 서버가 정하지 않는 이유: 사용자가 사이드바에서 바꾼 이름(customTitle)은
 // localStorage에만 있어 서버가 모른다. 그래서 서버는 "이 worktree에 이 세션들이 있다"는
@@ -26,7 +30,9 @@ const NODE_R = 4;
 /** 레인 색은 6종을 돌려 쓴다 — worktree.css가 --wt-lane-0..5로 정의한다. */
 const LANE_COLORS = 6;
 
-const REASON_TEXT = {
+/** 조회 불가 사유 → 사용자가 할 일. 입력창 아래 칩(WorktreeButton)이 같은 어휘를
+ *  툴팁으로 쓰므로 export한다 — 두 벌로 두면 한쪽만 고쳐진 채 남는다. */
+export const REASON_TEXT = {
   'no-session': '실행 중인 세션이 없습니다. 세션을 시작하면 그 프로젝트의 worktree를 보여 줍니다.',
   'no-cwd': '세션의 작업 디렉터리를 확인할 수 없습니다.',
   'git-missing': 'git을 찾지 못했습니다. git이 설치되어 있고 PATH에 있는지 확인해 주세요.',

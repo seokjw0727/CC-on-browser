@@ -10,7 +10,9 @@ import { WebSocketServer } from 'ws';
 import { SessionHub } from './session-hub.js';
 import { listProjects, listSessions, loadTranscript, listRecentSessions, deleteSession } from './history.js';
 import { listDirs, pickDirectory, searchFiles } from './fs-api.js';
-import { attachSessions, collectWorktrees, unavailableResult } from './git-api.js';
+import {
+  attachSessions, collectBranch, collectWorktrees, unavailableBranch, unavailableResult,
+} from './git-api.js';
 import { aggregateDailyUsage, aggregateUsage, MAX_DAILY_DAYS } from './usage.js';
 import { defaultConfigPath, readClaudeConfig, writeClaudeConfig } from './claude-config.js';
 import { defaultPluginsDir, listInstalledPlugins } from './claude-plugins.js';
@@ -936,6 +938,20 @@ export async function startServer({
             }
           }
           json(res, 200, result);
+          return;
+        }
+        case '/api/branch': {
+          // 입력창 아래 브랜치 칩이 쓰는 경량 조회. /api/worktrees와 **기준 디렉터리를
+          // 정하는 규칙은 같고**(세션 key → 서버 장부의 cwd), 값이 훨씬 싸다는 점만
+          // 다르다. 이 창구가 있는 이유는 그 비용 차이 자체다 — 늘 떠 있는 라벨을
+          // worktree 전경 조회로 채우면 세션을 옮길 때마다 저장소를 통째로 훑는다.
+          const key = url.searchParams.get('key');
+          const cwd = key ? hub.cwdOf(key) : null;
+          if (!cwd) {
+            json(res, 200, unavailableBranch('no-session'));
+            return;
+          }
+          json(res, 200, await collectBranch(cwd));
           return;
         }
         case '/api/pick-directory':

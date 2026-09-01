@@ -2007,13 +2007,10 @@ select.mode-trust:focus {
 .foot-modal.settings-modal {
   max-width: 460px;
 }
-/* worktree: 커밋 그래프(레인 + 제목)와 절대경로가 함께 서야 해서 가장 넓다. 높이도
-   기본형(560px)보다 키운다 — 그래프와 카드 목록이 한 화면에 겹쳐 담기는 패널이라
-   좁으면 둘 다 각자의 스크롤에 갇혀 무엇도 훑을 수 없다. */
-.foot-modal.worktree-modal {
-  max-width: 680px;
-  max-height: min(84vh, 720px);
-}
+/* worktree 모달의 폭 규칙은 worktree.css로 옮겼다 — 그 패널은 사이드바 하단 버튼에서
+   입력창 아래 브랜치 칩으로 떨어져 나가, 더는 .foot-modal(사이드바 풋 전용 컴팩트
+   변형)의 변형이 아니다. 여기에 남겨 두면 .foot-modal이 붙지 않는 그 모달에 아예
+   적용되지 않는다. */
 .foot-modal .modal-title .foot-icon {
   color: var(--accent);
 }

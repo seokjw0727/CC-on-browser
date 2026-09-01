@@ -1,4 +1,6 @@
-// worktree 패널 E2E — fake CLI 'echo' 스택 대상. 조회 전용 계약을 브라우저에서 확인한다.
+// worktree 브랜치 칩과 그 패널의 E2E — fake CLI 'echo' 스택 대상. 조회 전용 계약을
+// 브라우저에서 확인한다. 패널로 들어가는 문은 사이드바 하단 버튼이 아니라 입력창 아래
+// 칩이다(v1.11.2 다음 변경) — 그 자리와 라벨 자체도 여기서 함께 못박는다.
 //
 // 이 스택의 세션 cwd는 이 레포 자신(process.cwd())이라, 패널이 상대하는 것은 픽스처가
 // 아니라 **실제 git 저장소**다. 그래서 여기서만 증명되는 것이 있다: git 하위 프로세스가
@@ -28,11 +30,25 @@ async function startSession(page, cwd = process.cwd()) {
   await expect(page.getByLabel('메시지 입력')).toBeEnabled();
 }
 
+// 칩의 접근성 이름은 'worktree — <브랜치>'다. 앞머리만 보고 찾는 이유는 그 뒤가
+// 저장소 상태에 따라 달라지기 때문이다(CI는 태그를 체크아웃해 detached다) — 이름
+// 전체를 못박으면 브랜치가 바뀔 때마다 테스트가 깨진다.
+const chip = (page) => page.getByRole('button', { name: /^worktree/ });
+
 const openPanel = async (page) => {
-  await page.getByRole('button', { name: 'worktree', exact: true }).click();
+  await chip(page).click();
   const modal = page.getByRole('dialog', { name: 'worktree' });
   await expect(modal).toBeVisible();
   return modal;
+};
+
+/**
+ * 칩이 **첫 조회를 끝낼 때까지** 기다린다 — 라벨이 자리표시자를 벗어나는 순간이 그것이다.
+ * 갱신을 세는 테스트는 반드시 이걸 먼저 통과해야 한다: 마운트 직후의 조회까지 세면
+ * 아무 일도 일어나지 않아도 개수가 늘어 테스트가 공허해진다(codex 지적).
+ */
+const settleChip = async (page) => {
+  await expect(chip(page).locator('.wt-chip-label')).not.toHaveText('worktree');
 };
 
 test('worktree 패널이 실제 저장소의 커밋 그래프와 카드를 그린다', async ({ page }) => {
@@ -139,10 +155,78 @@ test('git 저장소가 아닌 디렉터리도 오류가 아니라 다른 안내�
 
 test('Esc와 배경 클릭으로 닫히고 포커스가 버튼으로 돌아온다', async ({ page }) => {
   await startSession(page);
-  const trigger = page.getByRole('button', { name: 'worktree', exact: true });
-  const modal = await openPanel(page);
+  const trigger = chip(page);
 
+  // ① Esc
+  const modal = await openPanel(page);
   await page.keyboard.press('Escape');
   await expect(modal).toBeHidden();
   await expect(trigger).toBeFocused();
+
+  // ② 배경 클릭 — 오버레이의 **여백**을 눌러야 한다. 대화상자 위를 누르면 닫히지
+  //    않는 것이 정상이라, 좌표를 주지 않으면 가운데(=대화상자)를 눌러 헛돈다.
+  await openPanel(page);
+  await page.locator('.modal-overlay').click({ position: { x: 5, y: 5 } });
+  await expect(modal).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
+
+test('턴이 끝날 때와 패널을 닫을 때 칩이 브랜치를 다시 읽는다', async ({ page }) => {
+  // 이 칩은 늘 떠 있으므로 "열 때 한 번"으로는 부족하다 — Claude가 턴 도중 브랜치를
+  // 갈아탔다면 사용자가 패널을 열기 전부터 라벨이 틀려 있다. 그래서 턴 종료와 패널
+  // 닫기를 갱신 신호로 삼았고, 여기서는 그 요청이 실제로 다시 나가는지를 본다.
+  await startSession(page);
+  await settleChip(page); // 마운트 조회를 흘려보낸 **뒤**부터 센다
+
+  let calls = 0;
+  page.on('request', (req) => {
+    if (new URL(req.url()).pathname === '/api/branch') calls += 1;
+  });
+
+  // ① 턴 종료(중단 버튼 → 전송 버튼 복귀)
+  const input = page.getByLabel('메시지 입력');
+  await input.fill('안녕');
+  await input.press('Enter');
+  await expect(page.getByRole('button', { name: '전송' })).toBeVisible();
+  await expect.poll(() => calls, { message: '턴이 끝나면 브랜치를 다시 읽어야 한다' })
+    .toBeGreaterThan(0);
+
+  // ② 패널을 닫을 때 — 패널을 보고 닫은 시점의 브랜치가 칩에도 반영되어야 한다.
+  const beforeClose = calls;
+  const modal = await openPanel(page);
+  await page.keyboard.press('Escape');
+  await expect(modal).toBeHidden();
+  await expect.poll(() => calls, { message: '패널을 닫으면 브랜치를 다시 읽어야 한다' })
+    .toBeGreaterThan(beforeClose);
+});
+
+test('브랜치 칩은 입력창 아래에 있고 사이드바에는 없다', async ({ page }) => {
+  // 이 작업의 요점 자체를 못박는다: 패널로 들어가는 문이 사이드바 하단 버튼 행에서
+  // 컴포저 아래로 **옮겨졌다**(복제된 것이 아니다).
+  await startSession(page);
+
+  const trigger = chip(page);
+  await expect(trigger).toHaveCount(1);
+  await expect(trigger).toBeVisible();
+
+  // ① 자리 — 컴포저 도크 안, 입력 상자 **밖**이자 아래다.
+  await expect(page.locator('.composer-dock .wt-chip-row .wt-chip')).toHaveCount(1);
+  await expect(page.locator('.composer-shell .wt-chip')).toHaveCount(0);
+  const inputBox = await page.getByLabel('메시지 입력').boundingBox();
+  const chipBox = await trigger.boundingBox();
+  expect(chipBox.y).toBeGreaterThan(inputBox.y + inputBox.height - 1);
+
+  // ② 사이드바 하단 버튼 행에는 더 이상 없다 — 통계·설정·정보 셋만 남는다.
+  await expect(page.locator('.sidebar-foot').getByRole('button', { name: /worktree/ }))
+    .toHaveCount(0);
+
+  // ③ 라벨은 이 저장소의 실제 HEAD를 말한다. CI는 얕은 클론에 태그 체크아웃이라
+  //    detached일 수 있으므로 브랜치명을 못박지 않고, 패널이 같은 값을 말하는지로 본다.
+  const label = (await trigger.locator('.wt-chip-label').innerText()).trim();
+  expect(label).not.toBe('');
+  const modal = await openPanel(page);
+  const card = modal.locator('.wt-card').first();
+  expect((await card.locator('.wt-branch').innerText()).trim()).toContain(
+    label.replace(' (detached)', ''),
+  );
 });

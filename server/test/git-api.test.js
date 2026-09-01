@@ -14,6 +14,7 @@ import {
   assignToWorktree,
   attachSessions,
   classifyRevParseError,
+  collectBranch,
   collectWorktrees,
   containsNormalized,
   isInside,
@@ -728,5 +729,167 @@ describe('collectWorktrees (실제 git repo)', { skip: gitAvailable ? false : 'g
     assert.equal(r.worktrees.length, 1);
     assert.equal(r.worktrees[0].lastCommit, null);
     assert.deepEqual(r.graph.rows, []);
+  });
+});
+
+// ----- collectBranch -----
+//
+// 입력창 아래 브랜치 칩이 쓰는 경량 조회. collectWorktrees와 **결과가 겹치는 지점**을
+// 특히 못박는다: 같은 저장소를 두 창구가 다르게 말하면(칩은 master, 패널은 detached)
+// 사용자는 어느 쪽도 믿을 수 없게 된다.
+
+describe('collectBranch 인자 검증', () => {
+  test('상대경로·빈 값은 no-cwd', async () => {
+    for (const bad of ['', null, undefined, 'relative/path', 42]) {
+      const r = await collectBranch(bad);
+      assert.equal(r.available, false, `${String(bad)} 는 거부되어야 한다`);
+      assert.equal(r.reason, 'no-cwd');
+      assert.equal(r.branch, null);
+    }
+  });
+
+  test('git 실행 파일이 없으면 오류가 아니라 git-missing 결과', async () => {
+    // 첫 호출(symbolic-ref)이 ENOENT로 죽는다 — 그것을 detached로 오해하고 저장소
+    // 판정으로 넘어가면 같은 이유로 또 실패해 git-failed로 잘못 안내된다.
+    const r = await collectBranch(os.tmpdir(), {
+      gitPath: path.join(os.tmpdir(), 'ccob-no-such-git-binary'),
+    });
+    assert.equal(r.available, false);
+    assert.equal(r.reason, 'git-missing');
+  });
+
+  test('사라진 디렉터리는 git-missing이 아니라 no-cwd', { skip: gitAvailable ? false : 'git 없음' }, async () => {
+    // execFile은 실행 파일을 못 찾을 때와 cwd가 없을 때 **둘 다** ENOENT를 낸다.
+    // 뭉뚱그리면 세션 디렉터리를 지운 사용자에게 "git을 설치하라"고 안내하게 된다
+    // (codex 지적). collectWorktrees도 같은 판정을 공유한다.
+    const gone = path.join(os.tmpdir(), 'ccob-no-such-dir-9d3f1a');
+    const b = await collectBranch(gone);
+    assert.equal(b.available, false);
+    assert.equal(b.reason, 'no-cwd', 'git이 설치되어 있는데 git-missing이라 하면 안 된다');
+    const w = await collectWorktrees(gone);
+    assert.equal(w.available, false);
+    assert.equal(w.reason, 'no-cwd');
+  });
+});
+
+describe('collectBranch (실제 git repo)', { skip: gitAvailable ? false : 'git 없음' }, () => {
+  let root;
+  let main;
+  let linked;
+
+  const IDENT = [
+    '-c', 'user.name=ccob test', '-c', 'user.email=ccob@test.invalid',
+    '-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=master',
+  ];
+  const git = (args, cwd) => run('git', [...IDENT, ...args], cwd);
+
+  before(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'ccob-branch '));
+    main = path.join(root, 'main repo'); // 공백 있는 경로까지 함께 검증
+    linked = path.join(root, 'wt-feature');
+    await fs.mkdir(main, { recursive: true });
+    await git(['init'], main);
+    await fs.writeFile(path.join(main, 'a.txt'), 'hello\n');
+    await git(['add', '.'], main);
+    await git(['commit', '-m', 'base: 최초 커밋'], main);
+    await git(['branch', 'feature'], main);
+    await git(['worktree', 'add', linked, 'feature'], main);
+  });
+
+  after(async () => {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  });
+
+  test('브랜치 위에서는 이름을 그대로 준다', async () => {
+    const r = await collectBranch(main);
+    assert.equal(r.available, true, r.message ?? '');
+    assert.equal(r.reason, null);
+    assert.equal(r.branch, 'master');
+    assert.equal(r.detached, false);
+  });
+
+  test('연결 worktree는 그 worktree의 브랜치를 준다', async () => {
+    // 칩은 "이 세션이 있는 디렉터리"의 브랜치를 말해야 한다 — 저장소의 기본 브랜치가
+    // 아니라. 둘을 헷갈리면 worktree를 옮겨 가며 작업하는 사람에게 늘 틀린 값이 보인다.
+    const r = await collectBranch(linked);
+    assert.equal(r.available, true, r.message ?? '');
+    assert.equal(r.branch, 'feature');
+  });
+
+  test('detached HEAD는 브랜치 대신 짧은 sha를 준다', async () => {
+    const det = path.join(root, 'detached repo');
+    await git(['clone', main, det], root);
+    const sha = (await git(['rev-parse', 'HEAD'], det)).trim();
+    await git(['checkout', '--detach', sha], det);
+    const r = await collectBranch(det);
+    assert.equal(r.available, true, r.message ?? '');
+    assert.equal(r.branch, null, 'detached에는 브랜치가 없다');
+    assert.equal(r.detached, true);
+    assert.ok(r.head, '브랜치가 없으면 짧은 sha라도 있어야 한다');
+    assert.ok(sha.startsWith(r.head), '짧은 sha는 실제 HEAD의 앞자리여야 한다');
+  });
+
+  test('커밋이 하나도 없는 repo도 브랜치 이름을 준다', async () => {
+    // symbolic-ref를 쓰는 이유가 여기 있다 — rev-parse --abbrev-ref HEAD는 커밋이
+    // 없으면 실패해서, 갓 만든 저장소가 빈 라벨이나 '저장소 아님'으로 보인다.
+    const empty = path.join(root, 'empty repo');
+    await fs.mkdir(empty, { recursive: true });
+    await git(['init'], empty);
+    const r = await collectBranch(empty);
+    assert.equal(r.available, true, r.message ?? '');
+    assert.equal(r.branch, 'master');
+    assert.equal(r.detached, false);
+  });
+
+  test('bare 저장소도 오류가 아니다', async () => {
+    const bare = path.join(root, 'demo bare.git');
+    await git(['clone', '--bare', main, bare], root);
+    const r = await collectBranch(bare);
+    assert.equal(r.available, true, r.message ?? '');
+    assert.equal(r.branch, 'master');
+  });
+
+  test('HEAD가 깨진 저장소를 정상 브랜치처럼 보고하지 않는다', async () => {
+    // 이 창구는 available=true면 브랜치 이름이나 짧은 sha 중 하나를 **반드시** 준다.
+    // 그 불변식이 깨지면 칩이 빈 라벨이나 지어낸 이름을 달게 되므로, 무엇도 말할 수
+    // 없는 저장소에서는 available=false로 물러서야 한다.
+    const broken = path.join(root, 'broken head');
+    await git(['clone', main, broken], root);
+    // 심볼릭 참조도 아니고 리비전으로도 풀리지 않는 HEAD. 40자리 hex는 쓰지 않는다 —
+    // rev-parse는 객체가 실제로 있는지 보지 않고 그 문자열을 그대로 축약해 주므로,
+    // 그런 HEAD는 손상이 아니라 정상 detached로 읽힌다(실측).
+    await fs.writeFile(path.join(broken, '.git', 'HEAD'), 'garbage-not-a-ref\n');
+    const r = await collectBranch(broken);
+    assert.equal(r.available, false, '읽지 못한 HEAD를 정상 응답으로 내면 안 된다');
+    // 사유는 git이 정한다 — HEAD가 이 모양이면 git 자신이 "저장소가 아니다"라고 답한다.
+    // 여기서 철자를 못박지 않는 이유는 그것이 git 버전의 몫이기 때문이고, 정작 중요한
+    // 것은 어느 쪽이든 "말할 수 없음"으로 분류된다는 사실이다.
+    assert.ok(
+      ['not-a-repo', 'git-failed'].includes(r.reason),
+      `예상 밖의 사유: ${r.reason}`,
+    );
+    assert.equal(r.branch, null);
+    assert.equal(r.head, null);
+  });
+
+  test('git 저장소가 아니면 not-a-repo', async () => {
+    const plain = path.join(root, 'plain dir');
+    await fs.mkdir(plain, { recursive: true });
+    const r = await collectBranch(plain);
+    assert.equal(r.available, false);
+    assert.equal(r.reason, 'not-a-repo');
+    assert.equal(r.branch, null);
+  });
+
+  test('collectWorktrees와 같은 브랜치를 말한다', async () => {
+    // 두 창구가 어긋나면 칩과 패널이 같은 저장소를 두고 다른 말을 한다.
+    // cwd↔worktree 대응은 프로덕션과 같은 함수로 짓는다 — 문자열 비교로 하면 이 판정이
+    // Windows의 8.3 단축 경로(os.tmpdir()이 돌려주는 USERNA~1)에서 헛돈다.
+    for (const cwd of [main, linked]) {
+      const [light, full] = await Promise.all([collectBranch(cwd), collectWorktrees(cwd)]);
+      const i = assignToWorktree(full.worktrees, cwd);
+      assert.notEqual(i, -1, `${cwd} 가 자기 worktree 목록에 있어야 한다`);
+      assert.equal(light.branch, full.worktrees[i].branch);
+    }
   });
 });

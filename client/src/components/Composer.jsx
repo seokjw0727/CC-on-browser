@@ -27,6 +27,7 @@ import ActiveModes from './ActiveModes.jsx';
 import Icon from './Icon.jsx';
 import PermissionModeBar from './PermissionModeBar.jsx';
 import RunningWork from './RunningWork.jsx';
+import WorktreeButton from './WorktreeButton.jsx';
 import Clawd from './Clawd.jsx';
 import './interact.css';
 
@@ -1147,6 +1148,14 @@ export default function Composer() {
         </div>
 
       </div>
+
+      {/* worktree 브랜치 칩 — 입력 상자 **바로 아래**의 독립 버튼(사이드바 하단
+          네 버튼 중 하나였던 것을 떼어 왔다). 여기가 셸 밖·RunningWork 앞인 이유는
+          "입력창 아래"라는 자리가 조건부로 흔들리면 안 되기 때문이다: 셸 안에 두면
+          입력 상자 테두리 안으로 들어가고, RunningWork 뒤에 두면 작업이 돌 때만
+          한 칸 밀려난다. 데이터·여닫음은 전부 자기가 처리하므로 props가 없다
+          (PermissionModeBar와 같은 규약). */}
+      <WorktreeButton />
 
       {/* 실행 중 작업 도크 — 입력창 박스 **밖**의 독립 카드(.composer-shell의 형제).
           셸 안에 있던 시절엔 도크에 포커스만 가도 .composer-shell:focus-within이 입력창

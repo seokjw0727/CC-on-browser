@@ -99,6 +99,21 @@ export const fetchWorktrees = (key) =>
   get(`/api/worktrees?key=${encodeURIComponent(key ?? '')}`);
 
 /**
+ * 현재 브랜치 이름만 묻는 경량 조회 — 입력창 아래 worktree 칩의 라벨 재료다.
+ *
+ * fetchWorktrees와 **계약(세션 key → 서버가 cwd를 되찾음, 실패도 200 + reason)은
+ * 같지만 몸통이 다르다**. 그 차이가 이 함수의 존재 이유다: 칩은 늘 떠 있어 세션을
+ * 옮길 때마다 다시 부르는데, 전경 조회는 worktree 전수 status와 60커밋 그래프를 돈다.
+ *
+ * available이면 둘 중 하나다: 브랜치 위(branch에 이름) 또는 detached(head에 짧은 sha).
+ * 커밋이 하나도 없는 저장소도 앞쪽이다 — HEAD가 심볼릭이라 이름이 그대로 온다.
+ * @returns {Promise<{available: boolean, reason: string|null, message: string|null,
+ *   branch: string|null, head: string|null, detached: boolean}>}
+ */
+export const fetchBranch = (key) =>
+  get(`/api/branch?key=${encodeURIComponent(key ?? '')}`);
+
+/**
  * 결과물 미리보기 티켓 발급 — 반환된 url은 인증 없이 열 수 있는 단명 capability라
  * iframe/img에 그대로 실을 수 있다(메인 토큰은 URL에 절대 싣지 않는다).
  * 실패 시 err.status: 403(세션 작업 디렉터리 밖) / 404(없는 파일·세션 아님) /

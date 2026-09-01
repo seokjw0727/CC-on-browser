@@ -60,7 +60,6 @@ import SessionMenu from './SessionMenu.jsx';
 import ConfigEditorModal from './ConfigEditorModal.jsx';
 import PluginsForm from './PluginsForm.jsx';
 import TrustModeWarning from './TrustModeWarning.jsx';
-import WorktreePanel from './WorktreePanel.jsx';
 import { useFocusTrap } from '../lib/useFocusTrap.js';
 import { usePresence } from '../lib/usePresence.js';
 import './interact.css';
@@ -540,20 +539,9 @@ function SettingsIcon() {
   );
 }
 
-// 브랜치가 갈라지는 모양 — worktree 패널이 보여 주는 것이 곧 이 모양이다.
-// StatsIcon·SettingsIcon과 같은 20 격자 직접 그림(Icon.jsx 세트를 늘리지 않는 이유는
-// 바로 아래 InfoIcon 주석과 같다).
-function WorktreeIcon() {
-  return (
-    <svg className="foot-icon" viewBox="0 0 20 20" aria-hidden="true">
-      <path d="M6 5.2v9.6" />
-      <path d="M13.8 7.5h-3.3A4.5 4.5 0 0 0 6 12" />
-      <circle cx="6" cy="3.6" r="1.6" />
-      <circle cx="6" cy="16.4" r="1.6" />
-      <circle cx="15.4" cy="7.5" r="1.6" />
-    </svg>
-  );
-}
+// worktree 아이콘은 여기 없다 — 패널과 함께 WorktreeButton.jsx로 옮겨 갔다(입력창
+// 아래 브랜치 칩). 이 표(FOOT_PANELS)에 다시 넣지 말 것: 그 버튼이 사이드바에서
+// 벗어나는 것이 그 변경의 요점이었다.
 
 // 정보 아이콘만 Icon.jsx 세트에서 가져온다(StatsIcon·SettingsIcon은 20 격자 직접 그림).
 // 새 path를 추가하지 않는 이유: icon.test.js가 세트를 정확한 종수로 고정해 두었고,
@@ -1342,13 +1330,6 @@ const FOOT_PANELS = {
       </>
     ),
   },
-  worktree: {
-    title: 'worktree',
-    Glyph: WorktreeIcon,
-    // 커밋 그래프와 경로가 들어가 통계·설정보다 넓어야 한다.
-    modalClass: 'worktree-modal',
-    body: ({ state }) => <WorktreePanel state={state} />,
-  },
   settings: {
     title: '설정',
     Glyph: SettingsIcon,
@@ -1374,7 +1355,7 @@ const FOOT_PANELS = {
   },
 };
 // 화면 순서는 따로 적는다 — Object.keys에 기대면 표의 정의 순서를 옮기는 순간 UI가 바뀐다.
-const FOOT_PANEL_ORDER = ['stats', 'worktree', 'settings', 'info'];
+const FOOT_PANEL_ORDER = ['stats', 'settings', 'info'];
 
 // 하단 고정 버튼 행 — 패널 자체는 화면 중앙 모달(FootModalPresence, aside 밖)로 뜬다.
 function SidebarFoot({ openPanel, onToggle }) {
@@ -1477,7 +1458,7 @@ export default function Sidebar({ onCollapse, theme, onSetTheme, shape, onSetSha
   // 갈라 담는다 — 모달 쪽에서 다시 부르면 데몬이 죽은 뒤 이미 알던 값까지 잃는다.
   // 조회 실패 시 null로 남고, 그때는 모든 행이 '알 수 없음'으로 정상 표시된다.
   const [bootInfo, setBootInfo] = useState(null); // {claudeVersion, daemonVersion, port} | null
-  // null | 'stats' | 'worktree' | 'settings' | 'info' — 값의 출처는 FOOT_PANEL_ORDER다.
+  // null | 'stats' | 'settings' | 'info' — 값의 출처는 FOOT_PANEL_ORDER다.
   const [footPanel, setFootPanel] = useState(null);
   // 세션 컨텍스트 메뉴 — {rowKey, x, y}. 행 데이터는 매 렌더에 스토어에서 다시 읽어
   // 메뉴가 열린 사이 세션이 종료·제거돼도 낡은 정보로 동작하지 않게 한다.

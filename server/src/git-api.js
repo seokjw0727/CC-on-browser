@@ -32,6 +32,15 @@ const FS = '\x1f';
 const RS = '\x1e';
 const LOG_FORMAT = ['%H', '%h', '%P', '%s', '%an', '%aI'].join(FS) + RS;
 
+/** 이 경로가 지금 **디렉터리로** 존재하는가. 판정 실패는 전부 "아니다"로 접는다. */
+function isDir(p) {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * git 호출 한 번. 성공하면 stdout 문자열, 실패하면 code가 붙은 Error를 던진다.
  *
@@ -63,11 +72,16 @@ function runGit(args, cwd, { gitPath = 'git', timeoutMs = GIT_TIMEOUT_MS } = {})
           resolve(String(stdout));
           return;
         }
-        // ENOENT = git 실행 파일 자체가 없음. 그 밖은 git이 0이 아닌 코드로 끝난 것.
         const failure = new Error(
           String(stderr || err.message || 'git failed').trim().split('\n')[0],
         );
-        failure.code = err.code === 'ENOENT' ? 'EGITMISSING' : 'EGITFAILED';
+        // ENOENT는 두 가지를 뭉뚱그린다: 실행 파일을 못 찾았거나, **cwd가 없거나**.
+        // 세션이 열려 있던 디렉터리를 사용자가 지우거나 이름을 바꾸면 후자가 되는데,
+        // 그것을 git-missing으로 보고하면 화면이 "git을 설치하고 PATH를 확인하라"고
+        // 엉뚱한 일을 시킨다(codex 지적). 어느 쪽인지는 cwd를 직접 보면 알 수 있다.
+        failure.code = err.code === 'ENOENT'
+          ? (isDir(cwd) ? 'EGITMISSING' : 'EGITNOCWD')
+          : 'EGITFAILED';
         failure.exitCode = typeof err.code === 'number' ? err.code : null;
         reject(failure);
       },
@@ -453,6 +467,8 @@ async function inspectWorktree(wt, repoCwd, opts) {
  */
 export function classifyRevParseError(err) {
   if (err?.code === 'EGITMISSING') return 'git-missing';
+  // 기준 디렉터리 자체가 사라졌다 — 저장소 문제도, git 설치 문제도 아니다.
+  if (err?.code === 'EGITNOCWD') return 'no-cwd';
   const msg = String(err?.message ?? '');
   if (/not a git repository|not a working tree/i.test(msg)) return 'not-a-repo';
   // git 2.35+의 안전 디렉터리 검사 — 저장소는 맞는데 소유자가 달라 거부된 상태다.
@@ -481,6 +497,96 @@ export function unavailableResult(reason, message = null) {
     truncated: false,
     graphFailed: false,
   };
+}
+
+/**
+ * 브랜치 표시만을 위한 "없음" 응답. unavailableResult와 reason 어휘는 같지만 몸통은
+ * 따로 둔다 — 라벨 하나 그리는 쪽에 worktrees·graph 같은 빈 배열을 딸려 보내면, 두
+ * 창구가 같은 계약을 공유하는 것처럼 보여 나중에 한쪽만 커질 때 어긋난다.
+ */
+export function unavailableBranch(reason, message = null) {
+  return {
+    available: false,
+    reason,
+    message,
+    branch: null,
+    head: null,
+    detached: false,
+  };
+}
+
+/**
+ * "지금 HEAD가 어느 브랜치인가" 하나만 본다. collectWorktrees와 목적이 다르다:
+ * 저쪽은 사용자가 패널을 열었을 때 한 번 도는 전경 조회라 worktree 전수 status와
+ * 60커밋 그래프를 감수하지만, 이 함수의 결과는 **입력창 아래에 늘 떠 있는 라벨**이라
+ * 세션을 옮길 때마다 다시 불린다. 그 자리에 전경 조회를 쓰면 라벨 한 줄 때문에
+ * 저장소 전체를 훑게 된다.
+ *
+ * 그래서 흔한 경우(브랜치 위에 있음)를 git 호출 **한 번**으로 끝낸다. symbolic-ref는
+ * rev-parse --abbrev-ref와 달리 커밋이 하나도 없는 저장소에서도 성공해 "아직 커밋은
+ * 없지만 master에 있다"를 그대로 알려 준다 — 갓 만든 저장소가 빈 라벨로 보이지 않는
+ * 유일한 경로다. 실패했을 때만 detached인지 저장소가 아닌지를 가르느라 호출이 한두 번
+ * 더 붙는다.
+ *
+ * "커밋이 없다"를 따로 알리는 필드는 두지 않는다. 그런 저장소도 HEAD는 심볼릭이라 위의
+ * 첫 경로로 브랜치 이름을 그대로 내고, 이 창구가 답할 질문("지금 어느 브랜치인가")에는
+ * 그것으로 충분하다 — 커밋 유무는 패널이 답한다. 예전에 unborn 플래그를 두었을 때는
+ * 정작 갓 만든 저장소가 false로, HEAD를 읽지 못하는 **손상된** 저장소가 true로 잡혀
+ * 뜻이 정확히 뒤집혀 있었다(codex 지적).
+ *
+ * 던지지 않는다 — git이 없거나 repo가 아닌 것은 오류가 아니라 상태다(모듈 상단 주석).
+ *
+ * @param {string} cwd 세션의 작업 디렉터리(서버 장부에서 되찾은 값이어야 한다)
+ * @returns {Promise<{available: boolean, reason: string|null, message: string|null,
+ *   branch: string|null, head: string|null, detached: boolean}>}
+ */
+export async function collectBranch(cwd, { gitPath = 'git', timeoutMs } = {}) {
+  const opts = { gitPath, timeoutMs };
+
+  if (typeof cwd !== 'string' || !cwd || !path.isAbsolute(cwd)) {
+    return unavailableBranch('no-cwd');
+  }
+
+  try {
+    const name = (await runGit(['symbolic-ref', '--short', 'HEAD'], cwd, opts)).trim();
+    if (name) {
+      return {
+        available: true, reason: null, message: null,
+        branch: name, head: null, detached: false,
+      };
+    }
+  } catch (err) {
+    // git이 없거나 기준 디렉터리가 사라졌으면 아래 판정도 전부 같은 이유로 실패한다 —
+    // 헛돌지 않게 여기서 끝낸다.
+    if (err?.code === 'EGITMISSING') return unavailableBranch('git-missing', err?.message ?? null);
+    if (err?.code === 'EGITNOCWD') return unavailableBranch('no-cwd', err?.message ?? null);
+    // 그 밖의 실패는 아직 "detached HEAD"인지 "저장소가 아님"인지 모른다. 아래에서 가른다.
+  }
+
+  // 저장소인지부터 확정한다. collectWorktrees와 같은 이유로 --show-toplevel이 아니라
+  // --git-common-dir를 쓴다(bare 저장소에서도 나온다).
+  try {
+    const commonDir = (await runGit(['rev-parse', '--git-common-dir'], cwd, opts)).trim();
+    if (!commonDir) return unavailableBranch('not-a-repo');
+  } catch (err) {
+    return unavailableBranch(classifyRevParseError(err), err?.message ?? null);
+  }
+
+  // 저장소는 맞는데 HEAD가 심볼릭 참조가 아니다 = detached. 라벨은 짧은 sha로 대신한다.
+  try {
+    const short = (await runGit(['rev-parse', '--short', 'HEAD'], cwd, opts)).trim();
+    if (short) {
+      return {
+        available: true, reason: null, message: null,
+        branch: null, head: short, detached: true,
+      };
+    }
+  } catch (err) {
+    // 저장소는 맞다고 확인해 놓고 HEAD를 읽지 못했다 = 브랜치도 sha도 말할 수 없다.
+    // 이것을 "커밋이 없는 저장소"로 넘기면 손상된 저장소가 정상인 척 보인다.
+    return unavailableBranch('git-failed', err?.message ?? null);
+  }
+  return unavailableBranch('git-failed', 'HEAD를 읽지 못했습니다');
 }
 
 /**

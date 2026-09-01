@@ -72,7 +72,9 @@ test('하단 패널이 표 하나로 정의되고 패널별 분기가 되살아�
   const orderSrc = src.match(/FOOT_PANEL_ORDER\s*=\s*\[([^\]]*)\]/);
   assert.ok(orderSrc, 'FOOT_PANEL_ORDER 배열을 찾지 못했다');
   const order = [...orderSrc[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
-  assert.deepEqual(order, ['stats', 'worktree', 'settings', 'info']);
+  // worktree는 이 표에 없다 — 입력창 아래 독립 버튼(WorktreeButton.jsx)으로 떨어져
+  // 나갔다. 되돌아오면 사이드바 하단과 컴포저 양쪽에 같은 패널이 두 벌 생긴다.
+  assert.deepEqual(order, ['stats', 'settings', 'info']);
 
   const tableSrc = src.match(/const FOOT_PANELS = \{([\s\S]*?)\n\};/);
   assert.ok(tableSrc, 'FOOT_PANELS 표를 찾지 못했다');
