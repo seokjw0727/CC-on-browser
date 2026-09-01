@@ -8,6 +8,42 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.11.3] - 2026-09-01
+
+> worktree 패널이 사이드바에서 나와 **입력창 바로 아래의 독립 버튼**이 되었습니다.
+> 버튼에는 워크트리 아이콘과 지금 브랜치 이름(예: `master`)이 함께 적혀 있어서, 누르지
+> 않아도 어느 브랜치에서 작업 중인지 보입니다. 사이드바 하단 버튼 행에는 통계·설정·정보
+> 셋만 남습니다. 누르면 열리는 패널의 내용과 조회 전용 성격은 그대로입니다.
+> (Moves the worktree panel out of the sidebar into a standalone button directly beneath the
+> composer input. The button shows a worktree icon plus the current branch name, so the branch
+> is visible without opening anything. The sidebar foot row keeps only stats, settings and
+> info. The panel's contents and its read-only nature are unchanged.)
+
+### Changed
+- **worktree 버튼이 입력창 아래로 내려왔습니다.** 어느 브랜치에서 프롬프트를 보내는지는
+  보내기 직전에 보여야 하는 값이라, 통계·설정과 나란한 사이드바 부가 패널 자리에서
+  컴포저 옆으로 옮겼습니다. 입력 상자 바깥·실행 중 작업 도크 앞에 두어, 작업이 돌 때만
+  자리가 밀리는 일이 없습니다.
+  (The chip sits outside the input box and before the running-work dock, so its position
+  does not shift when work is in progress.)
+- **버튼 라벨이 현재 브랜치를 말합니다.** detached HEAD면 짧은 sha와 함께 그 사실을
+  적고, 커밋이 하나도 없는 저장소도 브랜치 이름을 그대로 보여 줍니다. 세션을 옮기거나
+  턴이 끝나거나 창으로 돌아올 때 다시 읽어, Claude나 터미널이 브랜치를 바꿔도 라벨이
+  옛 값에 머물지 않습니다.
+  (The label refreshes on session change, turn completion and window focus, so a checkout
+  made by Claude or in an external terminal does not leave it stale.)
+- **worktree 모달을 그 버튼이 직접 갖습니다.** 사이드바의 패널 표에서 완전히 빠졌고,
+  포커스 트랩·Esc·배경 클릭·닫힘 페이드 동작은 예전과 같습니다.
+
+### Added
+- **경량 브랜치 조회 창구(`GET /api/branch`).** 늘 떠 있는 라벨을 기존 worktree 전경
+  조회로 채우면 세션을 옮길 때마다 worktree 전수 상태와 60커밋 그래프를 돌게 됩니다.
+  흔한 경우는 git 호출 한 번으로 끝납니다. 기준 디렉터리를 세션 id로 되찾는 규칙은
+  worktree 창구와 같습니다 — 클라이언트가 경로를 부르지 않습니다.
+  (A cheap current-branch endpoint for the always-visible label; the common case costs a
+  single git invocation, and the working directory is still resolved server-side from the
+  session id rather than accepted from the client.)
+
 ## [1.11.2] - 2026-08-31
 
 > 권한 모드 선택창이 화면 우측 상단에서 **입력창 안쪽 우측 상단**으로 들어왔습니다.
@@ -943,7 +979,8 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
-[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.2...HEAD
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.3...HEAD
+[1.11.3]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.2...v1.11.3
 [1.11.2]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.1...v1.11.2
 [1.11.1]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/seokjw0727/CC-on-browser/compare/v1.10.6...v1.11.0
