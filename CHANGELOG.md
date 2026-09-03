@@ -8,6 +8,56 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.11.4] - 2026-09-03
+
+> 입력창 옆 마스코트 CLAW'D가 **에이전트가 겪는 모든 사건에 반응**하도록 넓어졌습니다.
+> 지금까지는 생각 중·도구 실행 중·턴 종료 정도만 표정이 있었고, 컨텍스트 압축이나
+> worktree 생성, 권한 알림처럼 눈에 띄어야 하는 순간에는 아무 일도 없는 것처럼 서
+> 있었습니다. 이제 압축이 돌면 빗자루질을 하고, worktree를 만들면 상자를 들고 걷고,
+> 알림이 오면 머리 위에 느낌표를 띄웁니다. 오래 아무것도 하지 않으면 가끔 책을 펴고,
+> 세션이 여러 개 동시에 돌면 그만큼 손이 빨라집니다. 동작만 늘었을 뿐, 마스코트가
+> 차지하는 자리와 크기는 그대로이고 `prefers-reduced-motion`을 켠 환경에서는 예전처럼
+> 정지 그림으로 떨어집니다.
+> (Widens the CLAW'D mascot beside the composer so that every agent-side event has a
+> matching animation. Compaction sweeps, worktree creation carries a box, notifications
+> pop an exclamation mark, long idles occasionally read a book, and concurrent sessions
+> speed the working loop up in tiers. The mascot's footprint is unchanged and the
+> reduced-motion fallback still resolves to a static frame.)
+
+### Added
+- **압축·worktree·알림·독서 무드가 새로 생겼습니다.** 마스코트 무드가 9개에서 13개로
+  늘었습니다 — 컨텍스트 압축 중에는 `sweep`(빗자루질 + 먼지), worktree를 만드는 도구가
+  실행 중이면 `carry`(상자를 들고 뒤뚱), 알림 카드가 올라오면 `notify`(느낌표 팝 1회),
+  한동안 아무 입력이 없으면 `read`(20~40초마다 5초간 책)로 바뀝니다. 프레임은 새 비트맵
+  5장을 추가해 그렸고, 나머지는 기존 프레임 위의 CSS로 처리합니다.
+  (Four new moods — sweep, carry, notify, read — bringing the mascot from 9 states to 13.)
+- **동시 실행 수에 따른 속도 티어.** 세션이 1개일 때는 예전과 완전히 같은 속도이고,
+  2개면 조금, 3개 이상이면 확실히 빨라집니다. 서브에이전트가 2개 이상이면 저글링도
+  한 단계 빨라집니다. 새 그림 없이 프레임 간격과 CSS 클래스(`tier-1|2|3`)로만 표현해서,
+  1티어는 이전 릴리스와 픽셀 단위로 동일합니다.
+  (Concurrency tiers for the working and juggling loops; tier 1 is byte-identical to the
+  previous behaviour, so nothing changes for the single-session case.)
+- **도구 단위 실패 반응.** 지금까지는 턴 전체가 실패해야 찡그린 표정이 나왔습니다. 이제
+  도구 하나가 실패한 순간 바로 반응하고, Esc로 직접 끊은 경우는 실패로 치지 않습니다.
+  (A failing tool call now reacts immediately instead of waiting for the whole turn to
+  fail; a user interrupt is still not treated as an error.)
+
+### Changed
+- **반응에 "작업 중에도 보이는" 층이 생겼습니다.** 기존 규칙은 일회성 반응을 한가할 때만
+  띄웠는데, 알림과 도구 실패는 대개 작업이 도는 중에 일어나서 그 규칙 아래서는 화면에
+  나올 기회가 없었습니다. 알림·도구 실패는 작업 표시를 잠깐 밀고 나오고, 턴 종료 반응은
+  예전 그대로 새 턴이 시작되면 양보합니다.
+  (Splits transient reactions into live and turn-end tiers, so a notification or tool
+  failure is visible mid-work while the old "a new turn beats a stale reaction" contract
+  is preserved for end-of-turn reactions.)
+- **신호를 대화 기록에서 한 번에 뽑습니다.** 압축 진행·압축 완료·worktree 생성·알림·도구
+  실패를 메시지 배열 한 번의 순회로 계산하고, 마스코트에는 원시 값만 넘깁니다 — 스트리밍
+  델타마다 마스코트가 다시 그려지지 않습니다. 세션을 바꿀 때는 지난 세션의 알림이 다시
+  재생되지 않도록 기준선을 다시 잡습니다.
+  (Derives all mascot signals in a single pass over the message list and passes only
+  primitives down, and re-baselines on session switch so historical notifications are not
+  replayed.)
+
 ## [1.11.3] - 2026-09-01
 
 > worktree 패널이 사이드바에서 나와 **입력창 바로 아래의 독립 버튼**이 되었습니다.
@@ -979,7 +1029,8 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
-[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.3...HEAD
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.4...HEAD
+[1.11.4]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.3...v1.11.4
 [1.11.3]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.2...v1.11.3
 [1.11.2]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.1...v1.11.2
 [1.11.1]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.0...v1.11.1
