@@ -1810,6 +1810,44 @@ select.mode-trust:focus {
 .clawd.mood-error .clawd-bob {
   animation: clawd-shake 0.36s linear infinite;
 }
+/* PreCompact — 빗자루질. 몸이 좌우로 기울며 쓸고 발치에 먼지(.clawd-dust)가 인다. */
+.clawd.mood-sweep .clawd-bob {
+  animation: clawd-sway 0.62s ease-in-out infinite;
+}
+/* WorktreeCreate — 상자(.clawd-box)를 이고 뒤뚱뒤뚱 나른다. */
+.clawd.mood-carry .clawd-bob {
+  animation: clawd-waddle 0.68s ease-in-out infinite;
+}
+/* Idle(random) — 독서. idle보다도 느린 호흡(집중해 들여다보는 중). */
+.clawd.mood-read .clawd-bob {
+  animation: clawd-bob 4.2s ease-in-out infinite;
+}
+/* Notification — 알림이 도착한 순간 **한 번만** 튀어오르고, 그 뒤 2.4s가 끝날 때까지는
+   평소 호흡으로 돌아간다. 반복(infinite)으로 두면 네 번쯤 계속 튀어 알림이 아니라
+   경련처럼 보인다(codex 지적). 두 애니메이션은 시간대가 겹치지 않는다 —
+   clawd-pop이 0.6s에 끝나고(fill 없음) clawd-bob이 0.6s 지연 뒤 이어받는다. */
+.clawd.mood-notify .clawd-bob {
+  animation: clawd-pop 0.6s ease-out 1, clawd-bob 3.2s ease-in-out 0.6s infinite;
+}
+/* ----- 동시 작업 티어 (레퍼런스 working 1/2/3+ 세션 · juggling 1/2+ 서브에이전트) -----
+   무드는 그대로 두고 "강도"만 올린다. tier-1은 규칙을 두지 않는다 — 단일 세션이
+   종전과 완전히 같은 모션이어야 회귀가 아니다(codex 지적). 무드+티어는 클래스 2개라
+   위 무드 단독 규칙(클래스 1개)을 특이도로 항상 이긴다. */
+.clawd.mood-busy.tier-2 .clawd-bob {
+  animation-duration: 0.68s;
+}
+.clawd.mood-busy.tier-3 .clawd-bob {
+  animation: clawd-build 0.5s ease-in-out infinite;
+}
+.clawd.mood-think.tier-2 .clawd-bob {
+  animation-duration: 1.4s;
+}
+.clawd.mood-think.tier-3 .clawd-bob {
+  animation-duration: 1.05s;
+}
+.clawd.mood-juggle.tier-2 .clawd-bob {
+  animation: clawd-juggle 0.44s ease-in-out infinite;
+}
 /* doze/sleep 흐림 — 무드가 바뀌면 원복되도록 무드 레이어(clawd-bob)에만 건다 */
 .clawd.mood-doze .clawd-bob,
 .clawd.mood-sleep .clawd-bob {
@@ -1845,6 +1883,34 @@ select.mode-trust:focus {
   0%, 100% { transform: translateX(0); }
   25% { transform: translateX(-1.5px); }
   75% { transform: translateX(1.5px); }
+}
+/* 쓸기 — 좌우로 기울며 밀어낸다(프레임 스왑의 팔 쏠림과 위상을 맞춘다) */
+@keyframes clawd-sway {
+  0%, 100% { transform: translateX(-2px) rotate(-3deg); }
+  50% { transform: translateX(2px) rotate(3deg); }
+}
+/* 나르기 — 무게에 눌린 뒤뚱 걸음 */
+@keyframes clawd-waddle {
+  0%, 100% { transform: translateY(0) rotate(-2.5deg); }
+  50% { transform: translateY(-2px) rotate(2.5deg); }
+}
+/* 3+ 세션 — 망치질하듯 눌렀다 펴는 '작업(building)' 리듬 */
+@keyframes clawd-build {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  35% { transform: translateY(-3px) scale(0.97, 1.04); }
+  70% { transform: translateY(0) scale(1.04, 0.96); }
+}
+/* 2+ 서브에이전트 — 공을 더 높이 던지는 저글링 */
+@keyframes clawd-juggle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+/* 알림 — 한 번 튀어오르고 가라앉는다 */
+@keyframes clawd-pop {
+  0% { transform: translateY(0) scale(1, 1); }
+  20% { transform: translateY(-6px) scale(1.1, 0.92); }
+  45% { transform: translateY(0) scale(0.96, 1.05); }
+  70%, 100% { transform: translateY(0) scale(1, 1); }
 }
 
 /* think 말풍선 — 점 3개가 번갈아 뜨는 CSS 전용 인디케이터(외부 이미지 없음).
@@ -1903,16 +1969,126 @@ select.mode-trust:focus {
   100% { opacity: 0; transform: translate(9px, -15px) scale(1.2); }
 }
 
+/* sweep 먼지 — 빗자루가 지나간 자리에서 옆으로 흩어졌다 사라지는 점 3개.
+   마스코트 발치(아래쪽)에 두어 말풍선·zzz(위쪽)와 자리가 겹치지 않는다. */
+.clawd-dust {
+  position: absolute;
+  left: 50%;
+  bottom: -1px;
+  width: 24px;
+  height: 8px;
+  pointer-events: none;
+}
+.clawd-dust i {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  opacity: 0;
+  animation: clawd-dust 0.62s linear infinite;
+}
+/* 출발점을 셋 다 다르게 둔다 — 모션이 꺼진 reduced에서도 한 점에 겹치지 않고
+   흩어진 먼지로 읽힌다(아래 reduced 블록이 opacity만 되살린다). */
+.clawd-dust i:nth-child(2) { left: 7px; animation-delay: 0.2s; }
+.clawd-dust i:nth-child(3) { left: 14px; animation-delay: 0.41s; }
+@keyframes clawd-dust {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.6); }
+  30% { opacity: 0.5; }
+  100% { opacity: 0; transform: translate(7px, -6px) scale(1.1); }
+}
+
+/* carry 상자 — 머리 위에 인 화물. 몸(.clawd-bob)과 같은 위상으로 흔들려 함께 움직인다.
+   비트맵이 아니라 CSS 소품인 이유: 프레임의 '0/1/2' 3색 규약을 깨지 않기 위해서다. */
+.clawd-box {
+  position: absolute;
+  left: 50%;
+  /* 머리 '위'에 인다 — 2px만 겹쳐 이고 있는 것으로 읽히게 한다(브라우저 실측 조정). */
+  bottom: calc(100% - 2px);
+  width: 12px;
+  height: 9px;
+  margin-left: -6px;
+  border: 1.5px solid var(--clawd-body, #d77757);
+  border-radius: 2px;
+  background: var(--surface-2);
+  pointer-events: none;
+  animation: clawd-waddle 0.68s ease-in-out infinite;
+}
+/* 화물 끈 */
+.clawd-box::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -1.5px;
+  bottom: -1.5px;
+  border-left: 1.5px solid var(--clawd-body, #d77757);
+}
+
+/* read 책 — 마스코트 앞에 펼쳐 든 책(정적 소품, 모션 없음) */
+.clawd-book {
+  position: absolute;
+  left: 50%;
+  bottom: 1px;
+  width: 18px;
+  height: 7px;
+  margin-left: -9px;
+  border: 1.5px solid var(--clawd-body, #d77757);
+  border-top-color: transparent;
+  border-radius: 0 0 3px 3px;
+  background: var(--surface-2);
+  pointer-events: none;
+}
+/* 책등 — 펼친 두 면을 가르는 선 */
+.clawd-book::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  border-left: 1.5px solid var(--clawd-body, #d77757);
+}
+
+/* notify 배지 — 머리 위에서 튀어오르는 알림. 권한 대기(alert)와 달리 스스로 사라진다. */
+.clawd-bang {
+  position: absolute;
+  left: calc(100% - 15px);
+  bottom: calc(100% - 11px);
+  min-width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font: 700 10px/14px var(--font-sans);
+  text-align: center;
+  pointer-events: none;
+  /* 배지도 한 번만 튀어오르고 그 자리에 머문다(forwards) — 사라지는 건 무드가 끝날 때다. */
+  animation: clawd-bang 0.6s ease-out 1 forwards;
+}
+@keyframes clawd-bang {
+  0% { opacity: 0; transform: scale(0.4); }
+  25% { opacity: 1; transform: scale(1.15); }
+  45%, 100% { opacity: 1; transform: scale(1); }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  /* 무드별 규칙(.clawd.mood-* .clawd-bob)이 특이도로 이기지 못하게 !important.
-     sleep 무드 자체가 reduced에선 발동하지 않으므로(zzz 미렌더) 여기 zzz는
-     방어선일 뿐이다. 말풍선 점은 정지 상태(불투명)로 남는다. */
+  /* 무드별 규칙(.clawd.mood-* .clawd-bob)과 티어 규칙(.mood-*.tier-N)이 특이도로
+     이기지 못하게 !important. sleep 무드 자체가 reduced에선 발동하지 않으므로(zzz
+     미렌더) 여기 zzz는 방어선일 뿐이다. 말풍선 점은 정지 상태(불투명)로 남는다.
+     sweep/carry는 reduced에서도 무드 자체는 성립하므로(파생 신호가 근거) 소품이
+     렌더된다 — 그래서 먼지·상자·알림 배지의 모션도 여기서 함께 멈춘다. */
   .clawd .clawd-bob,
   .clawd .clawd-poke.poked,
   .clawd-bubble i,
-  .clawd-zzz i {
+  .clawd-zzz i,
+  .clawd-dust i,
+  .clawd-box,
+  .clawd-bang {
     animation: none !important;
   }
+  /* 먼지는 정지하면 opacity: 0(키프레임 0%)로 남아 보이지 않는다 — 정적으로 보이게 고정 */
+  .clawd-dust i { opacity: 0.45; }
 }
 
 /* ===== 사이드바 하단 통계·설정 팝오버 ===== */

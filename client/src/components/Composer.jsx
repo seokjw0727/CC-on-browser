@@ -12,6 +12,7 @@ import { searchFiles, clipboardFiles, uploadPasteFile } from '../lib/api.js';
 import { insertPaths, dataUrlToBase64 } from '../lib/paste-paths.js';
 import { reduceCliEvent } from '../lib/reduce-cli-event.js';
 import { openSubagents } from '../lib/subagents.js';
+import { clawdSignals, runningSessionCount } from '../lib/clawd.js';
 import { fmtTok, fmtReset, contextWindowFor, hasDisplayableCtx } from '../lib/format.js';
 import { familyOf, buildModelOptions } from '../lib/model-catalog.js';
 import {
@@ -469,6 +470,15 @@ export default function Composer() {
   const showCtx = hasDisplayableCtx(session?.usage);
   // 실행 중인 서브에이전트(Task/Agent 도구) 목록 — 패널 표시 + 마스코트 juggle 판정(개수)
   const subagentList = useMemo(() => openSubagents(session?.messages), [session?.messages]);
+  // 마스코트의 나머지 상태(sweep/carry/notify/happy)를 여는 파생 신호.
+  // 압축·worktree·notice를 각각 훑으면 배열을 세 번 더 도는 셈이라 한 번의 순회로 모은다.
+  // useMemo는 messages가 스트리밍 델타마다 새 배열이 돼 사실상 매번 다시 도는데(참조가
+  // 바뀐다 — codex 지적), 그 배열 자체가 방금 선형 복사된 것이라 같은 차수 안의 상수
+  // 비용이다. 여기서 줄이는 건 "세 번"을 "한 번"으로 만드는 부분이고, 그 아래로 더
+  // 내리려면 리듀서에 카운터를 심어야 해서 비용이 실측되기 전엔 하지 않는다.
+  const signals = useMemo(() => clawdSignals(session?.messages), [session?.messages]);
+  // 동시 실행 세션 수(레퍼런스 working 1/2/3+ 티어) — 활성 세션만이 아니라 전체가 근거다.
+  const sessionsRunning = useMemo(() => runningSessionCount(state.sessions), [state.sessions]);
 
   // ----- `/` 커맨드 드롭다운 -----
   const commands = useMemo(() => {
@@ -1225,6 +1235,10 @@ export default function Composer() {
 
       {/* CLAW'D — 세션 상태에 따라 움직이는 마스코트 (클릭=찌르기, 4연타=어지럼) */}
       <Clawd
+        /* 세션이 바뀌면 마스코트를 새로 마운트한다 — effect로 지우는 방식은 새 세션의
+           첫 렌더에 이전 세션의 happy/error/notify가 한 프레임 새어 나온다(codex 지적).
+           remount는 기준선(notice·압축 완료 수)까지 새 세션 값으로 다시 잡는 효과도 있다. */
+        key={state.activeKey ?? 'none'}
         className="composer-mascot"
         scale={5}
         status={session?.status ?? 'none'}
@@ -1233,6 +1247,12 @@ export default function Composer() {
         lastResult={session?.lastResult ?? null}
         interrupted={session?.interruptRequested ?? false}
         subagents={subagentList.length}
+        compacting={signals.compacting}
+        carrying={signals.carrying}
+        noticeCount={signals.notices}
+        compactionsDone={signals.compactionsDone}
+        toolErrors={signals.toolErrors}
+        sessionsRunning={sessionsRunning}
       />
     </div>
   );

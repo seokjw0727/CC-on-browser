@@ -21,7 +21,11 @@ import {
 import { reduceCliEvent } from '../src/lib/reduce-cli-event.js';
 import { createSessionState } from '../src/lib/store-reducer.js';
 
-const FRAME_NAMES = ['base', 'blink', 'lookLeft', 'lookRight', 'claws', 'doze', 'jugLeft', 'jugRight'];
+const FRAME_NAMES = [
+  'base', 'blink', 'lookLeft', 'lookRight', 'claws', 'doze', 'jugLeft', 'jugRight',
+  // state-mapping.md의 나머지 상태용 프레임
+  'read', 'sweepLeft', 'sweepRight', 'carryLeft', 'carryRight',
+];
 
 test('모든 프레임은 18x5이고 0/1/2로만 구성된다', () => {
   assert.deepEqual(Object.keys(CLAWD_FRAMES).sort(), [...FRAME_NAMES].sort());
