@@ -1449,43 +1449,25 @@ select.mode-trust:focus {
   box-shadow: inset 2px 0 0 var(--accent);
   color: var(--text);
 }
-/* ----- 세션 상태 점 -----
-   라이브 행의 유일한 상태 표시다(텍스트 배지 제거, 2026-08-09). 상태 → 클래스
-   매핑과 보조기술 라벨은 lib/session-status.js가 소유하고, 여기서는 색만 붙인다.
-   색은 --dot 하나로 모아 둔다 — 점 본체와 광륜이 같은 색을 써야 하기 때문. */
-.sess-dot {
-  --dot: var(--text-faint);
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--dot);
+/* ----- 세션 상태 표시(미니 CLAW'D) -----
+   라이브 행의 유일한 상태 표시다(텍스트 배지 제거, 2026-08-09). 2026-09-04에 색 점을
+   미니 마스코트로 바꿨다 — 상태는 색이 아니라 포즈·모션으로 읽고 색은 공식 CLAW'D
+   주황 하나로 고정된다. 프레임·모션은 components/Clawd.jsx의 ClawdMini가, 상태 클래스
+   (.st-*)와 보조기술 라벨은 여전히 lib/session-status.js가 소유한다. .st-*는 색을
+   입히지 않고 상태를 DOM에 남기는 표식으로만 남는다(e2e·디버깅).
+   여기서는 행 안에서의 자리만 준다 — 크기·모션 오버라이드는 아래 CLAW'D 섹션의
+   .clawd-mini가 갖는다(일반 .clawd 규칙보다 뒤에 와야 이기기 때문). */
+.sess-clawd {
   flex: none;
+  /* 생각 중일 때 마스코트 오른쪽에 붙는 말풍선(2px 간격 + 점 3개 = 15px)만큼 미리
+     자리를 잡아 둔다 — 그러지 않으면 턴이 시작·종료될 때마다 긴 이름의 말줄임
+     지점이 15px씩 밀린다. 마스코트는 이 상자의 왼쪽 끝에 서므로 이름과는 붙어 있다. */
+  min-width: 33px;
 }
-.sess-dot.st-idle { --dot: var(--success); }
-.sess-dot.st-think { --dot: var(--info); }
-.sess-dot.st-tool { --dot: var(--warning); }
-/* 권한 대기·질문 대기 — "사용자 확인이 필요해 멈춰 있음"의 단일 색 */
-.sess-dot.st-attn { --dot: var(--danger); }
-.sess-dot.st-exited { --dot: var(--text-faint); }
-
-/* 움직이는 상태(생각·도구)와 멈춰 기다리는 상태(권한·질문)는 바깥 광륜만
-   맥동시킨다 — 점 자체를 흐리면 색이라는 유일한 상시 신호가 약해진다.
-   키프레임 이름은 theme.css의 전역 @keyframes pulse(.pulse-dot 전용)와
-   충돌하지 않게 따로 둔다. */
-.sess-dot.st-think,
-.sess-dot.st-tool,
-.sess-dot.st-attn {
-  animation: sess-status-pulse 1.8s ease-out infinite;
-}
-@keyframes sess-status-pulse {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--dot) 55%, transparent); }
-  70% { box-shadow: 0 0 0 4px transparent; }
-  100% { box-shadow: 0 0 0 0 transparent; }
-}
-@media (prefers-reduced-motion: reduce) {
-  /* 전역 규칙(theme.css)이 이미 재생을 끊지만, 색만 남기는 의도를 못박아 둔다. */
-  .sess-dot { animation: none !important; }
-}
+/* 이름은 남는 자리를 다 먹지 않는다(공용 .truncate의 flex: 1 → 0 1 auto) — 마스코트가
+   행 오른쪽 끝이 아니라 "이름 바로 오른쪽"에 붙게 하려는 것이다. 길어지면 여전히
+   줄어들며 말줄임되고, 원격 제어 아이콘은 margin-left: auto라 행 끝에 그대로 남는다. */
+.sess-main > .truncate { flex: 0 1 auto; }
 
 /* ----- 원격 제어 켜짐 표시 -----
    컴포저 pill을 없앤 뒤 "지금 원격으로 열려 있다"를 알리는 유일한 상시 신호다.
@@ -1862,6 +1844,67 @@ select.mode-trust:focus {
    빈 영역 클릭(텍스트 선택·카드 접기 등)은 아래 콘텐츠로 통과시킨다. rect에서 시작한
    클릭은 .clawd의 onClick으로 버블링돼 poke가 동작한다. */
 .composer-mascot.clawd rect { pointer-events: visiblePainted; }
+
+/* ----- 미니 마스코트(사이드바 세션 행 — ClawdMini) -----
+   프레임·무드 CSS는 컴포저 마스코트와 그대로 공유하고, 행 높이(약 28px)에 맞는 크기와
+   "잘리지 않는" 말풍선만 여기서 덮는다. .clawd와 같은 특이도로 쓰면 소스 순서에
+   의존하므로 .clawd를 함께 물려 (0,2,0)으로 확실히 이긴다. */
+.clawd.clawd-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  line-height: 0; /* svg 아래 베이스라인 여백 제거 — 행 높이를 늘리지 않는다 */
+}
+/* 홉 진폭은 컴포저의 절반 — 4px는 10px짜리 미니에서 40% 도약이라 행을 튀어나온다.
+   바운스(clawd-bob, 2px)는 그대로 써도 자연스러워 덮지 않는다.
+   컴포저의 .clawd.mood-alert .clawd-bob과 클래스 수가 같으면(0,3,0) 소스 순서로만 이겨
+   나중에 섹션이 재배치되면 조용히 4px로 되돌아간다(리뷰 지적) — 위 .clawd.clawd-mini와
+   같은 방식으로 .clawd를 물려 (0,4,0)으로 확정한다. */
+.clawd.clawd-mini.mood-alert .clawd-bob {
+  animation: clawd-mini-hop 0.7s ease-in-out infinite;
+}
+@keyframes clawd-mini-hop {
+  0%, 55%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-2px); }
+}
+/* 생각 중 — 컴포저의 떠 있는 말풍선(position: absolute)은 사이드바의 overflow: hidden에
+   잘리고 세션 이름 위를 덮는다. 미니는 껍데기를 벗고 점 3개만 마스코트 오른쪽에
+   인라인으로 붙인다(자리는 .sess-clawd의 min-width가 미리 잡아 둔다). */
+.clawd-mini .clawd-bubble {
+  position: static;
+  padding: 0;
+  gap: 2px;
+  background: none;
+  border: none;
+}
+/* 점은 컴포저(회색 --text-dim, 쉬는 구간 35%)를 그대로 쓰면 3px에서 배경에 묻혀
+   사실상 보이지 않는다(실측 확인) — 마스코트 몸통색으로 칠하고 바닥 불투명도를
+   올려 "생각 중"이 한눈에 읽히게 한다. 튀는 높이도 3px 점에 맞춰 1px로 줄인다. */
+.clawd-mini .clawd-bubble i {
+  width: 3px;
+  height: 3px;
+  background: var(--clawd-body, #d77757);
+  animation-name: clawd-mini-dot;
+}
+@keyframes clawd-mini-dot {
+  0%, 60%, 100% { opacity: 0.55; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-1px); }
+}
+/* 도구 실행 중(busy)은 좌우 두리번 + 빠른 바운스로 읽는다. 그런데 모션을 끄면 그 둘이
+   모두 멈춰, 남는 정지 프레임(lookLeft)이 idle의 base와 눈 한 칸 차이뿐이라 18x10px에서는
+   사실상 구분되지 않는다(리뷰 지적 — 예전 색 점은 모션을 꺼도 색으로 구분됐다).
+   그래서 reduced일 때만 마스코트 오른쪽에 정적 막대를 하나 세운다. think의 점 3개와
+   모양이 달라 둘을 헷갈리지 않는다(자리는 .sess-clawd의 min-width가 이미 잡아 뒀다). */
+.clawd-mini .clawd-bubble.clawd-work i {
+  width: 9px;
+  height: 3px;
+  border-radius: 1px;
+  animation-name: clawd-mini-work;
+}
+@keyframes clawd-mini-work {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
 @keyframes clawd-bob {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-2px); }

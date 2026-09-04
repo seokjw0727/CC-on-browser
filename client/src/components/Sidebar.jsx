@@ -2,9 +2,11 @@
 // / 다른 열린 세션(타 프로젝트 라이브 전환·종료)
 // / 하단 고정 통계·설정 버튼(.sidebar-foot) — 패널은 화면 중앙 모달로 표시.
 //
-// 라이브 세션 행은 "이름 + 상태 점"뿐이다(2026-08-09). 이름 변경·세션 종료는 행
-// 우클릭(키보드는 Shift+F10) 메뉴로만 열고, 상태는 텍스트 배지 없이 점의 색으로만
-// 표현한다 — 색↔의미 매핑과 보조기술용 라벨은 lib/session-status.js가 소유한다.
+// 라이브 세션 행은 "이름 + 상태 표시"뿐이다(2026-08-09). 이름 변경·세션 종료는 행
+// 우클릭(키보드는 Shift+F10) 메뉴로만 열고, 상태는 텍스트 배지 없이 이름 오른쪽의
+// 미니 CLAW'D(components/Clawd.jsx의 ClawdMini)가 포즈·모션으로 표현한다 — 2026-09-04
+// 전에는 같은 자리를 색 점(.sess-dot)이 맡았다. 상태 클래스와 보조기술용 라벨은
+// 여전히 lib/session-status.js가 소유한다.
 //
 // 사이드바는 "지금 열려 있는 세션"만 다룬다. 히스토리(지난 세션)의 조회·재개·삭제는
 // 전부 새 세션 모달 한 곳으로 모았다(2026-07-21) — 상시 노출되던 "지난 세션" 섹션과
@@ -55,6 +57,7 @@ import {
   setLimitNotifyEnabled,
 } from '../lib/limit-notify.js';
 import { Sparkle, Mascot } from './Brand.jsx';
+import { ClawdMini } from './Clawd.jsx';
 import Icon from './Icon.jsx';
 import SessionMenu from './SessionMenu.jsx';
 import ConfigEditorModal from './ConfigEditorModal.jsx';
@@ -1443,6 +1446,9 @@ function FootModalPresence({ panel, ...rest }) {
 }
 
 // ----- 사이드바 본체 -----
+// 연결이 정상이 아닐 때 상태 문구 뒤에 붙는 꼬리 — 컴포저 상태줄(CONN_LABEL)과 같은 어휘.
+const CONN_STATUS_SUFFIX = { connecting: '연결 중', closed: '연결 끊김' };
+
 export default function Sidebar({ onCollapse, theme, onSetTheme, shape, onSetShape }) {
   const {
     state, dispatch, startSession, stopSession, renameSession, setRemoteControl, notify,
@@ -1764,15 +1770,24 @@ export default function Sidebar({ onCollapse, theme, onSetTheme, shape, onSetSha
   // 매 렌더마다 새 컴포넌트 타입이 생기지 않으므로 React가 remount 없이 patch한다.
   const liveRow = (row, node) => {
     const sess = state.sessions.get(row.key);
-    // 상태는 텍스트 배지가 아니라 점의 색으로만 보인다 — 라벨은 보조기술과 툴팁에
-    // 남는다(lib/session-status.js). 대기 중인 요청의 앞머리가 AskUserQuestion이면
+    // 상태는 텍스트 배지가 아니라 이름 오른쪽 미니 마스코트의 포즈로 보인다 — 라벨은
+    // 보조기술과 툴팁에 남는다(lib/session-status.js). 대기 중인 요청의 앞머리가
+    // AskUserQuestion이면
     // '권한 대기' 대신 '질문 대기'로, 다이얼로그 분기와 같은 판별을 쓴다.
     const dot = statusDotOf(
       row.status,
       isQuestionRequest(sess?.pendingPermissions?.[0]),
     );
-    const dotCls = `sess-dot${dot.cls ? ` ${dot.cls}` : ''}`;
-    const dotLabel = `상태: ${dot.label}`;
+    // st-* 클래스는 이제 색을 입히지 않지만(마스코트는 공식 색 고정) 상태를 DOM에
+    // 남겨 e2e·디버깅이 붙잡을 수 있게 그대로 싣는다.
+    const dotCls = `sess-clawd${dot.cls ? ` ${dot.cls}` : ''}`;
+    // 연결이 끊기면 마스코트는 상태와 무관하게 졸기(doze)로 바뀐다(clawdMood) — 포즈는
+    // "자는 중"인데 라벨만 '도구'로 남으면 보는 눈과 듣는 귀가 다른 말을 한다(codex 지적).
+    // 상태 문구에 연결 상태를 덧붙여 포즈·라벨·툴팁이 같은 이야기를 하게 한다.
+    const statusText = state.conn === 'open'
+      ? dot.label
+      : `${dot.label} · ${CONN_STATUS_SUFFIX[state.conn] ?? '연결 끊김'}`;
+    const dotLabel = `상태: ${statusText}`;
     // 원격 제어가 켜져 있다는 사실은 행에 남는다 — 컴포저 pill이 하던 "지금 켜져
     // 있음" 표시를 대신한다. 판정은 메뉴와 같은 remoteControlOf 하나를 쓴다.
     const { rc: rowRc, active: remoteOn } = remoteControlOf(row.key);
@@ -1792,9 +1807,6 @@ export default function Sidebar({ onCollapse, theme, onSetTheme, shape, onSetSha
     if (renaming?.rowKey === row.key) {
       return (
         <div key={row.key} className={`sess-row live renaming${row.active ? ' active' : ''}`}>
-          {/* 이름을 고치는 동안에도 상태 점은 그대로 — 편집 중이라고 세션이
-              멈추는 것은 아니다(편집 중 색이 accent로 되돌아가던 회귀 방지). */}
-          <span className={dotCls} role="img" aria-label={dotLabel} />
           <input
             className="sess-rename-input"
             autoFocus
@@ -1813,6 +1825,15 @@ export default function Sidebar({ onCollapse, theme, onSetTheme, shape, onSetSha
                 endRename({ save: false, restoreFocus: true });
               }
             }}
+          />
+          {/* 이름을 고치는 동안에도 상태 표시는 그대로 — 편집 중이라고 세션이 멈추는
+              것은 아니다(편집 중 표시가 되돌아가던 회귀 방지). 자리는 입력창 뒤로,
+              완성된 행의 "이름 오른쪽"과 같은 위치다. */}
+          <ClawdMini
+            status={row.status}
+            conn={state.conn}
+            label={dotLabel}
+            className={dotCls}
           />
         </div>
       );
@@ -1840,12 +1861,19 @@ export default function Sidebar({ onCollapse, theme, onSetTheme, shape, onSetSha
           // 구분하기 어려운 사용자의 확인 경로(hover 없는 기기에는 닿지 않는다).
           data-tip={`${
             label !== node.cwd ? `${label}${node.cwd ? ` — ${node.cwd}` : ''}` : node.cwd || node.label
-          } · ${dot.label}${remoteLabel ? ` · ${remoteLabel}` : ''}`}
+          } · ${statusText}${remoteLabel ? ` · ${remoteLabel}` : ''}`}
           // 이름 변경·종료는 우클릭 메뉴에만 있다 — 키보드 사용자에게 여는 법을 알린다.
           aria-keyshortcuts="Shift+F10"
         >
-          <span className={dotCls} role="img" aria-label={dotLabel} />
           <span className="truncate">{label}</span>
+          {/* 상태 표시 — 이름 바로 오른쪽에 붙는 미니 CLAW'D. status를 key로 쓰지
+              않으므로 상태가 바뀌어도 remount 없이 무드만 바뀐다(타이머 유지). */}
+          <ClawdMini
+            status={row.status}
+            conn={state.conn}
+            label={dotLabel}
+            className={dotCls}
+          />
           {/* title을 주면 Icon이 role="img" + aria-label로 렌더한다(장식용은 aria-hidden).
               툴팁이 닿지 않는 키보드·터치 사용자에게도 "켜져 있다"가 이름으로 읽힌다. */}
           {remoteOn && (

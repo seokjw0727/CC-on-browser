@@ -27,7 +27,10 @@
 // prefers-reduced-motion 또는 ≤900px(CSS가 마스코트를 숨김)이면 모든
 // 모션·타이머·전역 리스너 정지(reduced에선 무드별 대표 정지 프레임만 남는다).
 // 프레임 비트맵·무드 매핑(순수 데이터)은 lib/clawd.js — node --test 검증 대상.
-import { useEffect, useRef, useState } from 'react';
+//
+// 이 파일은 마스코트를 둘 낸다: 기본 export Clawd(컴포저 우측 하단 — 위 설명 전부)와
+// named export ClawdMini(사이드바 세션 행의 상태 표시 — 파일 끝, 기본 무드 5종만).
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   CLAWD_FRAMES,
   CLAWD_PIXEL_ASPECT,
@@ -45,6 +48,8 @@ import {
   clawdTransientWins,
   clawdTurnEnd,
   eyeOffsetFor,
+  clawdMiniFrame,
+  clawdMiniFrameFor,
 } from '../lib/clawd.js';
 import './interact.css';
 
@@ -58,6 +63,8 @@ const CARRY_MS = 340; // carry 뒤뚱 걸음
 const CHEER_MS = 200; // happy 집게 펌프
 const DIZZY_MS = 90; // error 눈 팽글
 const SLEEP_POLL_MS = 5000; // 무활동 판정 주기(리스너는 타임스탬프만 갱신)
+// 사이드바 미니 마스코트의 픽셀 배율 — 1 = 18x10px(행 높이 안에 들어가는 최소 크기).
+export const CLAWD_MINI_SCALE = 1;
 // reduced-motion에서 무드마다 남길 대표 정지 프레임 — 모션 없이 "무엇을 하는 중인지"만
 // 전달한다. 목록에 없는 무드(idle/think/busy/juggle/happy/error)는 base로 선다.
 const REDUCED_FRAME = {
@@ -74,18 +81,60 @@ const REDUCED_FRAME = {
 const HIDDEN_QUERY = '(max-width: 900px)';
 const blinkDelay = () => 2800 + Math.random() * 2800;
 
+const REDUCED_QUERY = '(prefers-reduced-motion: reduce)';
+// 미니 마스코트는 사이드바 행마다 하나씩 마운트된다 — 컴포넌트마다 matchMedia 리스너를
+// 달면 열린 세션 수만큼 구독이 늘어난다(codex 지적). 그래서 MediaQueryList는 쿼리당
+// 하나만 만들어 모듈 수준에서 공유하고, 구독자가 0이 될 때만 리스너를 뗀다.
+const mqStores = new Map();
+function mediaStore(query) {
+  let store = mqStores.get(query);
+  if (store) return store;
+  const mql = typeof window !== 'undefined' ? window.matchMedia?.(query) ?? null : null;
+  const subs = new Set();
+  const onChange = () => { for (const fn of [...subs]) fn(); };
+  store = {
+    get: () => mql?.matches ?? false,
+    subscribe: (fn) => {
+      if (!mql) return () => {};
+      if (subs.size === 0) mql.addEventListener('change', onChange);
+      subs.add(fn);
+      return () => {
+        subs.delete(fn);
+        if (subs.size === 0) mql.removeEventListener('change', onChange);
+      };
+    },
+  };
+  mqStores.set(query, store);
+  return store;
+}
+
 function useMediaQuery(query) {
-  const [matches, setMatches] = useState(
-    () => window.matchMedia?.(query).matches ?? false,
-  );
-  useEffect(() => {
-    const mq = window.matchMedia?.(query);
-    if (!mq) return undefined;
-    const onChange = (e) => setMatches(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, [query]);
-  return matches;
+  const store = mediaStore(query);
+  return useSyncExternalStore(store.subscribe, store.get, () => false);
+}
+
+// 무작위 간격 깜박임 루프 — 쉬는 프레임(rest)과 'blink'를 오간다. 컴포저 마스코트와
+// 미니가 같은 리듬을 쓰도록 한 곳에 둔다. effect의 정리 함수를 그대로 돌려준다.
+function startBlinkLoop(setFrame, rest) {
+  let alive = true;
+  let timer;
+  const schedule = () => {
+    timer = setTimeout(() => {
+      if (!alive) return;
+      setFrame('blink');
+      timer = setTimeout(() => {
+        if (!alive) return;
+        setFrame(rest);
+        schedule();
+      }, BLINK_MS);
+    }, blinkDelay());
+  };
+  setFrame(rest);
+  schedule();
+  return () => {
+    alive = false;
+    clearTimeout(timer);
+  };
 }
 
 // '1'=몸통, '2'=눈. 쿼드런트 픽셀은 터미널 셀 비율대로 세로 2배(1x2)로 그린다.
@@ -156,7 +205,7 @@ export default function Clawd({
   scale = 4,
   className = '',
 }) {
-  const reduced = useMediaQuery('(prefers-reduced-motion: reduce)');
+  const reduced = useMediaQuery(REDUCED_QUERY);
   const hidden = useMediaQuery(HIDDEN_QUERY); // CSS가 마스코트를 숨기는 뷰포트
   const [frame, setFrame] = useState('base');
   const [pokeTick, setPokeTick] = useState(0);
@@ -438,26 +487,7 @@ export default function Clawd({
     }
     // idle/think: 무작위 간격 깜박임. 정지 프레임은 base 고정 — 눈의 방향은
     // 프레임 교체가 아니라 눈 그룹 translate(eyeOff)로 연속 추적한다.
-    const restFrame = () => 'base';
-    setFrame(restFrame());
-    let alive = true;
-    let timer;
-    const schedule = () => {
-      timer = setTimeout(() => {
-        if (!alive) return;
-        setFrame('blink');
-        timer = setTimeout(() => {
-          if (!alive) return;
-          setFrame(restFrame());
-          schedule();
-        }, BLINK_MS);
-      }, blinkDelay());
-    };
-    schedule();
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
+    return startBlinkLoop(setFrame, 'base');
     // tier가 바뀌면 간격이 달라지므로 타이머를 다시 건다. 그 외 Composer 리렌더는
     // 여기 있는 값이 전부 원시 값이라 재시작을 일으키지 않는다.
   }, [mood, tier, reduced, hidden]);
@@ -524,6 +554,90 @@ export default function Clawd({
       {mood === 'read' && <span className="clawd-book" />}
       {/* 알림 배지 — 권한 대기(alert)와 달리 2.4s 뒤 스스로 사라진다 */}
       {mood === 'notify' && <span className="clawd-bang">!</span>}
+    </span>
+  );
+}
+
+/**
+ * 사이드바 세션 행의 미니 마스코트 — 예전 상태 점(.sess-dot)을 대신한다.
+ *
+ * 컴포저 마스코트(Clawd)와 달리 파생 신호·일회성 반응(happy/error/notify)·시선 추적·
+ * 수면·독서·찌르기가 전부 없다. 행마다 하나씩 마운트되므로 살아 있는 타이머는 무드당
+ * 최대 하나뿐이고(busy의 두리번 interval, idle/think의 깜박임 timeout), alert·doze는
+ * 0개다. reduced-motion 구독도 쿼리당 하나를 모든 행이 공유한다(mediaStore).
+ *
+ * 상태는 색이 아니라 포즈·모션으로만 갈린다 — 공식 CLAW'D 색(주황 몸통·검정 눈)을
+ * 그대로 써 컴포저 마스코트와 같은 정체성을 유지하기 위해서다:
+ *   idle  정면 + 느린 바운스 + 깜박임 / think 정면 + 말풍선(축소) + 중간 바운스
+ *   busy  좌우 두리번 + 빠른 바운스   / alert 집게 들고 홉
+ *   doze  눈 감고 흐리게(종료·세션 없음·연결 끊김)
+ * 색에 의존하지 않는 확인 경로는 예전 점과 똑같다 — role="img" + aria-label(label)과
+ * 행 버튼의 툴팁 꼬리(lib/session-status.js가 문자열을 소유).
+ *
+ * 무드가 바뀌어도 컴포넌트 정체성은 그대로라 React가 patch한다 — 호출측이 status를
+ * key로 쓰면 안 된다(remount = 타이머 재생성, codex 지적).
+ */
+export function ClawdMini({ status = 'none', conn = 'open', label = '', className = '' }) {
+  const reduced = useMediaQuery(REDUCED_QUERY);
+  const mood = clawdMood(status, conn);
+  const [frame, setFrame] = useState(() => clawdMiniFrame(mood));
+  // 무드가 바뀐 첫 페인트에는 아직 effect가 돌지 않아 frame이 이전 무드의 것이다
+  // (예: 클래스는 mood-alert인데 프레임은 idle의 base). 렌더 단계에서 걸러 낸다 —
+  // 행마다 useLayoutEffect를 거는 것보다 싸다(codex 지적).
+  const shown = clawdMiniFrameFor(mood, frame);
+
+  useEffect(() => {
+    const rest = clawdMiniFrame(mood);
+    // 모션이 꺼졌으면 무드별 정지 프레임만 남긴다 — 타이머를 아예 걸지 않는다.
+    if (reduced) {
+      setFrame(rest);
+      return undefined;
+    }
+    if (mood === 'busy') {
+      // 도구 실행 중 — 좌우를 두리번거린다(컴포저 tier-1과 같은 간격).
+      setFrame(rest);
+      const t = setInterval(
+        () => setFrame((f) => (f === 'lookLeft' ? 'lookRight' : 'lookLeft')),
+        BUSY_STEP_MS[1],
+      );
+      return () => clearInterval(t);
+    }
+    if (mood === 'idle' || mood === 'think') return startBlinkLoop(setFrame, rest);
+    setFrame(rest); // alert/doze — 정지 포즈, 타이머 없음
+    return undefined;
+  }, [mood, reduced]);
+
+  // 라벨이 없으면 role="img"를 붙이지 않는다 — 이름 없는 이미지는 스크린 리더가
+  // "그래픽"으로만 읽어 오히려 잡음이 된다. 사이드바는 항상 라벨을 넘긴다.
+  const a11y = label
+    ? { role: 'img', 'aria-label': label }
+    : { 'aria-hidden': 'true' };
+
+  return (
+    <span
+      className={`clawd clawd-mini mood-${mood} tier-1 ${className}`.trim()}
+      {...a11y}
+    >
+      <span className="clawd-bob">
+        <FrameSvg bits={CLAWD_FRAMES[shown] ?? CLAWD_FRAMES.base} scale={CLAWD_MINI_SCALE} />
+      </span>
+      {/* 생각 중 — 컴포저의 떠 있는 말풍선 대신 마스코트 오른쪽에 붙는 축소 점 3개.
+          사이드바는 overflow: hidden이라 행 밖으로 나가는 말풍선은 잘린다(CSS 참조). */}
+      {mood === 'think' && (
+        <span className="clawd-bubble">
+          <i />
+          <i />
+          <i />
+        </span>
+      )}
+      {/* 도구 실행 중인데 모션이 꺼져 있으면 busy의 정지 프레임(lookLeft)이 idle의 base와
+          눈 한 칸 차이뿐이라 구분되지 않는다(리뷰 지적) — 그때만 정적 막대를 세운다.
+          모션이 살아 있으면 두리번 + 빠른 바운스가 이미 신호라 덧붙이지 않는다. */}
+      {mood === 'busy' && reduced && (
+        <span className="clawd-bubble clawd-work">
+          <i />
+        </span>
+      )}
     </span>
   );
 }

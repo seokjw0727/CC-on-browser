@@ -90,6 +90,13 @@ test('권한 다이얼로그 — 허용/거부 왕복', async ({ page }) => {
   const permDialog = page.getByRole('dialog', { name: '도구 사용 권한 요청' });
   await expect(permDialog).toBeVisible();
   await expect(permDialog).toContainText('Write');
+  // 사이드바 표시도 함께 넘어간다 — 권한을 기다리는 동안 마스코트는 alert 포즈(집게를
+  // 든 채 홉)로 서고 라벨이 '권한 대기'가 된다. 대기 무드는 다이얼로그가 떠 있는 동안만
+  // 관측할 수 있어 여기가 유일한 결정적 지점이다.
+  const permMascot = page.locator('.sess-row.live .sess-clawd').first();
+  await expect(permMascot).toHaveClass(/st-attn/);
+  await expect(permMascot).toHaveClass(/mood-alert/);
+  await expect(permMascot).toHaveAttribute('aria-label', '상태: 권한 대기');
   await permDialog.getByRole('button', { name: '허용' }).click();
   await expect(permDialog).toBeHidden();
 
@@ -357,8 +364,8 @@ test('윈도잉 — "모두 불러오기"는 하단으로 돌아와도 유지되
 test('윈도잉 — /clear는 이전 대화를 위로 숨기고, "모두 불러오기"로 되살아난다', async ({ page }) => {
   await startBulkSession(page);
   await expect(bulkMsgs(page).first()).toHaveText('bulk-301'); // 타자기 출력 종료 대기
-  // 턴이 끝나기 전에는 컴포저가 전송을 거부한다(idle 불변식) — 상태 점이 대기가 될 때까지.
-  await expect(page.locator('.sess-dot.st-idle').first()).toHaveAttribute('aria-label', '상태: 대기');
+  // 턴이 끝나기 전에는 컴포저가 전송을 거부한다(idle 불변식) — 상태 표시가 대기가 될 때까지.
+  await expect(page.locator('.sess-clawd.st-idle').first()).toHaveAttribute('aria-label', '상태: 대기');
 
   const input = page.getByLabel('메시지 입력');
   // 후행 공백으로 커맨드 드롭다운을 닫는다 — 열려 있으면 Enter가 "항목 선택"으로 삼켜진다.
@@ -793,8 +800,9 @@ test('세션 우클릭 메뉴 — 이름 변경이 사이드바 행에 반영된
   await menu.getByRole('menuitem', { name: '이름 변경' }).click();
   const input = page.getByLabel('세션 이름');
   await expect(input).toBeFocused();
-  // 편집 중이라고 세션이 멈추는 것은 아니다 — 상태 점은 색·라벨을 그대로 유지한다.
-  await expect(row.locator('.sess-dot.st-idle')).toHaveAttribute('aria-label', '상태: 대기');
+  // 편집 중이라고 세션이 멈추는 것은 아니다 — 상태 표시는 포즈·라벨을 그대로 유지하고,
+  // 자리도 입력창 바로 뒤("이름의 오른쪽")를 지킨다.
+  await expect(row.locator('.sess-rename-input + .sess-clawd.st-idle')).toHaveAttribute('aria-label', '상태: 대기');
   await input.fill('내가 붙인 이름');
   await input.press('Enter');
 
@@ -846,29 +854,34 @@ test('세션 우클릭 메뉴 — Esc는 이름 변경을 취소하고, 닫기�
   await expect(page.getByLabel('세션 이름')).toHaveCount(0);
   await expect(row.locator('.sess-main')).not.toContainText('버려질 이름');
 
-  // 닫기(세션 종료) → 회색 종료 점 → 유예 후 목록에서 사라짐
+  // 닫기(세션 종료) → 졸고 있는 종료 마스코트 → 유예 후 목록에서 사라짐
   await row.click({ button: 'right' });
   await menu.getByRole('menuitem', { name: '세션 종료' }).click();
-  await expect(page.locator('.sess-row.live .sess-dot.st-exited')).toBeVisible();
+  await expect(page.locator('.sess-row.live .sess-clawd.st-exited')).toBeVisible();
   await expect(page.locator('.sess-row.live')).toHaveCount(0, { timeout: 10_000 });
 });
 
-test('사이드바 세션 행 — 버튼 없이 이름 + 상태 점만, 행 클릭은 메뉴를 닫는다', async ({ page }) => {
+test('사이드바 세션 행 — 버튼 없이 이름 + 미니 마스코트만, 행 클릭은 메뉴를 닫는다', async ({ page }) => {
   await startSession(page, servers.echo.url);
   const row = page.locator('.sess-row.live').first();
   await expect(row).toBeVisible();
 
   // 행에 남는 것은 세션 버튼 하나뿐 — ⋯·✕과 상태 텍스트 배지는 전부 사라졌다.
+  // 상태 마스코트는 버튼 안의 <span>이라 버튼 수를 늘리지 않는다.
   await expect(row.locator('.session-more')).toHaveCount(0);
   await expect(row.locator('.session-stop')).toHaveCount(0);
   await expect(row.locator('.badge')).toHaveCount(0);
   await expect(row.locator('button')).toHaveCount(1);
 
-  // 상태는 점의 색으로만 — 화면 텍스트는 없고 라벨은 보조기술에 남는다.
-  const dot = row.locator('.sess-dot');
+  // 상태는 미니 마스코트의 포즈로만 — 화면 텍스트는 없고 라벨은 보조기술에 남는다.
+  const dot = row.locator('.sess-clawd');
   await expect(dot).toHaveClass(/\bst-idle\b/);
   await expect(dot).toHaveAttribute('aria-label', '상태: 대기');
+  await expect(dot).toHaveAttribute('role', 'img');
   await expect(row.locator('.sess-main')).not.toContainText('대기');
+
+  // 자리 — 마스코트는 세션 이름 바로 다음 형제다("이름의 오른쪽").
+  await expect(row.locator('.sess-main > .truncate + .sess-clawd')).toHaveCount(1);
 
   // 메뉴가 열린 채 같은 행을 좌클릭하면 닫힌다(⋯ 토글용 예외 제거 회귀 방지).
   // 메뉴는 커서 지점에서 아래·오른쪽으로 펼쳐지므로, 행 오른쪽 아래에서 열고

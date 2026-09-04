@@ -111,7 +111,8 @@
   --r-xs: 4px; /* 인라인 코드·잔디 칸처럼 아주 작은 모서리 */
   --radius: 12px; /* legacy alias */
   /* 원형 컨트롤(전송 버튼·스위치 손잡이 등)이 square에서 따라 각지게 하는 토큰.
-     상태 점(.conn-dot/.pulse-dot/.sess-dot)은 '점'이 곧 의미라 50% 리터럴로 남긴다. */
+     상태 점(.conn-dot/.pulse-dot)은 '점'이 곧 의미라 50% 리터럴로 남긴다
+     (사이드바 세션 행의 .sess-dot은 2026-09-04에 미니 마스코트로 대체됐다). */
   --r-round: 50%;
 
   /* Elevation */

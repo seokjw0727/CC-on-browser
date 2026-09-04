@@ -17,6 +17,10 @@ import {
   CLAWD_EYE_MAX_Y,
   CLAWD_EYE_RANGE_PX,
   openSubagentCount,
+  CLAWD_MINI_MOODS,
+  CLAWD_MINI_FRAMES,
+  clawdMiniFrame,
+  clawdMiniFrameFor,
 } from '../src/lib/clawd.js';
 import { reduceCliEvent } from '../src/lib/reduce-cli-event.js';
 import { createSessionState } from '../src/lib/store-reducer.js';
@@ -266,4 +270,87 @@ test('통합: 고아 tool_use는 result가 합성 결과로 닫는다 — 영구
   assert.equal(openSubagentCount(s.messages), 0, '다음 턴의 juggle 판정을 오염시키지 않는다');
   const tool = s.messages.find((m) => m.kind === 'tool_use');
   assert.ok(tool.result && tool.result.isError, 'ToolCard가 "실행 중" 대신 오류로 표시된다');
+});
+
+// ----- 사이드바 미니 마스코트(ClawdMini)의 프레임 매핑 -----
+// 사이드바에는 색 배지도 상태 텍스트도 없다 — 포즈가 곧 상태다. 매핑이 틀어지면
+// 화면에서 상태를 읽을 방법이 사라지므로 여기서 고정한다(렌더는 components/Clawd.jsx).
+
+test('clawdMiniFrame: 무드마다 실재하는 프레임을 준다', () => {
+  const byMood = Object.fromEntries(CLAWD_MINI_MOODS.map((m) => [m, clawdMiniFrame(m)]));
+  assert.deepEqual(byMood, {
+    idle: 'base',
+    think: 'base',
+    busy: 'lookLeft',
+    alert: 'claws',
+    doze: 'doze',
+  });
+  for (const [mood, frame] of Object.entries(byMood)) {
+    assert.ok(CLAWD_FRAMES[frame], mood + ': ' + frame + ' 프레임이 존재한다');
+  }
+});
+
+test('clawdMiniFrame: idle과 think만 같은 정지 프레임을 공유한다(구분은 말풍선이 맡는다)', () => {
+  const frames = CLAWD_MINI_MOODS.map(clawdMiniFrame);
+  assert.equal(new Set(frames).size, 4, '5무드 중 겹치는 것은 idle/think 한 쌍뿐');
+  assert.equal(clawdMiniFrame('idle'), clawdMiniFrame('think'));
+  // 나머지는 서로 달라야 색 없이도 포즈로 갈린다.
+  for (const a of ['busy', 'alert', 'doze']) {
+    for (const b of ['busy', 'alert', 'doze']) {
+      if (a !== b) assert.notEqual(clawdMiniFrame(a), clawdMiniFrame(b), a + ' vs ' + b);
+    }
+  }
+});
+
+test('clawdMiniFrame: busy의 시작 프레임은 두리번 왕복의 한쪽이다', () => {
+  // 컴포넌트가 lookLeft ↔ lookRight를 번갈아 세운다 — 시작이 둘 중 하나가 아니면
+  // 첫 전환에서 프레임이 튄다.
+  assert.ok(['lookLeft', 'lookRight'].includes(clawdMiniFrame('busy')));
+});
+
+test('CLAWD_MINI_MOODS는 clawdMood가 낼 수 있는 무드를 전부 덮는다', () => {
+  // 미니는 clawdMood만 쓴다(파생 신호·일회성 반응 없음) — 그 출력이 목록을 벗어나면
+  // 화면에 프레임 없는 무드가 뜬다.
+  const statuses = ['idle', 'thinking', 'tool', 'awaiting-permission', 'exited', 'none', 'compacting', undefined];
+  const produced = new Set();
+  for (const conn of ['open', 'connecting', 'closed']) {
+    for (const s of statuses) produced.add(clawdMood(s, conn));
+  }
+  assert.deepEqual([...produced].sort(), [...CLAWD_MINI_MOODS].sort());
+});
+
+test('clawdMiniFrame: 미니가 쓰지 않는 무드는 정면(base)으로 폴백한다', () => {
+  for (const m of ['juggle', 'sweep', 'carry', 'read', 'sleep', 'happy', 'error', 'notify', undefined, null]) {
+    assert.equal(clawdMiniFrame(m), 'base', String(m));
+  }
+});
+
+test('CLAWD_MINI_FRAMES: 무드마다 실재하는 프레임만, 정해진 개수로 나열한다', () => {
+  // clawdMiniFrame이 frames[0]을 돌려주므로 "첫 원소가 시작 프레임"은 스스로를 되뇌는
+  // 단언이다(리뷰 지적) — 시작 프레임은 위 테스트가 하드코딩한 표로 이미 고정돼 있다.
+  // 여기서는 표 자체의 무결성만 본다: 실재하는 프레임 이름인가, 개수가 의도대로인가.
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(CLAWD_MINI_FRAMES).map(([m, fr]) => [m, fr.length])),
+    { idle: 2, think: 2, busy: 2, alert: 1, doze: 1 },
+    '정지 무드는 1프레임, 애니메이션 무드는 2프레임',
+  );
+  for (const [mood, frames] of Object.entries(CLAWD_MINI_FRAMES)) {
+    for (const fr of frames) assert.ok(CLAWD_FRAMES[fr], mood + ': ' + fr + ' 프레임이 존재한다');
+    assert.equal(new Set(frames).size, frames.length, mood + ': 같은 프레임이 중복되지 않는다');
+  }
+});
+
+test('clawdMiniFrameFor: 이전 무드의 프레임은 새 무드의 시작 프레임으로 되돌린다', () => {
+  // 무드가 바뀌는 첫 페인트에 클래스(mood-*)만 먼저 갱신되는 상황 — 프레임까지
+  // 함께 갈아입지 않으면 alert 클래스에 idle 프레임 같은 조합이 한 번 보인다.
+  assert.equal(clawdMiniFrameFor('alert', 'base'), 'claws');
+  assert.equal(clawdMiniFrameFor('doze', 'lookRight'), 'doze');
+  assert.equal(clawdMiniFrameFor('busy', 'blink'), 'lookLeft');
+  assert.equal(clawdMiniFrameFor('idle', 'claws'), 'base');
+  // 같은 무드 안의 애니메이션 프레임은 그대로 통과한다.
+  assert.equal(clawdMiniFrameFor('busy', 'lookRight'), 'lookRight');
+  assert.equal(clawdMiniFrameFor('idle', 'blink'), 'blink');
+  assert.equal(clawdMiniFrameFor('think', 'blink'), 'blink');
+  // 모르는 무드는 정면으로 떨어진다.
+  assert.equal(clawdMiniFrameFor('juggle', 'jugLeft'), 'base');
 });

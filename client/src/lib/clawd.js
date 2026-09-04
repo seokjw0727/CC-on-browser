@@ -179,6 +179,41 @@ export function clawdMood(status, conn) {
   }
 }
 
+// ----- 사이드바 미니 마스코트 (components/Clawd.jsx의 ClawdMini) -----
+// 사이드바 행에는 컴포저 마스코트의 파생 신호(일회성 반응·수면·독서·시선 추적)가 없다 —
+// 행마다 하나씩 붙는 최소 표시라 clawdMood의 기본 무드 5종만 쓴다.
+//
+// 무드마다 "그 무드에서 나올 수 있는 프레임 전부"를 적어 둔다. 첫 원소가 시작(정지)
+// 프레임이고 — alert·doze는 그것 하나로 끝, busy는 뒤 원소와 번갈아 두리번거리며,
+// idle/think는 깜박임 루프가 쉬는 프레임이 곧 시작 프레임이다. 목록이 있어야 무드가 막
+// 바뀐 첫 페인트에서 이전 무드의 프레임이 한 번 그려지는 것을 렌더 단계에서 걸러낼 수
+// 있다(codex 지적 — useLayoutEffect로 동기화하는 대신 순수 판정으로 막는다).
+// 렌더·타이머는 컴포넌트가 갖고, 여기 순수 데이터·판정만 node --test로 고정한다.
+export const CLAWD_MINI_FRAMES = {
+  idle: ['base', 'blink'], // 정면 + 깜박임
+  think: ['base', 'blink'], // 정면 + 깜박임 (구분은 말풍선이 맡는다)
+  busy: ['lookLeft', 'lookRight'], // 좌우 두리번
+  alert: ['claws'], // 권한·질문 대기 — 집게를 든 채 멈춰 선다
+  doze: ['doze'], // 종료·세션 없음·연결 끊김 — 눈 감음
+};
+
+export const CLAWD_MINI_MOODS = Object.keys(CLAWD_MINI_FRAMES);
+
+/** 무드의 시작(정지) 프레임. 모르는 무드는 정면(base). */
+export function clawdMiniFrame(mood) {
+  return CLAWD_MINI_FRAMES[mood]?.[0] ?? 'base';
+}
+
+/**
+ * 지금 무드에서 이 프레임을 그려도 되는가 — 아니면 무드의 시작 프레임으로 되돌린다.
+ * 무드가 바뀌는 순간 클래스(mood-*)는 즉시 갱신되지만 프레임 상태는 effect가 돌아야
+ * 갱신되므로, 그 한 페인트 동안 alert 클래스에 idle 프레임 같은 조합이 보인다.
+ */
+export function clawdMiniFrameFor(mood, frame) {
+  const allowed = CLAWD_MINI_FRAMES[mood];
+  return allowed && allowed.includes(frame) ? frame : clawdMiniFrame(mood);
+}
+
 /**
  * 기본 무드에 파생 신호·일시 상태를 합성한 표시 무드.
  *
