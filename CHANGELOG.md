@@ -8,6 +8,43 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+## [1.11.5] - 2026-09-04
+
+> 사이드바 세션 목록의 **색 점이 작은 CLAW'D로 바뀌었습니다.** 지금까지 세션 상태는 이름
+> 왼쪽의 점 하나가 색으로만 알렸는데, 색은 세션이 여러 개 쌓이면 서로 구분이 잘 안 되고
+> 색각 이상이 있는 분에게는 사실상 아무 정보도 주지 못하는 표시였습니다. 이제 세션 이름
+> 오른쪽에 18×10px 마스코트가 붙어 자세와 움직임으로 상태를 말합니다 — 대기 중에는 가만히
+> 눈을 깜빡이고, 생각 중이면 옆에 점 세 개가 뜨고, 도구가 도는 동안에는 좌우를 두리번거리고,
+> 권한이나 질문을 기다릴 때는 집게를 들고 폴짝 뛰고, 끝난 세션은 잡니다. 툴팁 문구와 스크린
+> 리더가 읽는 문장은 예전 그대로이고, `prefers-reduced-motion`을 켜면 무드별 정지 그림으로
+> 떨어집니다.
+> (Replaces the coloured status dot in the sidebar session list with a small CLAW'D to the
+> right of each session name. State is carried by pose and motion instead of hue, so it
+> survives colour blindness and stays legible when many sessions are stacked. Tooltips and
+> screen-reader labels are unchanged, and reduced motion resolves to a static per-mood frame.)
+
+### Changed
+- **상태 점이 미니 마스코트로 교체되었습니다.** 대기·생각 중·도구 실행·권한/질문 대기·종료
+  다섯 상태가 각각 정면, 말풍선 점 세 개, 좌우 두리번, 집게 홉, 졸기로 나타납니다. 상태를
+  판정하는 로직과 라벨 문구는 손대지 않아서, 툴팁에 뜨는 글자와 보조기술이 읽는 문장은 이전
+  릴리스와 같습니다.
+  (The colour dot becomes an 18×10px mascot; status derivation and its labels are untouched,
+  so the tooltip text and the screen-reader string are identical to the previous release.)
+- **연결이 끊긴 세션은 라벨에 연결 상태가 덧붙습니다.** 소켓이 끊기면 마스코트는 자는 자세가
+  되는데, 라벨이 "대기"인 채로 남으면 그림과 설명이 서로 다른 이야기를 하게 됩니다. 이제
+  "대기 · 연결 끊김"처럼 뒤에 붙여 둘을 맞췄습니다.
+  (When the socket drops the mascot dozes, so the label now carries a connection suffix and
+  pose and text agree again.)
+- **행이 늘어도 타이머와 리스너는 늘지 않습니다.** `prefers-reduced-motion` 질의는 모듈에
+  하나만 두고 모든 행이 함께 구독하며, 무드마다 타이머는 최대 하나입니다. 이름이 길어 잘리는
+  행에서 말풍선이 떠도 글자가 밀리지 않도록 마스코트 자리를 미리 잡아 둡니다.
+  (One shared media-query listener for every row and at most one timer per mood; the mascot's
+  slot is width-reserved so a truncated name does not reflow when the thinking bubble appears.)
+- **모션을 끄면 정지 그림으로 떨어집니다.** `prefers-reduced-motion`에서는 무드마다 정지
+  프레임을 쓰되, 도구 실행 중에는 대기와 구분되도록 작은 막대 표식 하나를 남깁니다.
+  (Under reduced motion each mood resolves to a static frame, with a small static bar kept for
+  the busy state so it does not collapse into idle.)
+
 ## [1.11.4] - 2026-09-03
 
 > 입력창 옆 마스코트 CLAW'D가 **에이전트가 겪는 모든 사건에 반응**하도록 넓어졌습니다.
@@ -1029,7 +1066,8 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
-[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.4...HEAD
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.5...HEAD
+[1.11.5]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.4...v1.11.5
 [1.11.4]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.3...v1.11.4
 [1.11.3]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.2...v1.11.3
 [1.11.2]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.1...v1.11.2
