@@ -1,7 +1,11 @@
-# Claude Code on Browser — 설계 문서
+# CC on Browser — 설계 문서 (아카이브)
 
-날짜: 2026-07-06
-상태: 승인 대기 (자율 모드 — /goal 지시에 따라 설계 결정을 문서화하고 진행)
+날짜: 2026-07-06 (이후 관측을 §2에 덧붙임)
+
+> **아카이브된 설계 스냅샷입니다.** 현재 동작의 기준은 언제나 코드이고, 이 문서는
+> 초기 설계 판단과 CLI 연동 계약을 기록으로 남긴 것입니다. 이후 릴리스에서 바뀐
+> 부분(모듈 구성, 테스트 수, 기능 범위)은 여기 반영돼 있지 않을 수 있습니다.
+> 지금도 유효한 값이 있는 절은 §2(관측된 CLI 동작)와 §3(대안 검토 기록)입니다.
 
 ## 1. 목표
 
@@ -9,9 +13,10 @@ CLI 기반 Claude Code를 브라우저에서 사용할 수 있게 하는 로컬 
 
 - **개선된 UI**: 터미널 TUI 대신 현대적인 채팅 인터페이스 (스트리밍 markdown, 도구 실행 카드, diff 뷰, 권한 다이얼로그).
 - **개선된 UX**: 세션 목록/재개, 프로젝트(cwd) 선택, 모델·권한 모드 전환, slash command 자동완성, 사용량 표시, 중단(interrupt).
-- **SDK API 사용 금지**: `@anthropic-ai/sdk`, `@anthropic-ai/claude-agent-sdk`, api.anthropic.com 직접 호출 모두 금지. 오직 로컬에 설치된 `claude.exe`(구독 인증 완료 상태)를 자식 프로세스로 구동. 인증·과금은 전적으로 사용자의 Claude Max 구독을 따른다.
+- **SDK API 사용 금지**: `@anthropic-ai/sdk`, `@anthropic-ai/claude-agent-sdk`, api.anthropic.com 직접 호출 모두 금지. 오직 로컬에 설치된 `claude` CLI(로그인 완료 상태)를 자식 프로세스로 구동. 인증·과금은 전적으로 사용자의 Claude 구독을 따른다.
+  - *이후 변경(v1.7.0~)*: 상태줄의 계정 공식 사용률 표시를 위해 api.anthropic.com의 사용량 메타데이터 endpoint 하나를 조회하는 경로가 생겼다. 모델 호출이 아니고 기본값은 꺼짐이며, 사용자가 설정에서 켜야만 나간다 — 자세한 내용은 SECURITY.md.
 
-## 2. 검증된 사실 (이 머신에서 직접 프로브, CLI v2.1.201)
+## 2. 관측된 CLI 동작 (로컬 CLI v2.1.201 프로브 기준)
 
 설계는 추측이 아니라 아래 실측에 기반한다:
 
@@ -29,12 +34,12 @@ CLI 기반 Claude Code를 브라우저에서 사용할 수 있게 하는 로컬 
 6. **스트림 이벤트**: `stream_event`(text_delta 등), `system/thinking_tokens`, `system/status`, `rate_limit_event`, tool_result가 담긴 `user` 메시지, 최종 `result`(usage, total_cost_usd, num_turns) 수신.
 7. 스폰된 CLI는 사용자의 훅·스킬·설정을 그대로 로드 → 브라우저 UI는 사용자의 실제 CLI 환경의 전면부가 된다.
 8. 세션 파일: `~/.claude/projects/<cwd를 -로 인코딩한 경로>/<session_id>.jsonl`. `--resume <id>`로 재개(이전 메시지 재전송 금지).
-9. (2026-07-10 추가, CLI v2.1.205 **바이너리 문자열 분석** — 런타임 프로브 아님) control_request 서브타입 `set_max_thinking_tokens`(`max_thinking_tokens`: null=기본/0=끔/양수=예산, CLI 내부 클라이언트가 동일 채널 사용) 확인 — 서버 계층에 setThinking으로 구현(현 UI는 미노출). `rate_limit_event`의 rate_limit_info에는 사용률 %가 없음(status/resetsAt/rateLimitType뿐)도 transcript 실측으로 확인.
-10. (2026-07-10 추가, 동일 바이너리 분석) `--effort <level>`(low|medium|high|xhigh|max, 기본 high)은 **spawn 전용** — 런타임 변경 서브타입이 없고 apply_flag_settings 문맥에 "can't change server effort" 문자열 존재. 따라서 노력 수준 변경 UI는 stop → `--resume`+`--effort` 재스폰(대화 이월)으로 구현.
+9. (2026-07-10 추가, CLI v2.1.205 기준) control_request 서브타입 `set_max_thinking_tokens`를 지원한다(`max_thinking_tokens`: null=기본 / 0=끔 / 양수=예산). 서버 계층에 setThinking으로 구현했고 현 UI에는 노출하지 않는다. `rate_limit_event`의 rate_limit_info에는 사용률 %가 없음(status/resetsAt/rateLimitType뿐)도 transcript 실측으로 확인.
+10. (2026-07-10 추가) `--effort <level>`(low|medium|high|xhigh|max, 기본 high)은 이 버전에서 **spawn 전용**이다 — 런타임에 effort를 바꾸는 control_request 서브타입이 없다. (이후 CLI에서 런타임 채널이 생겨 현재 구현은 재스폰 없이 바꾼다.) 따라서 노력 수준 변경 UI는 stop → `--resume`+`--effort` 재스폰(대화 이월)으로 구현.
 11. (2026-07-10 추가, CLI v2.1.206 **handshake 런타임 프로브** — 유저 메시지 미전송, 토큰 소모 0) `system/init`은 첫 user 메시지 전에는 방출되지 않고, **무턴 세션은 트랜스크립트(jsonl)를 만들지 않는다** — 그 id로 `--resume`하면 stderr "No conversation found" + exit 1. ⇒ 노력 변경 재시작은 **완결 턴 ≥1 또는 재개로 시작한 세션만** `--resume`을 붙인다(클라이언트 hasCompletedTurn 게이트, 그 외에는 새로 시작 — 잃을 서버측 맥락 없음). 실존 세션 `--resume`은 과거 대화를 replay하지 않음(이월 메시지와 중복 없음).
 12. (동일 프로브) `set_model` 성공 시 `<local-command-stdout>…</local-command-stdout>` 문자열 content의 `user` 이벤트(`isReplay:true`)가 동반된다 — 클라이언트 리듀서가 채팅에서 걸러내고 설정 변경 확인은 토스트로 표시. `set_permission_mode`는 4개 모드 전부 런타임 전환 성공(`system/status`에 새 permissionMode 동반), spawn `--permission-mode bypassPermissions`도 정상.
-13. (2026-07-10 추가, CLI v2.1.206 **바이너리 문자열 분석**) CLAW'D 마스코트의 공식 자산이 바이너리에 내장돼 있다: 테마 색 `clawd_body: rgb(215,119,87)` / `clawd_background: 검정`, 3행 쿼드런트 블록 아트(` ▐▛███▜▌` / `▝▜█████▛▘` / `  ▘▘ ▝▝`), 포즈 4종(default / look-left / look-right / arms-up — 눈 블록 `▛███▜`→`▟███▟`→`▙███▙`과 팔 블록 차이). 웹 마스코트(client/src/lib/clawd.js)는 이 아트의 쿼드런트 전사(18×5, 1픽셀=쿼드런트 1:2 종횡비)다. 채팅의 턴별 토큰 꼬리표(usage 아이템)는 `result.usage.input_tokens/output_tokens` + `duration_ms`에서 취한다(토큰 0이면 생략).
-14. (2026-07-11 추가) 마스코트 무드 어휘는 clawd-on-desk(github rullerzhou-afk)의 state-mapping.md를 축소 이식했다: 기본 무드는 `clawdMood(status, conn)` — thinking→`think`(말풍선)·tool→`busy`(두리번)·awaiting-permission→`alert`·exited/none/연결끊김→`doze`, 표시 무드는 `clawdVisualMood`가 합성 — idle 위에만 일회성 `happy`/`error`(턴 종료, `clawdTurnEnd`가 lastResult.isError로 판별, 2.4s), idle+유저 무입력 60s→`sleep`(zzz, 입력에 깸), busy+실행 중 Task/Agent 도구(`openSubagentCount`>0)→`juggle`(자체 프레임 jugLeft/jugRight — 집게 들고 눈이 공을 쫓음). idle은 커서 눈 추적(`eyeFrameFor`, 데드존 48px, rAF 스로틀). 빠른 4연타(1.6s)는 어지럼 이스터에그. 사용자가 직접 중단한 턴은 무반응(`session.interruptRequested` — 인터럽트 전송 시 마킹, 다음 doSend가 해제; 인터럽트도 is_error result로 끝나므로 error 연출과 구분). `reduceResult`는 결과 미수신 열린 tool_use를 합성 결과(`(중단됨 — 결과 미수신)`, isError)로 닫아 고아가 status(`hasOpenTool`)·juggle(`openSubagentCount`)·ToolCard("실행 중" 칩)를 영구 오염시키지 않는다. ≤900px(CSS가 마스코트를 숨기는 뷰포트)와 reduced-motion에선 전역 리스너·타이머 전부 정지. 관찰용 fake-cli 시나리오 `subagent`(FAKE_SUBAGENT_MS, 0 허용)와 `FAKE_ECHO_DELAY_MS`가 있다(기본 즉답 — 테스트 계약 유지).
+13. 채팅의 턴별 토큰 꼬리표(usage 아이템)는 `result.usage.input_tokens/output_tokens` + `duration_ms`에서 취한다(토큰 0이면 생략).
+14. (2026-07-11 추가) 마스코트 무드 어휘는 clawd-on-desk(https://github.com/rullerzhou-afk/clawd-on-desk, AGPL-3.0)의 state-mapping 문서에서 상태→연출 대응만 참고했다(코드·자산 복사 없음 — THIRD-PARTY-NOTICES.md): 기본 무드는 `clawdMood(status, conn)` — thinking→`think`(말풍선)·tool→`busy`(두리번)·awaiting-permission→`alert`·exited/none/연결끊김→`doze`, 표시 무드는 `clawdVisualMood`가 합성 — idle 위에만 일회성 `happy`/`error`(턴 종료, `clawdTurnEnd`가 lastResult.isError로 판별, 2.4s), idle+유저 무입력 60s→`sleep`(zzz, 입력에 깸), busy+실행 중 Task/Agent 도구(`openSubagentCount`>0)→`juggle`(자체 프레임 jugLeft/jugRight — 집게 들고 눈이 공을 쫓음). idle은 커서 눈 추적(`eyeFrameFor`, 데드존 48px, rAF 스로틀). 빠른 4연타(1.6s)는 어지럼 이스터에그. 사용자가 직접 중단한 턴은 무반응(`session.interruptRequested` — 인터럽트 전송 시 마킹, 다음 doSend가 해제; 인터럽트도 is_error result로 끝나므로 error 연출과 구분). `reduceResult`는 결과 미수신 열린 tool_use를 합성 결과(`(중단됨 — 결과 미수신)`, isError)로 닫아 고아가 status(`hasOpenTool`)·juggle(`openSubagentCount`)·ToolCard("실행 중" 칩)를 영구 오염시키지 않는다. ≤900px(CSS가 마스코트를 숨기는 뷰포트)와 reduced-motion에선 전역 리스너·타이머 전부 정지. 관찰용 fake-cli 시나리오 `subagent`(FAKE_SUBAGENT_MS, 0 허용)와 `FAKE_ECHO_DELAY_MS`가 있다(기본 즉답 — 테스트 계약 유지).
 
 주의: stream-json 제어 프로토콜은 공식 미문서 인터페이스다. CLI 업데이트로 형식이 바뀔 수 있으므로 프로토콜 계층을 한 모듈로 격리하고, 알 수 없는 메시지는 무시가 아닌 "raw 이벤트"로 UI에 전달할 수 있게 설계한다.
 

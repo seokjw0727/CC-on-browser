@@ -1,22 +1,22 @@
 // CLAW'D 마스코트의 순수 데이터·로직 — 프레임 비트맵과 무드 매핑.
 // React 없는 모듈로 분리해 node --test로 검증한다 (렌더·타이머는 components/Clawd.jsx).
 //
-// 실물 충실도: 프레임은 실제 claude CLI(v2.1.206) 바이너리에 내장된 공식 아트를
-// 쿼드런트 단위로 옮긴 것이다. 원본은 3행 블록 문자 아트
-//   " ▐▛███▜▌" / "▝▜█████▛▘" / "  ▘▘ ▝▝"
-// 이고, 포즈 변형(default / look-left / look-right / arms-up)은 눈 블록
-// (r1E: "▛███▜"→"▟███▟"→"▙███▙")과 팔 블록의 쿼드런트 차이로 정의돼 있다.
-// 색도 바이너리 테마 실측값을 쓴다: clawd_body rgb(215,119,87), 눈=검정 배경.
+// 출처와 권리: Clawd는 Claude Code CLI의 마스코트 캐릭터이고, 캐릭터와 그 디자인은
+// Anthropic PBC의 것이다. 이 프로젝트는 Anthropic과 무관한 비공식 프로젝트이며,
+// 아래 프레임은 터미널에서 블록 문자로 그려지는 그 캐릭터의 실루엣을 이 앱의 픽셀
+// 격자에 맞춰 다시 그린 것이다. 상표·캐릭터 고지는 THIRD-PARTY-NOTICES.md 참조.
 //
-// 좌표계: 1문자 셀 = 2x2 쿼드런트 → 아트 전체 = 18열 x 6행 쿼드런트(빈 마지막
+// 좌표계: 원 실루엣의 1문자 셀 = 2x2 쿼드런트 → 전체 = 18열 x 6행 쿼드런트(빈 마지막
 // 행은 생략해 5행). 터미널 셀은 세로가 길어 쿼드런트가 1:2(가로:세로) 비율이므로
 // 렌더 시 픽셀 하나를 세로 2배로 그린다(CLAWD_PIXEL_ASPECT).
 //
-// 전사 범위: base·lookLeft/lookRight의 눈 위치·claws의 팔은 바이너리 아트의 전사,
-// blink/doze(눈 감음·팔 붙임)·look 포즈의 다리 반칸 이동·jugLeft/jugRight(집게 들고
-// 눈만 좌우 — 저글링)는 원본에 없는 자체 애니메이션 프레임이다.
+// 프레임 구성: base·lookLeft/lookRight·claws는 캐릭터의 기본 실루엣과 눈·팔 위치를
+// 옮긴 것이고, blink/doze(눈 감음·팔 붙임)·look 포즈의 다리 반칸 이동·jugLeft/jugRight
+// (집게 들고 눈만 좌우 — 저글링)는 애니메이션을 위해 직접 덧붙인 자체 프레임이다.
 //
-// 무드 어휘는 clawd-on-desk(github rullerzhou-afk)의 state-mapping.md 이식이다.
+// 무드 어휘는 clawd-on-desk(https://github.com/rullerzhou-afk/clawd-on-desk, AGPL-3.0)의
+// state-mapping 문서에서 가져온 아이디어다 — 코드는 한 줄도 옮기지 않았고, 상태→연출의
+// 대응 관계만 참고했다(THIRD-PARTY-NOTICES.md에 출처를 적어 두었다).
 // 그 문서의 표는 훅 이벤트(UserPromptSubmit·PreToolUse…)로 쓰여 있지만 이 앱은 훅이
 // 아니라 CLI stream-json을 받으므로, 리듀서가 남긴 **정규화된 신호**로 옮겨 대응한다:
 //   UserPromptSubmit→think(말풍선) / Pre·PostToolUse→busy(두리번, 세션 수 1·2·3+ 티어)

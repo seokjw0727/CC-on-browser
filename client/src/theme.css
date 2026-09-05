@@ -1,7 +1,8 @@
 /* ============================================================
    Design system — warm-charcoal dark (default) + warm-paper light.
-   Inspired by the Claude Code product shell: serif wordmark,
-   coral accent, generous whitespace, composer-centric layout.
+   Tone: serif wordmark, coral accent, generous whitespace, composer-centric
+   layout. Visually adjacent to the tool it drives, but this project is not
+   affiliated with Anthropic (see THIRD-PARTY-NOTICES.md).
    ============================================================ */
 
 /* 번들 폰트 — 자기완결(무-CDN). Pretendard KR = UI, Monoplex KR = 대화·코드. */
@@ -70,7 +71,7 @@
   --border-soft: rgba(255, 255, 255, 0.07);
   --border-strong: #4a453f;
 
-  /* Brand — Claude coral/terracotta */
+  /* Brand — 따뜻한 코랄/테라코타 계열 강조색 */
   --accent: #d97757;
   --accent-hover: #e28b6f;
   --accent-press: #c76547;
@@ -83,7 +84,7 @@
   --warning: #e0a458;
   --danger: #e0705f;
   --danger-soft: rgba(224, 112, 95, 0.14);
-  --info: #6a9bcc; /* CLI 테마의 chromeBlue rgb(106,155,204) — 자동모드 표시색 */
+  --info: #6a9bcc; /* 자동모드 표시색 */
 
   /* 잔디(사이드바 돌아보기) 강도 색 — color-mix가 테마별 --accent/--bg-sink를
      사용 시점에 해석하므로 라이트 테마에서 자동으로 재계산된다(별도 override 불요). */
@@ -471,9 +472,6 @@ select:focus {
 /* ===== Shared bits ===== */
 .dim {
   color: var(--text-dim);
-}
-.faint {
-  color: var(--text-faint);
 }
 .spacer {
   flex: 1;

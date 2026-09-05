@@ -33,7 +33,7 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 If args.Count < 1 Then
   MsgBox "cc-on-browser: missing the node.exe path argument." & vbCrLf & vbCrLf & _
          "Recreate the shortcut:  cc-on-browser --shortcut", _
-         16, "Claude Code on Browser"
+         16, "CC on Browser"
   WScript.Quit 1
 End If
 
@@ -44,13 +44,13 @@ scriptPath = fso.BuildPath(fso.GetParentFolderName(WScript.ScriptFullName), "cc-
 If Not fso.FileExists(nodeExe) Then
   MsgBox "cc-on-browser: node.exe not found at" & vbCrLf & nodeExe & vbCrLf & vbCrLf & _
          "If you reinstalled Node.js, recreate the shortcut:  cc-on-browser --shortcut", _
-         16, "Claude Code on Browser"
+         16, "CC on Browser"
   WScript.Quit 1
 End If
 
 If Not fso.FileExists(scriptPath) Then
   MsgBox "cc-on-browser: entry point not found at" & vbCrLf & scriptPath & vbCrLf & vbCrLf & _
-         "Reinstall the package.", 16, "Claude Code on Browser"
+         "Reinstall the package.", 16, "CC on Browser"
   WScript.Quit 1
 End If
 
@@ -71,6 +71,6 @@ If rc <> 0 Then
   MsgBox "cc-on-browser could not start (exit code " & rc & ")." & vbCrLf & vbCrLf & _
          "Run this in a terminal to see why:" & vbCrLf & _
          "    cc-on-browser --no-open", _
-         16, "Claude Code on Browser"
+         16, "CC on Browser"
   WScript.Quit rc
 End If

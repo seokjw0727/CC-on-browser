@@ -27,7 +27,10 @@
     "server/src/",
     "server/test/fake-cli.mjs",
     "scripts/dev-fake.mjs",
-    "client/dist/"
+    "client/dist/",
+    "THIRD-PARTY-NOTICES.md",
+    "SECURITY.md",
+    "CHANGELOG.md"
   ],
   "publishConfig": {
     "access": "public"

@@ -1,5 +1,5 @@
 // claude.exe stream-json 브리지. 미문서 CLI 프로토콜 지식은 이 파일에 격리한다.
-// 프로토콜 상세: docs/superpowers/plans/2026-07-06-claude-code-on-browser.md "검증된 CLI 프로토콜" 절.
+// 프로토콜 상세: docs/specs/2026-07-06-claude-code-on-browser-design.md §2(관측된 CLI 동작).
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import { createJsonlParser } from './jsonl.js';
@@ -70,7 +70,7 @@ export class ClaudeSession extends EventEmitter {
     // setEffort()의 런타임 채널로 바꾼다(재시작 불필요 — v2.1.233 실측, setEffort 주석 참조).
     this.#effort = effort;
     // ultracode는 --effort 값이 아니라 별개의 플래그 설정이다(CLI의 /effort ultracode는
-    // effortLevel 'xhigh' + ultracode true를 함께 보낸다 — v2.1.233 바이너리 실측).
+    // effortLevel 'xhigh' + ultracode true를 함께 보낸다 — v2.1.233 동작 관찰).
     // 스폰 인자로는 전달할 수 없어 initialize 직후 setEffort로 얹는다(start() 참조).
     this.#ultracodeRequested = ultracode === true;
     this.#resumeSessionId = resumeSessionId;

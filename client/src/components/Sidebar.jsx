@@ -47,7 +47,9 @@ import {
   DEFAULT_MODEL_KEY,
   DEFAULT_MODE_KEY,
   loadDefaults,
+  officialUsageEnabled,
   resolveDefaultModel,
+  setOfficialUsageEnabled,
   writePref,
 } from '../lib/preferences.js';
 import {
@@ -581,10 +583,16 @@ function FootButton({ title, panel, openPanel, onToggle, icon }) {
 
 // 사용량 블록 — Composer 상태줄과 같은 데이터(store.globalUsage, 60초 폴링 재사용).
 // 공식 %(quota)가 있으면 %바 + 리셋 시각, 없으면 로컬 집계 폴백(Composer와 동일 기준).
-// 조회 실패 동안 마지막 성공 quota가 유지될 수 있어 fetchedAt을 툴팁에 병기한다.
-function UsageStats({ gu }) {
+// 공식 %가 없는 이유는 둘이고 안내가 갈린다 — 설정에서 조회를 꺼 둔 것(정상)과
+// 켰는데 조회가 실패한 것(미로그인·네트워크). 후자에서는 마지막 성공 quota가 잠시
+// 유지될 수 있어 fetchedAt을 툴팁에 병기한다.
+function UsageStats({ gu, officialUsage }) {
   if (!gu) return <div className="dim foot-note">사용량 정보를 불러오는 중…</div>;
   const quota = gu.quota;
+  // Composer 상태줄과 같은 갈래 — 꺼서 없는 것과 실패해서 없는 것은 다른 안내다.
+  const noQuotaTip = officialUsage
+    ? '공식 % 조회 실패(CLI 미로그인 또는 네트워크) — 로컬 트랜스크립트 집계만 표시'
+    : '공식 % 조회 꺼짐 — 설정 → 세션에서 켜면 표시됩니다. 지금은 로컬 트랜스크립트 집계만 표시';
   const rows = [
     { label: '5시간 창', q: quota?.fiveHour, local: gu.fiveHour },
     { label: '7일 창', q: quota?.sevenDay, local: gu.sevenDay },
@@ -594,9 +602,9 @@ function UsageStats({ gu }) {
       {rows.map(({ label, q, local }) => {
         const localTok = local ? `로컬 ${fmtTok(local.totalTokens)} tok` : null;
         if (!q) {
-          // 공식 %를 한 번도 못 받은 창 — 로컬 집계만(미로그인·네트워크 실패)
+          // 공식 %가 없는 창 — 로컬 집계만(조회를 껐거나, 켰는데 실패했거나)
           return (
-            <div key={label} className="usage-row" data-tip="공식 % 조회 실패(CLI 미로그인 또는 네트워크) — 로컬 트랜스크립트 집계만 표시">
+            <div key={label} className="usage-row" data-tip={noQuotaTip}>
               <div className="usage-row-head">
                 <span className="usage-label">{label}</span>
                 <span className="usage-pct dim">{localTok ?? '—'}</span>
@@ -805,7 +813,7 @@ function ThemeSettings({ theme, onSetTheme, shape, onSetShape }) {
 }
 
 function SessionSettings({ onEditConfig }) {
-  const { state, setDebug } = useStore();
+  const { state, setDebug, dispatch } = useStore();
   const [defaults, setDefaults] = useState(() => loadDefaults());
   // 모델 카탈로그는 CLI가 세션 init에서 보고한다 — 앱을 켜고 아직 아무 세션도
   // 시작하지 않았다면 비어 있어 고를 수 없다(안내 문구로 대체).
@@ -820,6 +828,24 @@ function SessionSettings({ onEditConfig }) {
   const setDefaultMode = (value) => {
     setDefaults((cur) => ({ ...cur, mode: value }));
     writePref(DEFAULT_MODE_KEY, value);
+  };
+
+  // 계정 공식 사용률 조회 토글 — 이 앱에서 유일하게 바깥으로 나가는 조회의 허락이다.
+  // 저장 실패(차단된 localStorage)는 켜진 모습을 보여 주지 않는다: 폴링은 매 주기
+  // 저장소를 다시 읽어 판단하므로, 저장되지 않은 켬은 화면에서만 켜진 거짓말이 된다.
+  const [officialUsage, setOfficialUsage] = useState(() => officialUsageEnabled());
+  const [usageSaveFailed, setUsageSaveFailed] = useState(false);
+
+  const toggleOfficialUsage = () => {
+    const next = !officialUsage;
+    const saved = setOfficialUsageEnabled(next);
+    const on = saved && next;
+    setOfficialUsage(on);
+    setUsageSaveFailed(!saved);
+    // 스토어에도 즉시 알린다: 상태줄·통계의 문구가 다음 폴링(최대 60초)을 기다리지 않고
+    // 바뀌고, 끌 때는 남아 있던 %가 그 자리에서 사라진다. App.jsx의 폴링 effect가 이
+    // 값에 의존하므로 켜는 즉시 첫 조회도 함께 나간다.
+    dispatch({ type: 'set-official-usage', on });
   };
 
   // 한도 알림 토글. 권한은 여기서 한 번 읽어 두고 요청 결과로만 갱신한다 — 브라우저
@@ -918,6 +944,42 @@ function SessionSettings({ onEditConfig }) {
         </button>
       </div>
 
+      {/* 계정 공식 사용률 조회 — 이 앱에서 유일하게 컴퓨터 밖으로 나가는 정기 조회다.
+          그래서 기본값이 꺼짐이고, 켜는 순간 무엇이 나가는지를 토글 옆에서 바로 읽을 수
+          있어야 한다(설명을 툴팁에만 두면 켜는 판단에 필요한 정보가 숨는다). */}
+      <div className="setting-row">
+        <span
+          className="setting-label"
+          data-tip="CLI가 저장한 구독 OAuth 토큰으로 api.anthropic.com의 사용량 메타데이터 endpoint 하나를 60초마다 조회합니다 — 모델 호출이 아니라 과금은 없습니다"
+        >
+          계정 공식 사용률 조회
+          <span className="setting-sub dim">기본 꺼짐 · 켜면 api.anthropic.com 조회</span>
+        </span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={officialUsage}
+          className={`switch${officialUsage ? ' on' : ''}`}
+          onClick={toggleOfficialUsage}
+          aria-label="계정 공식 사용률 조회"
+        >
+          <span className="switch-knob" aria-hidden="true" />
+        </button>
+      </div>
+      <div role="status">
+        {usageSaveFailed && (
+          <div className="dim setting-note">
+            브라우저가 저장소를 막고 있어 이 설정을 유지할 수 없습니다 — 조회는 꺼진 채로 둡니다.
+          </div>
+        )}
+        {!officialUsage && (
+          <div className="dim setting-note">
+            꺼져 있는 동안에는 상태줄·통계의 5시간/7일 %가 표시되지 않고, 로컬 대화 기록에서
+            집계한 토큰 수만 나옵니다. 이 앱은 조회를 위해 자격증명 파일을 읽지도 않습니다.
+          </div>
+        )}
+      </div>
+
       {/* 사용량 한도 알림 — 이미 도는 60초 사용량 폴링에 얹혀 간다(추가 조회 없음). */}
       <div className="setting-row">
         <span
@@ -945,6 +1007,15 @@ function SessionSettings({ onEditConfig }) {
       <div role="status">
         {notifyUnsupported && (
           <div className="dim setting-note">이 브라우저는 알림(Notification)을 지원하지 않습니다.</div>
+        )}
+        {/* 한도 판정의 유일한 재료가 공식 사용률이라, 위 토글이 꺼져 있으면 이 스위치를
+            켜 두어도 알림은 한 건도 나가지 않는다. 눌러 놓고 오지 않는 알림을 기다리는
+            일이 없도록, 켜 둔 사람에게만 그 사실을 알린다. */}
+        {limitNotify && !officialUsage && (
+          <div className="dim setting-note">
+            위의 “계정 공식 사용률 조회”가 꺼져 있어 한도를 판정할 값이 없습니다 — 알림을
+            받으려면 그것도 함께 켜 주세요.
+          </div>
         )}
         {notifySaveFailed && (
           <div className="dim setting-note">
@@ -1309,6 +1380,15 @@ function InfoPanel({ appInfo, platform, skew }) {
           GitHub <Icon name="external" size={13} />
         </a>
       </div>
+
+      {/* 상표·소속 고지. 앱 안에서 이것을 읽을 수 있는 곳은 여기뿐이라(README는 앱 밖),
+          "이 앱은 Anthropic이 만든 것이 아니다"를 화면에서도 한 번은 말해 둔다. */}
+      <p className="info-legal dim">
+        Claude · Claude Code · Clawd는 Anthropic PBC의 상표이자 캐릭터입니다. 이 프로젝트는
+        Anthropic이 만들거나 보증하지 않은 비공식 프로젝트이며, 로컬에 설치된 Claude Code
+        CLI를 구동할 뿐입니다. 번들 폰트·라이브러리의 라이선스는 저장소의
+        THIRD-PARTY-NOTICES.md를 보세요.
+      </p>
     </div>
   );
 }
@@ -1328,7 +1408,7 @@ const FOOT_PANELS = {
     Glyph: StatsIcon,
     body: ({ state, notify }) => (
       <>
-        <UsageStats gu={state.globalUsage} />
+        <UsageStats gu={state.globalUsage} officialUsage={state.officialUsage} />
         <Retrospective notify={notify} />
       </>
     ),
@@ -1778,7 +1858,7 @@ export default function Sidebar({ onCollapse, theme, onSetTheme, shape, onSetSha
       row.status,
       isQuestionRequest(sess?.pendingPermissions?.[0]),
     );
-    // st-* 클래스는 이제 색을 입히지 않지만(마스코트는 공식 색 고정) 상태를 DOM에
+    // st-* 클래스는 이제 색을 입히지 않지만(마스코트 색은 하나로 고정) 상태를 DOM에
     // 남겨 e2e·디버깅이 붙잡을 수 있게 그대로 싣는다.
     const dotCls = `sess-clawd${dot.cls ? ` ${dot.cls}` : ''}`;
     // 연결이 끊기면 마스코트는 상태와 무관하게 졸기(doze)로 바뀐다(clawdMood) — 포즈는
@@ -1906,10 +1986,13 @@ export default function Sidebar({ onCollapse, theme, onSetTheme, shape, onSetSha
     <>
       <aside className="sidebar">
       <div className="sidebar-head">
+        {/* 브랜드 락업 — 워드마크는 이 프로젝트의 이름뿐이다. 남의 제품명을 자기 로고
+            자리에 두지 않는다. "무엇을 구동하는 앱인가"와 상표 고지는 정보 패널
+            (InfoPanel 하단)과 README가 맡는다. 264px 사이드바에 설명 배지를 함께 넣으면
+            말줄임으로 잘려 아무것도 전달하지 못했다. */}
         <div className="brand">
           <Sparkle size={20} />
-          <span className="brand-word">Claude Code</span>
-          <span className="brand-badge">브라우저</span>
+          <span className="brand-word">CC on Browser</span>
         </div>
         <button
           type="button"

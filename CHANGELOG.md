@@ -8,6 +8,80 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
+> 저장소를 공개하기 위한 정리입니다. 눈에 보이는 변화는 셋입니다. **계정 공식 사용률
+> 조회가 옵트인이 되어 기본으로 꺼집니다** — 지금까지는 앱을 켜기만 해도 60초마다 CLI가
+> 저장해 둔 구독 OAuth 토큰으로 api.anthropic.com을 조회했는데, 그 자격증명은 원래
+> Claude Code와 Anthropic 자체 앱을 위한 것이라 서드파티 도구가 대신 쓰는 판단은 사용자가
+> 직접 내려야 한다고 보았습니다. 설정에서 켜면 예전과 똑같이 동작하고, 꺼 두면 로컬 대화
+> 기록 집계만 표시됩니다. 다음으로 **앱 이름이 "CC on Browser"가 됩니다** — Anthropic의
+> 상표 정책이 제품명·로고에 "Claude Code"를 쓰는 것을 금지하기 때문이며, 이 앱이 Claude
+> Code CLI를 구동한다는 설명은 평문으로 그대로 남습니다. 마지막으로 **번들된 폰트와
+> 라이브러리의 라이선스 고지가 추가됩니다** — 빌드가 라이선스 배너를 지운 채 배포되고
+> 있어 THIRD-PARTY-NOTICES.md가 유일한 고지가 되기 때문입니다.
+> (Prepares the repository for public release. Three user-visible changes: official
+> account-usage lookups become opt-in and default to off; the app is renamed to
+> "CC on Browser"; and the bundled fonts and libraries now carry the license notices
+> that minification strips from the shipped bundle.)
+
+### Added
+- **THIRD-PARTY-NOTICES.md** — 번들되는 폰트(Pretendard, Monoplex KR)와 라이브러리
+  (React, marked, DOMPurify, highlight.js, ws)의 저작권 표기와 라이선스 전문. 빌드가
+  minify 과정에서 모든 라이선스 배너를 지우기 때문에, 배포되는 패키지에서는 이 파일이
+  유일한 고지입니다. 폰트 라이선스 전문은 `client/public/licenses/`에도 두어 빌드
+  산출물(`client/dist/licenses/`)과 함께 배포됩니다.
+  (Adds the copyright notices and full license texts that the minified bundle strips.)
+- **계정 공식 사용률 조회 토글** — 설정 → 세션. 기본 꺼짐이고, 켜야만 조회가 나갑니다.
+  한도 알림은 이 값을 재료로 쓰므로, 알림만 켜 두면 안내가 함께 뜹니다.
+  (A settings toggle for official account usage, off by default.)
+- README와 앱 정보 패널에 **상표 고지** — Claude·Claude Code·Clawd가 Anthropic의 것이며
+  이 프로젝트가 비공식임을 밝힙니다.
+  (Trademark notice in both READMEs and the in-app info panel.)
+
+### Changed
+- **계정 공식 사용률은 이제 옵트인입니다(기본 꺼짐).** 관문은 서버에 있습니다 —
+  `/api/usage`가 `?quota=1`을 명시적으로 받았을 때만 자격증명을 읽고 조회합니다.
+  낡은 브라우저 탭이나 직접 두드리는 요청으로는 조회가 일어나지 않고, 켰다가 끈 뒤에는
+  서버 캐시에 남은 값도 돌려주지 않습니다. 끄면 화면의 %도 그 자리에서 사라집니다.
+  (Server-side gate: credentials are read only for an explicitly opted-in request, and
+  cached values are never returned to a request that did not opt in.)
+- **앱 이름이 "CC on Browser"로 바뀌었습니다.** 브라우저 탭 제목, 사이드바 로고, CLI
+  도움말과 기동 배너, Windows 바로가기가 모두 새 이름을 씁니다. npm 패키지 이름
+  (`cc-on-browser`), 명령 이름, 저장소 주소는 그대로입니다. `--shortcut`을 다시 실행하면
+  새 이름의 바로가기를 만들고 **예전 이름의 바로가기는 치웁니다** — 그 바로가기가 우리가
+  만든 것인지 확인한 뒤에만 지웁니다.
+  (Renames the app; `--shortcut` now also removes the old-named shortcut it created.)
+- SECURITY.md가 바깥으로 나가는 요청을 다시 설명합니다 — 기본값은 0이고, 옵트인 둘
+  (공식 사용률·수동 업데이트 확인)이 무엇을 언제 보내는지, 공식 사용률을 켜기 전에
+  무엇을 알아 두어야 하는지 적었습니다.
+  (SECURITY.md now describes both opt-in network paths and what to weigh before enabling.)
+- CI·릴리스 워크플로가 토큰을 덜 흘립니다 — `permissions: contents: read`를 명시하고,
+  체크아웃이 GITHUB_TOKEN을 `.git/config`에 남기지 않도록 `persist-credentials: false`를
+  걸었습니다(포크 PR의 코드가 같은 잡에서 도는 워크플로라 중요합니다).
+  (Least-privilege token settings for the CI and release workflows.)
+- 마스코트 주석과 README가 캐릭터의 출처를 정확히 밝히고, 무드 어휘를 참고한
+  clawd-on-desk(AGPL-3.0)를 출처로 표기합니다.
+  (Accurate provenance for the mascot, plus credit for the mood vocabulary it borrows.)
+
+### Removed
+- 쓰이지 않던 클라이언트 헬퍼 `fetchSessions`·`browseDirs`와 참조되지 않는 `.faint`
+  CSS 규칙. 서버의 `/api/browse` endpoint는 그대로 둡니다 — UI가 쓰지 않더라도 문서에
+  적힌 1.x 릴리스의 표면이라 조용히 없애지 않습니다.
+  (Drops two dead client helpers and an orphan CSS rule; the documented REST endpoint stays.)
+- 에이전트 작업 지시서였던 `docs/superpowers/plans/` 문서 둘과 이미 낡은 UI 스펙 하나.
+  남은 설계 스냅샷은 `docs/specs/`로 옮기고 아카이브임을 문서 머리에 명시했습니다.
+  (Removes stale internal planning docs; the remaining design snapshot moves to docs/specs/.)
+
+### Fixed
+- 공식 사용률을 껐다 켜면 옛 기준선과 비교돼 있지도 않은 한도 알림이 한 번 뜨던 문제.
+  이제 끄는 순간 기준선을 지우므로, 다시 켠 뒤의 첫 값은 기준선으로만 쓰입니다.
+  (Turning official usage off and back on no longer emits a spurious limit notification.)
+- 다른 탭에서 공식 사용률을 끄면 이 탭이 다음 폴링까지 계속 조회하던 문제. 이제
+  `storage` 이벤트로 즉시 따라갑니다.
+  (A toggle in another tab now takes effect immediately in every open tab.)
+- `claude-settings-form.js`에 이스케이프 대신 실제 NUL 바이트가 들어 있어 git과 ripgrep이
+  이 파일을 바이너리로 취급하던 문제 — 코드 리뷰에서 diff가 보이지 않았습니다.
+  (A literal NUL byte made one source file register as binary to git and ripgrep.)
+
 ## [1.11.5] - 2026-09-04
 
 > 사이드바 세션 목록의 **색 점이 작은 CLAW'D로 바뀌었습니다.** 지금까지 세션 상태는 이름

@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Claude Code on Browser">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="CC on Browser">
   <!-- 브라우저 탭 아이콘. Brand.jsx의 Sparkle(10방향 선버스트)과 같은 기하를 정적으로
        고정한 것 — 경로는 그 알고리즘(viewBox 24, 중심 12,12)의 산출물이다.
        탭 바는 밝기가 제각각이라 currentColor 대신 브랜드 색을 박아 둔다:

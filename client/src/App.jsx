@@ -11,7 +11,12 @@ import { shortPath } from './lib/format.js';
 import { sessionDisplayTitle } from './lib/sessionTree.js';
 import { artifactsOf, findArtifact } from './lib/artifacts.js';
 import { normalizeShape } from './lib/ui-shape.js';
-import { readPref, writePref } from './lib/preferences.js';
+import {
+  OFFICIAL_USAGE_KEY,
+  officialUsageEnabled,
+  readPref,
+  writePref,
+} from './lib/preferences.js';
 import { notifyLimitTransitions } from './lib/limit-notify.js';
 import ChatView from './components/ChatView.jsx';
 import Composer from './components/Composer.jsx';
@@ -88,17 +93,27 @@ function Shell() {
   // 응답 도착 순서는 보장되지 않는다. 한 요청이 주기보다 오래 끌면 뒤늦게 온 옛 응답이
   // 새 값을 덮어써 사용률이 뒷걸음질친다(99 → 100 → 99). 아래 한도 알림이 그 뒷걸음을
   // "해제"로 읽어 거짓 알림을 띄우므로(codex 지적), 순번을 붙여 뒤처진 응답은 버린다.
+  //
+  // 계정 공식 사용률(quota)은 옵트인이라 **매 주기 설정을 다시 읽는다** — 설정 모달에서
+  // 켜고 끈 것이 폴링을 다시 걸지 않고도 다음 주기부터 반영되게 하려는 것이다.
+  // 읽은 값은 요청(서버 관문)과 dispatch(화면 이월 여부) 양쪽에 같이 실어, 응답이
+  // 늦게 도착해도 "그 요청이 조회를 시도했는가"가 응답과 함께 따라오게 한다.
   useEffect(() => {
     let alive = true;
     let issued = 0;
     let applied = 0;
+    // 저장소의 옵트인 값을 스토어에 먼저 맞춘다 — 켜 둔 채로 **첫 조회가 실패하면**
+    // set-usage가 영영 오지 않아, 화면이 "켰는데 실패"를 "꺼져 있음"으로 잘못 설명하게
+    // 된다. 값이 같으면 리듀서가 같은 state를 돌려주므로 이 effect가 되풀이되지 않는다.
+    dispatch({ type: 'set-official-usage', on: officialUsageEnabled() });
     const tick = () => {
       const seq = ++issued;
-      return fetchUsage()
+      const quotaEnabled = officialUsageEnabled();
+      return fetchUsage(quotaEnabled)
         .then((usage) => {
           if (!alive || seq <= applied) return;
           applied = seq;
-          dispatch({ type: 'set-usage', usage });
+          dispatch({ type: 'set-usage', usage, quotaEnabled });
         })
         .catch(() => {});
     };
@@ -108,6 +123,24 @@ function Shell() {
       alive = false;
       clearInterval(id);
     };
+    // state.officialUsage에 의존하는 것은 값을 쓰기 위해서가 아니라(tick이 저장소를
+    // 직접 읽는다) **토글 직후 즉시 한 번 더 돌게** 하기 위해서다 — 켜자마자 주기를
+    // 새로 시작해 첫 조회가 바로 나가고, 끄면 quota 없는 응답이 곧바로 자리를 덮는다.
+  }, [dispatch, state.officialUsage]);
+
+  // 다른 탭에서 옵트인을 바꾸면 이 탭도 따라간다. 같은 앱을 두 탭에 띄워 두고 한쪽에서
+  // 끄면, 이 리스너가 없는 탭은 다음 주기까지 계속 조회하고 이미 나간 요청의 응답을
+  // 그대로 반영한다 — 끈 뒤에도 %가 갱신되고 알림까지 뜰 수 있다(codex 지적).
+  // dispatch가 state.officialUsage를 바꾸면 위 폴링 effect가 정리되며 alive=false가 되어
+  // 진행 중이던 응답도 함께 버려진다. storage 이벤트는 **다른** 탭에서만 오므로,
+  // 이 탭 자신의 토글은 Sidebar가 직접 dispatch하는 경로가 담당한다.
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key !== null && e.key !== OFFICIAL_USAGE_KEY) return;
+      dispatch({ type: 'set-official-usage', on: officialUsageEnabled() });
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, [dispatch]);
 
   // 한도 체결·해제 알림 — 위 폴링에 얹혀 간다(새 요청 없음, 토큰 소모 없음).
@@ -117,6 +150,14 @@ function Shell() {
   // 빠진 창이 해제 → 체결로 깜빡인다(store-reducer의 set-usage 주석).
   const prevQuotaRef = useRef(null);
   useEffect(() => {
+    // 옵트인이 꺼져 있으면 알림 자체가 성립하지 않는다(판정 재료가 없다). 이때
+    // **기준선을 지운다** — 남겨 두면 다시 켰을 때 첫 값이 꺼져 있던 동안의 옛 값과
+    // 비교돼, 있지도 않은 체결/해제가 한 번 튄다(codex 지적). 끄는 것은 사용자의
+    // 명시적 선택이므로 "안 보는 동안의 전이"를 나중에 보고할 이유도 없다.
+    if (!state.officialUsage) {
+      prevQuotaRef.current = null;
+      return;
+    }
     const quota = state.globalUsage?.quota ?? null;
     // 조회 실패 구간에는 기준선을 그대로 둔다 — 끊긴 동안 실제로 넘어간 전이를
     // 다음 성공에서 잡아내기 위해서다(기준선을 새로 세우면 그 전이를 놓친다).
@@ -127,7 +168,7 @@ function Shell() {
     // 때마다 같은 알림이 다시 뜬다.
     if (!prev) return;
     notifyLimitTransitions(prev, quota);
-  }, [state.globalUsage]);
+  }, [state.globalUsage, state.officialUsage]);
 
   // ----- 결과물 미리보기 -----
   // 산출물 목록은 상태가 아니라 대화 메시지에서 파생한다(lib/artifacts.js) —

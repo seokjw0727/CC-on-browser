@@ -9,6 +9,9 @@ import { MODES } from './permission-modes.js';
 
 export const DEFAULT_MODEL_KEY = 'ccob-default-model';
 export const DEFAULT_MODE_KEY = 'ccob-default-mode';
+// 계정 공식 사용률 조회의 켬/끔. 다른 기본값들과 성격이 다르다 — 새 세션 모달의
+// 초기 선택값이 아니라, 앱이 이 컴퓨터 밖으로 요청을 내보내도 되는지의 허락이다.
+export const OFFICIAL_USAGE_KEY = 'ccob-official-usage';
 
 // globalThis.localStorage 자체가 throw할 수 있어 getter도 try/catch.
 function defaultStorage() {
@@ -75,4 +78,28 @@ export function loadDefaults(storage = defaultStorage()) {
     model: readPref(DEFAULT_MODEL_KEY, storage) ?? '',
     mode: normalizeMode(readPref(DEFAULT_MODE_KEY, storage)),
   };
+}
+
+/**
+ * 계정 공식 사용률(5h/7d %)을 조회해도 되는가 — **기본값은 꺼짐**이다.
+ *
+ * 켜면 서버가 CLI의 구독 OAuth 토큰(~/.claude/.credentials.json)으로
+ * api.anthropic.com의 사용량 메타데이터 endpoint 하나를 조회한다. 모델 호출이 아니라
+ * 과금은 없지만, 서드파티 도구가 구독 자격증명을 쓰는 것 자체가 사용자가 직접 내려야
+ * 할 판단이므로 기본값으로 켜 두지 않는다(SECURITY.md의 위협 모델 참조).
+ *
+ * 저장소가 막힌 컨텍스트에서는 읽기가 null이라 자동으로 꺼짐이 된다 — 판단할 수 없으면
+ * 나가지 않는 쪽이 안전한 기본값이다.
+ */
+export function officialUsageEnabled(storage) {
+  return readPref(OFFICIAL_USAGE_KEY, storage) === '1';
+}
+
+/**
+ * 켬/끔 저장. 끄면 키를 지운다. 반환값은 "영속에 실제로 성공했는가"다 —
+ * 저장이 막힌 채 스위치만 켜지면 다음 폴링이 다시 꺼짐으로 읽어 조회가 나가지 않으므로,
+ * 호출측은 이 값이 false면 켜진 모습을 보여선 안 된다(한도 알림 토글과 같은 규약).
+ */
+export function setOfficialUsageEnabled(on, storage) {
+  return writePref(OFFICIAL_USAGE_KEY, on ? '1' : '', storage);
 }

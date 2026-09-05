@@ -25,25 +25,22 @@
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   flex: 1;
   min-width: 0;
 }
+/* 워드마크는 접히지 않는다 — 두 줄이 되면 머리글 높이가 흔들리고 접기 버튼이 밀린다.
+   좁아질 때 양보하는 쪽은 옆의 설명 배지다(아래 min-width: 0 + 말줄임). */
 .brand-word {
   font-family: var(--font-serif);
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   letter-spacing: 0.1px;
   color: var(--text);
-}
-.brand-badge {
-  font-size: 10px;
-  color: var(--text-faint);
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  padding: 1px 7px;
   white-space: nowrap;
+  flex: 0 0 auto;
 }
+
 
 .sidebar-inner {
   flex: 1;
@@ -1233,8 +1230,8 @@ select.mode-trust:focus {
 }
 .past-del:hover:not(:disabled) { color: var(--danger); }
 .past-del:disabled { cursor: default; }
-/* 목록 상태 문구 — 사이드바의 .dir-loading/.dir-empty와 별개(들여쓰기가 다르다).
-   .past-status는 role="status" 컨테이너로, 비어 있을 때 자리를 차지하지 않는다. */
+/* 목록 상태 문구 — .past-status는 role="status" 컨테이너로, 비어 있을 때 자리를
+   차지하지 않는다(안내가 없을 때 빈 줄이 생기지 않게). */
 .past-status:empty { display: none; }
 .past-note {
   display: flex;
@@ -1451,7 +1448,7 @@ select.mode-trust:focus {
 }
 /* ----- 세션 상태 표시(미니 CLAW'D) -----
    라이브 행의 유일한 상태 표시다(텍스트 배지 제거, 2026-08-09). 2026-09-04에 색 점을
-   미니 마스코트로 바꿨다 — 상태는 색이 아니라 포즈·모션으로 읽고 색은 공식 CLAW'D
+   미니 마스코트로 바꿨다 — 상태는 색이 아니라 포즈·모션으로 읽고 색은 마스코트
    주황 하나로 고정된다. 프레임·모션은 components/Clawd.jsx의 ClawdMini가, 상태 클래스
    (.st-*)와 보조기술 라벨은 여전히 lib/session-status.js가 소유한다. .st-*는 색을
    입히지 않고 상태를 DOM에 남기는 표식으로만 남는다(e2e·디버깅).
@@ -1753,7 +1750,7 @@ select.mode-trust:focus {
    .composer-mascot의 position: absolute(같은 단일 클래스 특이도 — 번들 순서로
    뒤집히는 함정, f80a0d2의 :focus 회귀와 동일 클래스)를 덮지 않는다. */
 :where(.clawd) { position: relative; }
-/* 공식 색 — CLI 바이너리 테마 실측: clawd_body rgb(215,119,87), 눈은 검정(clawd_background) */
+/* 캐릭터 색 — 몸통 주황과 검정 눈. 두 마스코트(컴포저·사이드바)가 이 한 쌍을 공유한다. */
 .mascot .px-body { fill: var(--clawd-body, #d77757); }
 /* 눈 소켓 — 눈 아래에 깔린 몸통색 백킹. 시선 추적으로 눈이 밀려나도 뒤가 배경이 아닌
    몸통색으로 채워져 "남은 구멍(=유령 눈)"이 안 생긴다(Clawd.jsx FrameSvg 주석 참조). */
@@ -2247,6 +2244,15 @@ select.mode-trust:focus {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+/* 상표·소속 고지 — 앱 안에서 이 문구를 읽을 수 있는 유일한 자리다. 버전 표 위로
+   튀지 않게 작고 흐리게 두되, 구분선으로 "이건 항목이 아니라 고지"임을 알린다. */
+.info-legal {
+  margin: 2px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 11px;
+  line-height: 1.5;
 }
 .info-row {
   display: flex;

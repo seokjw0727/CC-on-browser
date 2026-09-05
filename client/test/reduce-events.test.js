@@ -719,8 +719,7 @@ test('session_id 채택: 재개 프리로드의 원본 id는 CLI가 알려 준 f
 // ----- 모델 전환 확정 대기(modelSwitch) — "바꿔도 적용 안 되고, 입력 없이 바뀐다"의 수정 -----
 // 근거: 실 CLI v2.1.235 stream-json 제어 채널 실측. set_model은 진행 중 턴에서도 약
 // 170ms에 success를 주지만, 전환은 **다음 API 호출**부터 걸리므로 이미 시작된 호출의
-// assistant 이벤트는 이전 모델을 계속 보고한다. 설계 근거:
-// .certify/design/2026-08-23-model-effort-change-desync.html
+// assistant 이벤트는 이전 모델을 계속 보고한다.
 const assistantWithModel = (session, model, extra = {}) =>
   reduceCliEvent(session, {
     type: 'assistant',

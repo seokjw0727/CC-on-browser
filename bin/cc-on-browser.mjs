@@ -29,7 +29,7 @@ const selfPath = fileURLToPath(import.meta.url);
 const pkgRoot = path.resolve(path.dirname(selfPath), '..');
 const pkg = JSON.parse(readFileSync(path.join(pkgRoot, 'package.json'), 'utf8'));
 
-const HELP = `Claude Code on Browser v${pkg.version}
+const HELP = `CC on Browser v${pkg.version}
 Local-only web UI for the claude CLI. Binds to 127.0.0.1 only.
 
 By default the server runs in the background (no console window), opens your
@@ -44,7 +44,7 @@ Options:
   -p, --port <n>   Port to listen on (default: $PORT or 8787)
       --no-open    Do not open a browser or auto-exit; run a plain
                    foreground server until Ctrl+C
-      --shortcut   (Windows) Create a "Claude Code on Browser" shortcut on the
+      --shortcut   (Windows) Create a "CC on Browser" shortcut on the
                    Desktop and in the Start Menu that launches with no console
                    window at all, then exit
   -v, --version    Print the version and exit
@@ -448,9 +448,9 @@ if (!noOpen && !isDaemon) {
       fail(`The background server did not come up on port ${port}.\n`
         + 'Re-run with --no-open to see the underlying error.');
     }
-    console.log(`Claude Code on Browser v${pkg.version} — http://127.0.0.1:${port}/#token=${token}`);
+    console.log(`CC on Browser v${pkg.version} — http://127.0.0.1:${port}/#token=${token}`);
   } else {
-    console.log(`Claude Code on Browser v${pkg.version} — random port; check the browser address bar.`);
+    console.log(`CC on Browser v${pkg.version} — random port; check the browser address bar.`);
   }
   console.log('Opening your browser... The server runs in the background (127.0.0.1 only)');
   console.log('and stops automatically once every tab is closed. (--no-open for a foreground server)');
@@ -552,7 +552,7 @@ if (!noOpen) {
   });
   openBrowser(appUrl(handle.port, handle.token));
 } else {
-  console.log(`Claude Code on Browser v${pkg.version} — http://127.0.0.1:${handle.port}/#token=${handle.token}`);
+  console.log(`CC on Browser v${pkg.version} — http://127.0.0.1:${handle.port}/#token=${handle.token}`);
   console.log('Local-only server (127.0.0.1). Keep this URL private — the token grants access.');
 
   // claude --version 1회 — 세션을 만들지 않으므로 구독을 소모하지 않는다.

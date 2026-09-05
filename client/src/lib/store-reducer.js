@@ -114,6 +114,14 @@ export function createInitialState() {
     toasts: [], // [{id, kind: 'info'|'error', text}] — 설정 변경·오류의 일시 알림(자동 소멸)
     newSessionOpen: false, // 새 세션(레포 선택) 모달 표시 여부 — 진입점은 사이드바뿐
     globalUsage: null, // /api/usage 폴링 결과 — 로컬 5h/7d 집계 + 공식 quota(실패 시 null), 상태줄 표시용
+    // 계정 공식 사용률 조회의 옵트인 상태(localStorage 'ccob-official-usage' 미러).
+    // 리듀서는 순수 유지 — 저장소 읽기/쓰기는 설정 토글과 App.jsx 폴링의 몫이고,
+    // 여기 있는 값은 "지금 화면이 무엇을 근거로 그리고 있는가"의 사본이다.
+    // 기본값 false는 저장된 설정이 없을 때의 진짜 기본값(꺼짐)과 같다. 첫 폴링이
+    // 곧바로 실제 값으로 덮으므로, 켜 둔 사용자가 보는 잘못된 안내는 한 프레임이다.
+    // 이 값이 없으면 화면은 "꺼서 값이 없음"과 "조회에 실패해 값이 없음"을 구분할 수
+    // 없어, 껐을 뿐인데 "조회 실패"라는 오류 문구를 띄우게 된다.
+    officialUsage: false,
     // 디버그 raw 이벤트 표시(사이드바 설정 토글) — localStorage 'ccob-debug' 미러.
     // 리듀서는 순수 유지: localStorage 읽기/쓰기는 store.jsx(초기 동기화·setDebug)의 몫.
     // 토글 dispatch가 store 구독자(ChatView)를 리렌더시켜 Message.jsx의 기존
@@ -511,7 +519,20 @@ export function reducer(state, action) {
       // 같은 부분(partial) quota를 준다(quota.js). Composer는 창별로 폴백하므로, 빠진 창을
       // 직전 값으로 채워 넣는다 — 5h/7d 창 %는 느리게 변하므로 일시/부분 실패에도 링(%)
       // 표시가 유지되고, 원시 토큰 수치로 깜빡이며 뒤바뀌지 않는다(로컬 집계는 새 값 유지).
+      //
+      // 단 그 이월은 **조회를 시도했을 때만** 옳다. 사용자가 설정에서 공식 사용률
+      // 조회를 끄면 서버는 quota=null을 주는데, 그것을 "이번 조회만 실패"로 읽어
+      // 직전 값을 메우면 껐는데도 링과 한도 알림이 옛 %로 계속 살아 있게 된다.
+      // action.quotaEnabled === false는 "조회하지 않았다"는 뜻이므로 이월하지 않고
+      // 즉시 비운다 — 끔은 화면에서도 끔이어야 한다.
       const usage = action.usage;
+      // 응답과 함께 온 "그 요청이 조회를 시도했는가"로 옵트인 사본을 맞춘다 — 토글
+      // 직후 아직 응답이 오지 않은 구간에도 set-official-usage가 먼저 갱신해 둔다.
+      const officialUsage =
+        typeof action.quotaEnabled === 'boolean' ? action.quotaEnabled : state.officialUsage;
+      if (usage && action.quotaEnabled === false) {
+        return { ...state, globalUsage: { ...usage, quota: null }, officialUsage };
+      }
       const prevQuota = state.globalUsage?.quota ?? null;
       let merged = usage;
       if (usage && prevQuota) {
@@ -522,7 +543,20 @@ export function reducer(state, action) {
           merged = { ...usage, quota: { ...(q ?? prevQuota), fiveHour, sevenDay } };
         }
       }
-      return { ...state, globalUsage: merged };
+      return { ...state, globalUsage: merged, officialUsage };
+    }
+    case 'set-official-usage': {
+      // 설정 토글이 즉시 부르는 액션. 폴링(최대 60초)을 기다리지 않고 화면 문구가
+      // 곧바로 바뀌게 하고, 끌 때는 남아 있던 quota를 그 자리에서 비운다 —
+      // 끈 뒤 다음 응답이 올 때까지 옛 %가 링에 남아 있으면 끈 것으로 보이지 않는다.
+      const on = !!action.on;
+      const staleQuota = !on && !!state.globalUsage?.quota;
+      // 바뀔 것이 없으면 **같은 state 객체를 그대로** 돌려준다. App.jsx의 폴링 effect가
+      // state.officialUsage에 의존하면서 마운트 때 이 액션으로 저장소와 동기화하는데,
+      // 매번 새 객체를 만들면 리렌더 → effect 재실행 → 다시 dispatch의 무한 루프가 된다.
+      if (on === state.officialUsage && !staleQuota) return state;
+      const globalUsage = staleQuota ? { ...state.globalUsage, quota: null } : state.globalUsage;
+      return { ...state, officialUsage: on, globalUsage };
     }
     case 'update-session':
       return updateSession(state, action.key, action.fn);

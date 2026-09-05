@@ -1,8 +1,11 @@
 // quota.js — 계정의 공식 사용률(5h/7d %) 조회.
-// 사용자 승인 예외(2026-07-10): CLI의 구독 OAuth 토큰(~/.claude/.credentials.json)으로
-// api.anthropic.com의 사용량 메타데이터 endpoint 하나만 GET한다 — 모델 호출이 아니며
-// 과금이 없다(/usage 패널과 동일한 수치). 토큰은 이 모듈 밖으로 내보내지 않고,
-// 응답에는 사용량 수치만 있다. 실패(파일 없음·만료·네트워크·비2xx)는 전부 null.
+//
+// **기본값은 꺼짐이다.** 이 모듈은 /api/usage가 `?quota=1` 옵트인을 받았을 때만 호출된다
+// (server.js의 관문). 사용자가 설정에서 켜지 않으면 자격증명 파일을 읽지도, 바깥으로
+// 나가지도 않는다. 켠 경우 CLI가 이미 저장해 둔 구독 OAuth 토큰으로 사용량 메타데이터
+// endpoint 하나만 GET한다 — 모델 호출이 아니라 과금이 없고, 받는 것은 사용률 수치뿐이다.
+// 토큰은 이 모듈 밖으로 나가지 않으며, 실패(파일 없음·만료·네트워크·비2xx)는 전부 null이다.
+// 이 기능이 무엇을 하고 사용자가 무엇을 감수하는지는 SECURITY.md에 적어 두었다.
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -32,8 +35,9 @@ async function readAccessToken(credentialsPath) {
   return oauth.accessToken;
 }
 
-// 실측 응답(2026-07-10, 200 OK): { five_hour: {utilization: 46.0, resets_at: ISO, ...},
-//                                  seven_day: {utilization: 28.0, resets_at: ISO, ...}, ... }
+// 응답 형상: { five_hour: { utilization, resets_at, ... }, seven_day: { ... }, ... }
+// utilization은 퍼센트 숫자, resets_at은 ISO 문자열이다. 둘 중 하나라도 기대한 형태가
+// 아니면 그 창을 null로 접는다 — 그 판정을 아래 windowInfo 하나가 맡는다.
 function windowInfo(w) {
   if (!w || typeof w !== 'object') return null;
   const utilization = Number(w.utilization);

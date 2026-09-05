@@ -231,7 +231,7 @@ export function optionsWithCurrent(options, current) {
 
 // select에서 "(설정 안 함)"이 쓸 값. 빈 문자열을 쓰면 `"effortLevel": ""`처럼 실제로
 // 빈 문자열이 들어 있는 파일과 구분되지 않는다(고르지도 않았는데 키가 지워진다).
-export const UNSET_OPTION = ' unset';
+export const UNSET_OPTION = '\u0000unset';
 
 /** 폼이 다루지 않는 최상위 키들 — "JSON 탭에서 편집" 안내용. */
 export function unknownTopKeys(text) {

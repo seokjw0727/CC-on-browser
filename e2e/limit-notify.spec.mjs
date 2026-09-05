@@ -32,24 +32,46 @@ const zeroWindow = {
 /**
  * /api/usage를 테스트가 쥔다. 돌려주는 setter로 사용률을 바꾸면 다음 폴링부터 반영된다.
  * fetchedAt/resetsAt은 고정값이다 — 시계를 앞당기므로 Date.now()에 기대면 안 된다.
+ *
+ * 스텁은 진짜 서버처럼 **`?quota=1`이 붙었을 때만** quota를 싣는다(server.js의 옵트인
+ * 관문). 무조건 실어 주면 클라이언트가 플래그를 보내지 않게 되어도 테스트가 통과해,
+ * 정작 지켜야 할 계약("끄면 조회하지 않는다")을 이 스위트가 놓친다.
  */
 async function stubUsage(page, initial) {
   const util = { five: initial.five, seven: initial.seven };
   await page.route('**/api/usage*', async (route) => {
+    const wantQuota = new URL(route.request().url()).searchParams.get('quota') === '1';
     await route.fulfill({
       json: {
         now: 1_700_000_000_000,
         fiveHour: { ...zeroWindow },
         sevenDay: { ...zeroWindow },
-        quota: {
-          fiveHour: { utilization: util.five, resetsAt: 1_700_003_600_000 },
-          sevenDay: { utilization: util.seven, resetsAt: 1_700_600_000_000 },
-          fetchedAt: 1_700_000_000_000,
-        },
+        quota: wantQuota
+          ? {
+              fiveHour: { utilization: util.five, resetsAt: 1_700_003_600_000 },
+              sevenDay: { utilization: util.seven, resetsAt: 1_700_600_000_000 },
+              fetchedAt: 1_700_000_000_000,
+            }
+          : null,
       },
     });
   });
   return (next) => Object.assign(util, next);
+}
+
+/**
+ * 계정 공식 사용률 조회를 켜 둔 상태로 앱을 띄운다 — 한도 알림의 재료가 그 값뿐이라,
+ * 켜지 않으면 아래 알림 테스트들이 "알림이 안 온다"를 잘못된 이유로 통과한다.
+ * 내비게이션 전에 심어야 첫 폴링부터 켜진 상태다.
+ */
+async function enableOfficialUsage(page) {
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('ccob-official-usage', '1');
+    } catch {
+      /* 차단 컨텍스트는 이 스위트의 관심사가 아니다 */
+    }
+  });
 }
 
 /**
@@ -96,6 +118,7 @@ async function openSessionSettings(page) {
 
 test('설정 — 한도 알림은 기본 꺼짐이고, 켜면 새로고침 뒤에도 남는다', async ({ page }) => {
   await captureNotifications(page);
+  await enableOfficialUsage(page);
   await stubUsage(page, { five: 10, seven: 10 });
   await page.goto(servers.echo.url);
 
@@ -122,6 +145,7 @@ test('설정 — 한도 알림은 기본 꺼짐이고, 켜면 새로고침 뒤�
 
 test('알림 — 5시간 창이 100%에 닿으면 뜨고, 풀리면 해제 알림이 뜬다', async ({ page }) => {
   await captureNotifications(page);
+  await enableOfficialUsage(page);
   await page.clock.install();
   const setUtil = await stubUsage(page, { five: 97, seven: 20 });
   await page.goto(servers.echo.url);
@@ -158,6 +182,7 @@ test('알림 — 5시간 창이 100%에 닿으면 뜨고, 풀리면 해제 알�
 
 test('알림 — 설정이 꺼져 있으면 한도에 닿아도 오지 않는다', async ({ page }) => {
   await captureNotifications(page);
+  await enableOfficialUsage(page);
   await page.clock.install();
   const setUtil = await stubUsage(page, { five: 97, seven: 20 });
   await page.goto(servers.echo.url);
@@ -174,6 +199,7 @@ test('권한 프롬프트를 닫으면 안내와 재요청 버튼이 뜨고, 허
   // 켜져 있고 토글은 '꺼짐 → 켜짐'에서만 권한을 물으므로, 재요청 경로가 없으면 이 조합은
   // 영구히 무음이 된다 — 적대적 리뷰가 유일하게 확인한 결함이 이것이었다.
   await captureNotifications(page, 'default', ['default', 'granted']);
+  await enableOfficialUsage(page);
   await page.clock.install();
   const setUtil = await stubUsage(page, { five: 97, seven: 20 });
   await page.goto(servers.echo.url);
@@ -204,6 +230,7 @@ test('권한 프롬프트를 닫으면 안내와 재요청 버튼이 뜨고, 허
 
 test('알림 — 권한이 없으면 설정을 켜도 발송하지 않는다', async ({ page }) => {
   await captureNotifications(page, 'denied');
+  await enableOfficialUsage(page);
   await page.clock.install();
   const setUtil = await stubUsage(page, { five: 97, seven: 20 });
   await page.goto(servers.echo.url);
@@ -220,4 +247,91 @@ test('알림 — 권한이 없으면 설정을 켜도 발송하지 않는다', a
   await page.clock.fastForward(POLL_MS + 1_000);
   await page.clock.fastForward(POLL_MS + 1_000);
   expect(await readSent(page)).toEqual([]);
+});
+
+// 이 앱에서 유일하게 컴퓨터 밖으로 나가는 정기 조회의 관문. 단위 테스트가 서버의
+// `?quota=1` 게이트와 리듀서 규칙을 각각 고정하지만, "설정을 켜기 전에는 브라우저가
+// 그 플래그를 아예 보내지 않는다"는 화면에서만 증명된다.
+test('설정 — 공식 사용률 조회는 기본 꺼짐이고, 켜야 quota 요청이 나간다', async ({ page }) => {
+  await captureNotifications(page);
+  // enableOfficialUsage를 일부러 부르지 않는다 — 공장 기본값 그대로의 첫 실행이다.
+  const setUtil = await stubUsage(page, { five: 88, seven: 33 });
+
+  const quotaFlags = [];
+  page.on('request', (req) => {
+    const u = new URL(req.url());
+    if (u.pathname === '/api/usage') quotaFlags.push(u.searchParams.get('quota'));
+  });
+
+  await page.goto(servers.echo.url);
+
+  const modal = await openSessionSettings(page);
+  const toggle = modal.getByRole('switch', { name: '계정 공식 사용률 조회' });
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  // 켜기 전에 무엇이 나가는지 토글 옆에서 읽을 수 있어야 한다(툴팁에만 두지 않는다).
+  await expect(modal.getByText(/켜면 api\.anthropic\.com 조회/)).toBeVisible();
+
+  // 첫 폴링은 이미 나갔다 — 그 어느 것도 조회를 켜지 않았다.
+  await expect.poll(() => quotaFlags.length).toBeGreaterThan(0);
+  expect(quotaFlags.every((q) => q === null)).toBe(true);
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  expect(await page.evaluate(() => localStorage.getItem('ccob-official-usage'))).toBe('1');
+
+  // 켜는 즉시(폴링 60초를 기다리지 않고) 조회가 나간다.
+  await expect.poll(() => quotaFlags.filter((q) => q === '1').length).toBeGreaterThan(0);
+  // 그리고 그때부터 상태줄에 공식 %가 뜬다.
+  await expect(page.getByRole('img', { name: /^5h \d+%$/ })).toBeVisible();
+
+  // 다시 끄면 저장 흔적도, 화면의 %도 함께 사라진다 — 끔이 화면에서도 끔이어야 한다.
+  setUtil({ five: 91 });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  expect(await page.evaluate(() => localStorage.getItem('ccob-official-usage'))).toBeNull();
+  await expect(page.getByRole('img', { name: /^5h \d+%$/ })).toHaveCount(0);
+});
+
+// codex 리뷰가 잡은 회귀. 껐다 켜면 기준선이 남아 있어, 다시 켠 첫 값이 "꺼져 있던
+// 동안의 옛 값"과 비교되며 있지도 않은 해제 알림이 한 번 튀었다.
+test('알림 — 공식 사용률을 껐다 켜도 옛 기준선으로 헛알림이 뜨지 않는다', async ({ page }) => {
+  await captureNotifications(page);
+  await enableOfficialUsage(page);
+  await page.clock.install();
+  const setUtil = await stubUsage(page, { five: 97, seven: 20 });
+  await page.goto(servers.echo.url);
+
+  const modal = await openSessionSettings(page);
+  await modal.getByRole('switch', { name: '사용량 한도 알림' }).click();
+
+  // 한도에 닿아 한 건 알린다 — 기준선이 100%로 선다.
+  setUtil({ five: 100 });
+  await page.clock.fastForward(POLL_MS + 1_000);
+  await expect.poll(() => readSent(page)).toHaveLength(1);
+
+  // 공식 사용률 조회를 끈다. 화면의 %도 사라진다.
+  const usageToggle = modal.getByRole('switch', { name: '계정 공식 사용률 조회' });
+  await usageToggle.click();
+  await expect(usageToggle).toHaveAttribute('aria-checked', 'false');
+  await expect(page.getByRole('img', { name: /^5h \d+%$/ })).toHaveCount(0);
+
+  // 꺼져 있는 동안 실제 사용률은 풀렸다(100 → 2). 이 전이는 우리가 보지 않은 것이다.
+  setUtil({ five: 2 });
+  await page.clock.fastForward(POLL_MS + 1_000);
+  expect(await readSent(page)).toHaveLength(1);
+
+  // 다시 켠다 — 첫 값은 기준선일 뿐이어야 한다. 옛 100%와 비교해 '해제'를 띄우면 회귀다.
+  await usageToggle.click();
+  await expect(usageToggle).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('img', { name: /^5h \d+%$/ })).toBeVisible();
+  await page.clock.fastForward(POLL_MS + 1_000);
+  expect(await readSent(page)).toHaveLength(1);
+
+  // 그리고 켜 둔 상태에서 새로 넘어가는 전이는 정상적으로 잡힌다.
+  setUtil({ five: 100 });
+  await page.clock.fastForward(POLL_MS + 1_000);
+  await expect.poll(() => readSent(page)).toHaveLength(2);
+  const [, second] = await readSent(page);
+  expect(second.title).toBe('5시간 사용량 한도 도달');
 });

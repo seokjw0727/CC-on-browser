@@ -10,8 +10,11 @@ import {
   DEFAULT_MODEL_KEY,
   loadDefaults,
   normalizeMode,
+  OFFICIAL_USAGE_KEY,
+  officialUsageEnabled,
   readPref,
   resolveDefaultModel,
+  setOfficialUsageEnabled,
   writePref,
 } from '../src/lib/preferences.js';
 
@@ -142,4 +145,32 @@ test('loadDefaults: 저장된 묶음을 정규화해 돌려준다', () => {
   // 차단 컨텍스트 — 공장 기본값
   assert.deepEqual(loadDefaults(throwingStorage), { model: '', mode: 'default' });
   assert.deepEqual(loadDefaults(null), { model: '', mode: 'default' });
+});
+
+// 계정 공식 사용률 조회의 옵트인. 이 앱에서 유일하게 컴퓨터 밖으로 나가는 정기 조회의
+// 허락이라, "판단할 수 없으면 나가지 않는다"가 기본값이어야 한다.
+test('officialUsageEnabled: 저장된 값이 없거나 읽을 수 없으면 꺼짐이다', () => {
+  assert.equal(officialUsageEnabled(fakeStorage()), false, '기본값은 꺼짐');
+  assert.equal(officialUsageEnabled(throwingStorage), false, '차단 컨텍스트도 꺼짐');
+  assert.equal(officialUsageEnabled(null), false, 'storage 자체가 없어도 꺼짐');
+  // '1'만 켬으로 친다 — 손댄 값·구버전 문자열이 조회를 켜지 못한다.
+  assert.equal(officialUsageEnabled(fakeStorage({ [OFFICIAL_USAGE_KEY]: '1' })), true);
+  assert.equal(officialUsageEnabled(fakeStorage({ [OFFICIAL_USAGE_KEY]: 'true' })), false);
+  assert.equal(officialUsageEnabled(fakeStorage({ [OFFICIAL_USAGE_KEY]: '0' })), false);
+});
+
+test('setOfficialUsageEnabled: 끄면 키를 지우고, 저장 실패는 false로 알린다', () => {
+  const s = fakeStorage();
+  assert.equal(setOfficialUsageEnabled(true, s), true);
+  assert.equal(s._map.get(OFFICIAL_USAGE_KEY), '1');
+  assert.equal(officialUsageEnabled(s), true);
+
+  assert.equal(setOfficialUsageEnabled(false, s), true);
+  assert.equal(s._map.has(OFFICIAL_USAGE_KEY), false, '끄면 키를 남기지 않는다');
+  assert.equal(officialUsageEnabled(s), false);
+
+  // 저장이 막히면 켜졌다고 보고하지 않는다 — 폴링은 매 주기 저장소를 다시 읽으므로,
+  // 저장되지 않은 켬은 화면에서만 켜진 거짓말이 된다.
+  assert.equal(setOfficialUsageEnabled(true, throwingStorage), false);
+  assert.equal(setOfficialUsageEnabled(true, null), false);
 });

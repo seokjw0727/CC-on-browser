@@ -56,7 +56,6 @@ test('권한 모드 변경 로직이 컴포저에 남아 있지 않다', () => {
 });
 
 // ----- 마운트 위치: 메인 우측 상단 → 입력 상자 안쪽 우측 상단 (사용자 요청, 2026-08-31)
-// 설계 근거: .certify/design/2026-08-31-perm-mode-into-composer.html
 test('Composer가 입력 상자(.composer-input) 안에 이 컴포넌트를 마운트한다', () => {
   assert.match(composer, /import PermissionModeBar from '\.\/PermissionModeBar\.jsx';/);
   // 셸이 아니라 **입력 상자** 안이어야 한다 — 셸 최상단은 GOAL 배지·인터럽트 복구 바가
@@ -145,8 +144,7 @@ test('인라인 셀렉트의 절대 위치는 .composer-input으로 한정해 �
 // 이 계약이 이번 수정의 핵심이다: 예전 changeModel은 소켓 write가 성공하면 곧바로
 // session.model/spawnModel을 바꿨고, CLI가 그 모델을 거부해도 화면만 새 모델로 남았다.
 // e2e 해피패스는 낙관 갱신을 되살려도 그대로 통과하므로(둘 다 끝에는 Sonnet이 보인다)
-// 그 회귀를 잡는 그물이 여기뿐이다. 설계 근거:
-// .certify/design/2026-08-23-model-effort-change-desync.html
+// 그 회귀를 잡는 그물이 여기뿐이다.
 test('모델 변경은 ack를 기다린다 — 표시 갱신을 낙관적으로 하지 않는다', () => {
   // 전송 결과가 아니라 store.setModel의 **결론**을 기다린다.
   assert.match(composer, /const outcome = await setModel\(key, model\);/);

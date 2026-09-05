@@ -120,7 +120,8 @@ test('updateMessage — 네 갈래가 서로 다르고 undefined/null이 새지 
 });
 
 test('업데이트 확인은 자동으로 나가지 않는다 (배선 가드)', () => {
-  // 이 앱에서 사용자 조작 없이 나가는 외부 요청은 quota 폴링뿐이어야 한다.
+  // 이 앱에서 사용자 조작 없이 바깥으로 나가는 요청은 하나도 없어야 한다
+  // (공식 사용률 조회도 설정에서 켜야 나간다 — server.js의 ?quota=1 관문).
   // UpdateTab에 useEffect 한 줄이 슬쩍 들어오면 설정 모달을 여는 것만으로 외부에
   // 신호가 나가기 시작하므로, 소스 텍스트로 못박는다(app-version.test.js 선례).
   const sidebar = readFileSync(join(__dirname, '..', 'src', 'components', 'Sidebar.jsx'), 'utf8');

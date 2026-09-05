@@ -884,7 +884,7 @@ describe('collectBranch (실제 git repo)', { skip: gitAvailable ? false : 'git 
   test('collectWorktrees와 같은 브랜치를 말한다', async () => {
     // 두 창구가 어긋나면 칩과 패널이 같은 저장소를 두고 다른 말을 한다.
     // cwd↔worktree 대응은 프로덕션과 같은 함수로 짓는다 — 문자열 비교로 하면 이 판정이
-    // Windows의 8.3 단축 경로(os.tmpdir()이 돌려주는 USERNA~1)에서 헛돈다.
+    // Windows의 8.3 단축 경로(os.tmpdir()이 돌려줄 수 있는 형태)에서 헛돈다.
     for (const cwd of [main, linked]) {
       const [light, full] = await Promise.all([collectBranch(cwd), collectWorktrees(cwd)]);
       const i = assignToWorktree(full.worktrees, cwd);

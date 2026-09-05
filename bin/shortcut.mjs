@@ -12,13 +12,19 @@
 //
 // 바로가기 생성은 PowerShell의 WScript.Shell COM(CreateShortcut)으로 한다. .lnk 포맷을
 // 직접 쓰지 않는 유일한 표준 경로다. 대상 폴더는 하드코딩하지 않고 셸 폴더 API로
-// 해석한다 — 바탕화면이 OneDrive로 리다이렉트된 환경에서도 맞아야 한다.
+// 해석한다 — 바탕화면이 OneDrive로 리다이렉트된 환경에서도 맞아야 하기 때문이다.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-export const SHORTCUT_NAME = 'Claude Code on Browser';
+export const SHORTCUT_NAME = 'CC on Browser';
+/**
+ * v1.11.5까지 쓰던 바로가기 이름. 이 이름의 .lnk가 남아 있으면 새로 만든 뒤 지운다 —
+ * 개명 후 --shortcut을 다시 실행한 사용자의 바탕화면에 같은 일을 하는 바로가기가 둘
+ * 남지 않게 하려는 것이다. 우리가 만든 것(인수에 우리 .vbs 경로가 있는 것)만 건드린다.
+ */
+export const LEGACY_SHORTCUT_NAME = 'Claude Code on Browser';
 /** 바로가기를 놓는 위치 — 하나만 성공해도 부분 성공으로 보고한다. */
 export const SHORTCUT_TARGETS = ['Desktop', 'StartMenu'];
 
@@ -48,12 +54,14 @@ function psScript({ vbsPath, nodeExe, version }) {
   return `$ErrorActionPreference = 'Stop'
 $wsh = New-Object -ComObject WScript.Shell
 $name = ${q(`${SHORTCUT_NAME}.lnk`)}
+$legacyName = ${q(`${LEGACY_SHORTCUT_NAME}.lnk`)}
+$vbsPath = ${q(vbsPath)}
 $targets = @(
   @{ name = 'Desktop';   dir = [Environment]::GetFolderPath('Desktop') },
   @{ name = 'StartMenu'; dir = [Environment]::GetFolderPath('Programs') }
 )
 foreach ($t in $targets) {
-  $out = @{ name = $t.name; ok = $false; path = ''; error = '' }
+  $out = @{ name = $t.name; ok = $false; path = ''; error = ''; removedLegacy = '' }
   try {
     if ([string]::IsNullOrEmpty($t.dir) -or -not (Test-Path -LiteralPath $t.dir)) {
       throw 'shell folder not found'
@@ -64,10 +72,23 @@ foreach ($t in $targets) {
     $sc.Arguments = ${q(args)}
     $sc.WorkingDirectory = $HOME
     $sc.IconLocation = ${q(`${nodeExe},0`)}
-    $sc.Description = ${q(`Claude Code on Browser v${version} (no console window)`)}
+    $sc.Description = ${q(`${SHORTCUT_NAME} v${version} (no console window)`)}
     $sc.Save()
     $out.ok = $true
     $out.path = $lnk
+    # 개명 전 이름의 바로가기 정리. 인수에 우리 .vbs 경로가 들어 있는 것만 지운다 —
+    # 우연히 같은 이름을 쓰는 남의 바로가기를 지우지 않기 위해서다. 실패는 삼킨다:
+    # 정리는 부가 작업이라, 여기서 던지면 이미 성공한 생성이 실패로 보고된다.
+    try {
+      $legacy = Join-Path $t.dir $legacyName
+      if ((Test-Path -LiteralPath $legacy) -and ($legacy -ne $lnk)) {
+        $old = $wsh.CreateShortcut($legacy)
+        if ($old.Arguments -and $old.Arguments.Contains($vbsPath)) {
+          Remove-Item -LiteralPath $legacy -Force
+          $out.removedLegacy = $legacy
+        }
+      }
+    } catch { }
   } catch {
     $out.error = $_.Exception.Message
   }
@@ -190,6 +211,8 @@ export async function runShortcutCommand({
   for (const r of results) {
     if (r.ok) log(`  created  ${r.name.padEnd(9)} ${r.path}`);
     else logError(`  FAILED   ${r.name.padEnd(9)} ${r.error || 'unknown error'}`);
+    // 개명 전 바로가기를 치웠으면 말해 준다 — 말없이 사라지면 잃어버린 줄 안다.
+    if (r.removedLegacy) log(`  removed  ${'(old name)'.padEnd(9)} ${r.removedLegacy}`);
   }
   // 일부만 성공해도 0으로 끝내되(쓸 수 있는 바로가기가 생겼다), 프로세스 오류는 남긴다.
   if (ok.length < results.length && processError) logError(processError);

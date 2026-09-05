@@ -2,7 +2,7 @@
 //
 // 'ultracode'는 UI 최상위 티어다 — 실제 claude CLI의 --effort는 low|medium|high|
 // xhigh|max만 받는다(claude --help 실측). CLI 자신의 `/effort ultracode`는 이를
-// **effortLevel 'xhigh' + ultracode 플래그**로 보내므로(v2.1.233 바이너리 실측),
+// **effortLevel 'xhigh' + ultracode 플래그**로 보내므로(v2.1.233 동작 관찰),
 // 우리도 같은 의미로 매핑한다: effortSettings()가 그 단일 출처다.
 // ultracode는 워크플로 지원 계정·xhigh 지원 모델을 요구하므로, 미지원 환경에서는
 // 실효가 '매우 높음'(xhigh)에 머문다.

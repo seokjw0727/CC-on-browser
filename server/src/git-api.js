@@ -304,7 +304,7 @@ export function layoutCommits(commits) {
  *
  * realpath가 반드시 먼저다. 비교 대상 두 경로의 출처가 다르기 때문이다: worktree 경로는
  * git이 준 실제 경로이고, 세션 cwd는 사용자가 입력했거나 OS가 준 철자다. Windows에서는
- * 후자가 8.3 단축 이름(USERNA~1)일 수 있고, 어느 쪽이든 심볼릭 링크·junction일 수 있어
+ * 후자가 8.3 단축 이름(예: LONGNA~1)일 수 있고, 어느 쪽이든 심볼릭 링크·junction일 수 있어
  * 문자열만으로는 같은 디렉터리를 같다고 판정하지 못한다. remote-control.js의
  * canonicalCwdSync가 같은 이유로 같은 처방을 쓴다.
  *

@@ -2,7 +2,7 @@
 // 백그라운드 항목의 계약은 추측이 아니라 실측이다(2026-07-30, 실 CLI v2.1.220):
 //   system/background_tasks_changed { tasks: [{task_id, task_type, description}] }
 //   system/task_started            { task_id, tool_use_id, ... }
-// 근거·원시 캡처: .certify/design/2026-07-30-remote-control-running-dock-timestamps.html §3.2
+// 위 형식은 CLI v2.1.220~2.1.233에서 실제 스트림을 관찰해 확인한 것이다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openWork, workDetail } from '../src/lib/running-work.js';

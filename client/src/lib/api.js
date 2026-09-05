@@ -37,10 +37,6 @@ export const pickDirectory = (initialPath = '') =>
 /** @returns {Promise<[{dirName, cwd, sessionCount, lastModified}]>} */
 export const fetchProjects = () => get('/api/projects');
 
-/** @returns {Promise<[{sessionId, title, mtime, fileSize}]>} */
-export const fetchSessions = (dirName) =>
-  get(`/api/sessions?dir=${encodeURIComponent(dirName)}`);
-
 /**
  * @returns {Promise<Array<{dirName, cwd, sessionId, title, mtime, fileSize}>>}
  * 전 프로젝트 최근 세션. fileSize = 트랜스크립트 .jsonl 바이트(대화 크기 표시용).
@@ -65,10 +61,6 @@ export const fetchTranscript = (dirName, sessionId) =>
   get(
     `/api/transcript?dir=${encodeURIComponent(dirName)}&sessionId=${encodeURIComponent(sessionId)}`,
   );
-
-/** @returns {Promise<{path, parent, dirs: string[]}>} 빈 문자열이면 드라이브 목록 */
-export const browseDirs = (absPath = '') =>
-  get(`/api/browse?path=${encodeURIComponent(absPath)}`);
 
 /**
  * @ 파일 태그 자동완성 — cwd 하위 파일을 질의로 검색해 상대경로 목록을 반환.
@@ -124,10 +116,16 @@ export const fetchPreviewTicket = (key, absPath) =>
   get(`/api/preview-ticket?key=${encodeURIComponent(key)}&path=${encodeURIComponent(absPath)}`);
 
 /**
+ * @param {boolean} officialQuota 계정 공식 사용률까지 조회할지 — 설정의 옵트인 값이다.
+ *   기본값 false로 두는 것이 이 함수의 계약이다: 부르는 쪽이 명시적으로 켜야만
+ *   서버가 CLI의 OAuth 토큰으로 api.anthropic.com에 나간다(server.js의 `?quota=1` 관문).
  * @returns {Promise<{now, fiveHour, sevenDay, quota}>}
- * 로컬 트랜스크립트 집계(5h/7d) + 계정 공식 사용률 quota({fiveHour,sevenDay} — 실패 시 null)
+ * 로컬 트랜스크립트 집계(5h/7d) + 계정 공식 사용률 quota({fiveHour,sevenDay}).
+ * quota는 옵트인이 꺼져 있거나 조회에 실패하면 null이다 — 둘의 구분은 서버가 아니라
+ * 설정을 아는 클라이언트의 몫이다(store-reducer의 set-usage 참조).
  */
-export const fetchUsage = () => get('/api/usage');
+export const fetchUsage = (officialQuota = false) =>
+  get(`/api/usage${officialQuota ? '?quota=1' : ''}`);
 
 /**
  * 사이드바 "돌아보기" 잔디용 일별 집계 — 섹션이 열릴 때 1회 호출하고

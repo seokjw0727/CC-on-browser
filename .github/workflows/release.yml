@@ -63,6 +63,10 @@ jobs:
         with:
           # dry-run(태그 미지정)은 디스패치된 브랜치를, 그 외에는 대상 태그를 체크아웃.
           ref: ${{ steps.cfg.outputs.tag || github.ref }}
+          # 체크아웃이 GITHUB_TOKEN을 .git/config에 남기면, 뒤따르는 npm ci·빌드·E2E가
+          # (수백 개의 전이 의존성과 함께) 쓰기 권한 토큰을 읽을 수 있다. 릴리스가
+          # 실제로 토큰을 쓰는 곳은 gh CLI 단계뿐이고 그쪽은 env로 따로 받는다.
+          persist-credentials: false
 
       - uses: actions/setup-node@v5
         with:

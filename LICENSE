@@ -19,3 +19,26 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+Scope of the above license
+
+The MIT license above applies to this project's own source code. It does not and
+cannot relicense third-party material that is redistributed with it:
+
+  * Fonts under client/src/fonts/ (and client/dist/assets/ in the published
+    package) are licensed under the SIL Open Font License 1.1 by their own
+    copyright holders. See client/public/licenses/OFL-Pretendard.txt and
+    client/public/licenses/OFL-MonoplexKR.txt.
+
+  * Libraries compiled into the browser bundle shipped in client/dist/ —
+    React, React DOM, Scheduler, marked, DOMPurify and highlight.js — remain
+    under their own licenses (MIT, Apache-2.0 and BSD-3-Clause).
+
+  * "Claude", "Claude Code" and "Anthropic" are trademarks of Anthropic, PBC,
+    and the Clawd mascot character belongs to Anthropic. This project is not
+    affiliated with, endorsed by, or sponsored by Anthropic. No trademark
+    rights are granted by this license.
+
+Full notices, copyright lines and license texts: THIRD-PARTY-NOTICES.md

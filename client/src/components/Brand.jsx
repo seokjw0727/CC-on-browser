@@ -1,5 +1,6 @@
 // 자기완결형 브랜드 SVG — 외부 폰트/이미지 의존 없음(로컬 앱 CSP 안전).
-// Sparkle: Claude 스타일 선버스트 스파크. Mascot: CLAW'D 실루엣(단색 문맥용).
+// Sparkle: 이 프로젝트의 마크 — 8방향 선버스트를 코드로 그린다(아래 루프가 유일한
+// 정의이며 옮겨 온 자산이 아니다). Mascot: 마스코트 실루엣(단색 문맥용).
 import { CLAWD_FRAMES } from '../lib/clawd.js';
 import { FrameSvg } from './Clawd.jsx';
 

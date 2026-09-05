@@ -1,5 +1,5 @@
 // server.js — HTTP(REST + 정적 서빙) + WebSocket 허브. 127.0.0.1 전용.
-// WS/REST 스키마: docs/superpowers/plans/2026-07-06-claude-code-on-browser.md "WS 프로토콜" 절.
+// WS/REST 스키마: docs/specs/2026-07-06-claude-code-on-browser-design.md §4.2(WS 프로토콜).
 import http from 'node:http';
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -40,10 +40,10 @@ const QUOTA_CACHE_MS = 60_000;
 const DAILY_CACHE_MS = 5 * 60_000;
 // --effort 허용값 (claude --help 실측)
 const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
-// npm 레지스트리의 dist-tag 'latest' 문서. 서버가 내는 **두 번째** 외부 요청이다 —
-// 다른 하나는 quota.js의 api.anthropic.com 사용률 조회로, 그쪽은 /api/usage 폴링을
-// 타고 자동으로 나간다. 이쪽은 사용자가 버튼을 눌렀을 때만 나가는 유일한 요청이며,
-// 보내는 것은 이 URL의 GET 한 줄뿐이다(토큰·세션·경로·설치 식별자를 싣지 않는다).
+// npm 레지스트리의 dist-tag 'latest' 문서. 서버가 바깥으로 내는 요청은 둘뿐이고
+// **둘 다 사용자가 켜거나 눌러야만** 나간다: 이쪽(설정 → 업데이트 버튼)과
+// quota.js의 사용률 조회(설정 토글, 기본 꺼짐 — /api/usage의 ?quota=1 관문).
+// 이 요청이 보내는 것은 이 URL의 GET 한 줄뿐이다(토큰·세션·경로·설치 식별자를 싣지 않는다).
 const REGISTRY_LATEST_URL = 'https://registry.npmjs.org/cc-on-browser/latest';
 // 사용자가 버튼을 누르고 기다리는 전경 요청이라 quota(4s)보다 살짝 길게 잡되,
 // 행 걸린 네트워크가 설정 모달을 붙잡지 않도록 상한은 반드시 둔다.
@@ -960,6 +960,14 @@ export async function startServer({
           json(res, 200, await pickDir({ initialPath: url.searchParams.get('path') || undefined }));
           return;
         case '/api/usage': {
+          // 계정 공식 사용률(quota)은 **옵트인**이다. 요청이 `?quota=1`로 명시하지
+          // 않으면 quota.js를 호출조차 하지 않는다 — 자격증명 파일을 읽지도,
+          // api.anthropic.com에 나가지도 않는다. 기본값이 "조회함"이면 앱을 켜기만
+          // 해도 CLI의 구독 OAuth 토큰이 서드파티 도구의 외부 요청에 쓰이므로,
+          // 그 판단은 사용자가 설정에서 직접 켜는 것으로만 성립한다(SECURITY.md).
+          // 게이트가 서버에 있는 이유: 클라이언트에만 두면 "끈 상태"가 화면의 약속일
+          // 뿐이고, 낡은 번들·다른 탭·직접 호출이 그대로 토큰을 쓰게 된다.
+          const wantQuota = url.searchParams.get('quota') === '1';
           if (!usageCache.promise || Date.now() - usageCache.at > USAGE_CACHE_MS) {
             const promise = aggregateUsage(projectsRoot).catch((err) => {
               // 실패는 캐시하지 않는다 — 단, 그 사이 설치된 새 캐시는 건드리지 않는다
@@ -968,7 +976,7 @@ export async function startServer({
             });
             usageCache = { at: Date.now(), promise };
           }
-          if (!quotaCache.promise || Date.now() - quotaCache.at > QUOTA_CACHE_MS) {
+          if (wantQuota && (!quotaCache.promise || Date.now() - quotaCache.at > QUOTA_CACHE_MS)) {
             // 공식 사용률은 실패해도 응답을 막지 않는다 — null 폴백(다음 주기 재시도)
             const promise = Promise.resolve()
               .then(() => getQuota())
@@ -981,7 +989,11 @@ export async function startServer({
               });
             quotaCache = { at: Date.now(), promise };
           }
-          const [local, quota] = await Promise.all([usageCache.promise, quotaCache.promise]);
+          // 끈 요청은 캐시에 남은 직전 값도 돌려주지 않는다 — 껐는데 화면에 %가
+          // 계속 뜨면 끈 것이 아니다. 켠 사람의 캐시는 그대로 두어(무효화하지 않아)
+          // 같은 서버를 함께 쓰는 다른 탭의 폴링 주기를 흔들지 않는다.
+          const local = await usageCache.promise;
+          const quota = wantQuota ? await quotaCache.promise : null;
           json(res, 200, { ...local, quota });
           return;
         }

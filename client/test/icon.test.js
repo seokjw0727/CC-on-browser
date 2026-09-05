@@ -2,7 +2,7 @@
 //
 // Icon.jsx는 진짜 JSX(<path .../>)를 담고 있어 client/test의 평범한 node --test로는
 // import할 수 없다(이 프로젝트엔 JSX 트랜스폼이 붙은 로더가 없다 — Vite는 빌드 때만
-// 관여한다). 그래서 .certify/scan-emoji.mjs와 같은 방식으로 소스 텍스트를 스캔한다.
+// 관여한다). 그래서 컴포넌트를 import하지 않고 소스 텍스트를 그대로 스캔한다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';

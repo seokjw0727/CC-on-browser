@@ -9,7 +9,7 @@ version before reporting an issue that may already be fixed.
 
 ## Threat model — what this app is
 
-CC-on-browser is a **local-only** web front-end that drives your locally
+CC on Browser is a **local-only** web front-end that drives your locally
 installed Claude Code CLI as a child process. By design it can — through the
 CLI and its permission system — read and modify files and run shell commands
 on your machine. That makes the security boundary explicit:
@@ -77,10 +77,31 @@ on your machine. That makes the security boundary explicit:
   applies to **every Claude Code session started afterwards, including ones
   outside this app** (e.g. permission rules and hooks), and only JSON syntax is
   validated — not whether the settings themselves are safe.
-- **No telemetry, no external calls** from the server itself, with one
-  exception: the official usage percentages are fetched from a single
-  `api.anthropic.com` metadata endpoint using the OAuth token the CLI already
-  stored. No model calls are made outside your own sessions.
+- **No telemetry. No outbound requests by default.** The server makes none of its
+  own unless you ask for one. There are exactly two ways it can reach the network,
+  and both are opt-in:
+  - **Official account usage (off by default).** Turning on "계정 공식 사용률 조회"
+    in Settings lets the server read the OAuth token the Claude Code CLI already
+    stored in `~/.claude/.credentials.json` and `GET` a single
+    `api.anthropic.com` usage-metadata endpoint every 60 seconds while the app is
+    open. It is not a model call, so it costs nothing, and only utilization numbers
+    come back. The token is never written anywhere, never sent to any other host, and
+    never leaves that one module. **The gate is server-side**: without an explicit
+    opt-in the request handler does not call the module at all, so a stale browser
+    tab or a direct `curl` cannot make it happen either. Turning it off clears the
+    numbers from the screen immediately and stops the requests.
+
+    Worth knowing before you enable it: Anthropic's Claude Code terms say OAuth
+    subscription credentials are intended for Claude Code and Anthropic's own
+    applications. Using them from a third-party tool — even one that only reads a
+    usage counter, and even on your own machine with your own account — sits outside
+    that intent. That is why the default is off and why this is your decision, not
+    the app's. Everything else in the app works with it off; you simply see local
+    transcript token counts instead of official percentages.
+  - **Update check (manual only).** Settings → Updates fetches one npm registry URL
+    when you press the button. Nothing is sent with it.
+
+  No model calls are ever made outside your own CLI sessions.
 - The daemon scrubs the auth token from its process environment after startup
   so spawned CLI sessions and their child shells do not inherit it.
 - **Instance file (since v1.8.0)** — a background daemon records its port, auth
@@ -131,7 +152,7 @@ reproduce and an impact assessment if possible.
 
 ### 위협 모델 — 이 앱의 성격
 
-CC-on-browser는 로컬에 설치된 Claude Code CLI를 자식 프로세스로 구동하는
+CC on Browser는 로컬에 설치된 Claude Code CLI를 자식 프로세스로 구동하는
 **로컬 전용** 웹 프런트엔드입니다. 설계상 CLI와 그 권한 시스템을 통해 파일
 읽기/수정과 셸 명령 실행이 가능하므로, 보안 경계는 다음과 같습니다:
 
@@ -188,9 +209,28 @@ CC-on-browser는 로컬에 설치된 Claude Code CLI를 자식 프로세스로 �
   거부합니다. 다만 이는 실제로 권한이 넓어지는 기능입니다 — 저장한 내용은 **이후
   시작되는 모든 Claude Code 세션(이 앱 밖 포함)** 에 적용되고(권한 규칙·훅 등),
   검사하는 것은 JSON 문법뿐이지 설정 자체의 안전성이 아닙니다.
-- **텔레메트리 없음**: 서버의 외부 호출은 CLI가 저장한 OAuth 토큰으로
-  공식 사용률 메타데이터 endpoint(`api.anthropic.com`) 하나를 조회하는 것이
-  유일합니다.
+- **텔레메트리 없음. 기본값은 외부 요청 0입니다.** 서버가 스스로 바깥으로 내는
+  요청은 없고, 나갈 수 있는 길은 둘뿐이며 둘 다 옵트인입니다:
+  - **계정 공식 사용률 (기본 꺼짐).** 설정에서 "계정 공식 사용률 조회"를 켜면,
+    서버가 Claude Code CLI가 이미 저장해 둔 `~/.claude/.credentials.json`의 OAuth
+    토큰으로 `api.anthropic.com`의 사용량 메타데이터 endpoint 하나를 앱이 열려
+    있는 동안 60초마다 GET합니다. 모델 호출이 아니라 과금이 없고, 돌아오는 것은
+    사용률 수치뿐입니다. 토큰은 어디에도 기록되지 않고, 다른 호스트로 가지 않으며,
+    그 모듈 밖으로 나가지 않습니다. **관문은 서버에 있습니다** — 옵트인 없이 들어온
+    요청은 그 모듈을 호출조차 하지 않으므로, 낡은 브라우저 탭이나 직접 두드리는
+    `curl`로도 조회가 일어나지 않습니다. 끄면 화면의 수치도 즉시 사라지고 요청도
+    멈춥니다.
+
+    켜기 전에 알아 두실 것: Anthropic의 Claude Code 약관은 구독 OAuth 자격증명이
+    Claude Code와 Anthropic 자체 앱을 위한 것이라고 밝히고 있습니다. 서드파티 도구가
+    그것을 쓰는 일은 — 사용량 숫자만 읽더라도, 본인 계정으로 본인 기기에서 하더라도 —
+    그 취지 밖에 있습니다. 기본값을 꺼 둔 이유이자, 이 판단을 앱이 대신하지 않고
+    사용자에게 맡기는 이유입니다. 꺼 두어도 나머지 기능은 모두 그대로 동작하며,
+    공식 %(퍼센트) 자리에 로컬 대화 기록 집계가 표시됩니다.
+  - **업데이트 확인 (수동).** 설정 → 업데이트에서 버튼을 누를 때만 npm 레지스트리
+    URL 하나를 조회합니다. 함께 보내는 정보는 없습니다.
+
+  사용자의 CLI 세션 밖에서 모델을 호출하는 일은 어떤 경우에도 없습니다.
 - 데몬은 기동 직후 인증 토큰을 자신의 env에서 제거해, 스폰된 CLI 세션과 그
   자식 셸로 토큰이 상속되지 않게 합니다.
 - **인스턴스 파일 (v1.8.0부터)** — 백그라운드 데몬은 자신의 포트·인증 토큰·pid·

@@ -1,8 +1,7 @@
 // CLAW'D — 컴포저 우측 하단 마스코트의 상태 기반 애니메이션.
-// 실제 claude CLI 바이너리에 내장된 공식 아트·포즈를 그대로 옮긴 프레임을
-// 스왑한다(외부 GIF/이미지 없음 — 로컬 CSP 안전). 색은 interact.css의
-// .px-body/.px-eye(공식 clawd_body 주황/검정 눈)가 입힌다.
-// 무드 어휘는 clawd-on-desk의 state-mapping.md 축소 이식 — lib/clawd.js 헤더 참조.
+// 픽셀 프레임을 스왑한다(외부 GIF/이미지 없음 — 로컬 CSP 안전). 색은 interact.css의
+// .px-body/.px-eye가 입힌다.
+// 캐릭터의 출처·권리와 무드 어휘의 참고 출처는 lib/clawd.js 헤더 참조.
 //
 // 무드(세션 상태·파생 신호 → 애니메이션):
 //   idle   — 느린 바운스 + 무작위 깜박임 + 커서 눈 추적(lookLeft/Right)
@@ -566,7 +565,7 @@ export default function Clawd({
  * 최대 하나뿐이고(busy의 두리번 interval, idle/think의 깜박임 timeout), alert·doze는
  * 0개다. reduced-motion 구독도 쿼리당 하나를 모든 행이 공유한다(mediaStore).
  *
- * 상태는 색이 아니라 포즈·모션으로만 갈린다 — 공식 CLAW'D 색(주황 몸통·검정 눈)을
+ * 상태는 색이 아니라 포즈·모션으로만 갈린다 — 마스코트 색(주황 몸통·검정 눈)을
  * 그대로 써 컴포저 마스코트와 같은 정체성을 유지하기 위해서다:
  *   idle  정면 + 느린 바운스 + 깜박임 / think 정면 + 말풍선(축소) + 중간 바운스
  *   busy  좌우 두리번 + 빠른 바운스   / alert 집게 들고 홉

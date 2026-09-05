@@ -462,6 +462,12 @@ export default function Composer() {
   const modelOptions = useMemo(() => buildModelOptions(models), [models]);
   const gu = state.globalUsage;
   const quota = gu?.quota;
+  // %가 없는 이유는 둘이고 안내가 서로 다르다: 설정에서 조회를 꺼 둔 것(정상 — 켜는
+  // 법을 알려 준다)과, 켰는데 조회가 실패한 것(비정상 — 미로그인·네트워크를 의심한다).
+  // 끈 상태에 "조회 실패"라고 쓰면 있지도 않은 고장을 신고하게 만든다.
+  const noQuotaTip = state.officialUsage
+    ? '공식 % 조회 실패(CLI 미로그인 또는 네트워크)'
+    : '공식 % 조회 꺼짐 — 설정 → 세션에서 "계정 공식 사용률 조회"를 켜면 표시됩니다';
   const ctxTokens = session?.usage?.contextTokens || 0;
   // CLI가 result.modelUsage로 직접 보고한 창 크기가 1차 출처 — 없으면(첫 결과 전·
   // 재개 직후) 카탈로그 휴리스틱으로 판별([1m]→1M, 별칭은 카탈로그 해석)
@@ -1201,7 +1207,7 @@ export default function Composer() {
           gu?.fiveHour && (
             <span
               className="meta-item"
-              data-tip={`${usageWindowTitle('최근 5시간', gu.fiveHour)} — 공식 % 조회 실패(CLI 미로그인 또는 네트워크)`}
+              data-tip={`${usageWindowTitle('최근 5시간', gu.fiveHour)} — ${noQuotaTip}`}
             >
               5h {fmtTok(gu.fiveHour.totalTokens)}
             </span>
@@ -1217,7 +1223,7 @@ export default function Composer() {
           gu?.sevenDay && (
             <span
               className="meta-item"
-              data-tip={`${usageWindowTitle('최근 7일', gu.sevenDay)} — 공식 % 조회 실패(CLI 미로그인 또는 네트워크)`}
+              data-tip={`${usageWindowTitle('최근 7일', gu.sevenDay)} — ${noQuotaTip}`}
             >
               7d {fmtTok(gu.sevenDay.totalTokens)}
             </span>

@@ -1,5 +1,4 @@
 // lifecycle.js — 데몬 수명 정책 상태기계. bin(cc-on-browser.mjs)이 사용한다.
-// 설계: .certify/design/2026-07-19-lid-close-session-survival.html §3.
 //
 // 핵심 구분: "의도적 탭 닫힘"(클라이언트 pagehide → WS 'bye' 신호)과
 // "연결 유실"(노트북 리드 닫힘·절전·탭 freeze·브라우저 크래시).

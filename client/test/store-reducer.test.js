@@ -126,6 +126,70 @@ test('set-usage: quota 조회 실패(null) 시 직전 quota를 이어 쓴다(로
   assert.equal(s4.globalUsage.quota, null);
 });
 
+// 위 이월 규칙의 반례. "조회했는데 실패"와 "아예 조회하지 않음"은 둘 다 quota=null로
+// 도착하지만, 후자에서 직전 값을 이어 쓰면 껐는데도 링과 한도 알림이 옛 %로 살아 있게
+// 된다 — 끔이 화면에서 끔이 되지 않는다.
+test('set-usage: quotaEnabled=false는 이월하지 않고 quota를 즉시 비운다', () => {
+  const s0 = createInitialState();
+  assert.equal(s0.officialUsage, false, '기본값은 꺼짐');
+
+  const withQuota = {
+    fiveHour: { totalTokens: 100 },
+    sevenDay: { totalTokens: 200 },
+    quota: { fiveHour: { utilization: 42 }, sevenDay: { utilization: 18 } },
+  };
+  const on = reducer(s0, { type: 'set-usage', usage: withQuota, quotaEnabled: true });
+  assert.equal(on.globalUsage.quota.fiveHour.utilization, 42);
+  assert.equal(on.officialUsage, true, '요청이 조회를 시도했음을 사본에 기록');
+
+  // 껐다 — quota=null이 오고, 직전 값을 이어받지 않는다. 로컬 집계는 그대로 갱신.
+  const off = reducer(on, {
+    type: 'set-usage',
+    usage: { fiveHour: { totalTokens: 150 }, sevenDay: { totalTokens: 260 }, quota: null },
+    quotaEnabled: false,
+  });
+  assert.equal(off.globalUsage.quota, null, '끈 응답은 직전 quota를 이어받지 않는다');
+  assert.equal(off.globalUsage.fiveHour.totalTokens, 150, '로컬 집계는 계속 갱신된다');
+  assert.equal(off.officialUsage, false);
+
+  // quotaEnabled를 싣지 않은(구식) 액션은 종전 이월 동작을 그대로 유지한다.
+  const legacy = reducer(on, {
+    type: 'set-usage',
+    usage: { fiveHour: { totalTokens: 150 }, sevenDay: { totalTokens: 260 }, quota: null },
+  });
+  assert.equal(legacy.globalUsage.quota.fiveHour.utilization, 42, '실패는 여전히 이월된다');
+  assert.equal(legacy.officialUsage, true, '싣지 않으면 사본을 건드리지 않는다');
+});
+
+test('set-official-usage: 끄면 남은 quota를 비우고, 바뀔 것이 없으면 같은 state를 준다', () => {
+  const s0 = createInitialState();
+
+  // 켜기 — 사본만 바뀐다.
+  const on = reducer(s0, { type: 'set-official-usage', on: true });
+  assert.equal(on.officialUsage, true);
+
+  const withQuota = reducer(on, {
+    type: 'set-usage',
+    usage: { fiveHour: { totalTokens: 1 }, sevenDay: { totalTokens: 2 }, quota: { fiveHour: { utilization: 42 }, sevenDay: null } },
+    quotaEnabled: true,
+  });
+  assert.equal(withQuota.globalUsage.quota.fiveHour.utilization, 42);
+
+  // 끄기 — 다음 폴링을 기다리지 않고 그 자리에서 %가 사라진다.
+  const off = reducer(withQuota, { type: 'set-official-usage', on: false });
+  assert.equal(off.officialUsage, false);
+  assert.equal(off.globalUsage.quota, null, '토글 즉시 비운다');
+  assert.equal(off.globalUsage.fiveHour.totalTokens, 1, '로컬 집계는 남는다');
+
+  // 멱등 — 같은 값으로 다시 부르면 **같은 객체**를 돌려준다. App.jsx의 폴링 effect가
+  // 이 값에 의존한 채 마운트마다 동기화를 dispatch하므로, 새 객체를 만들면 무한 루프다.
+  assert.equal(reducer(off, { type: 'set-official-usage', on: false }), off);
+  assert.equal(reducer(on, { type: 'set-official-usage', on: true }), on);
+
+  // 켜져 있고 quota가 없는 상태에서 다시 켜도 마찬가지.
+  assert.equal(reducer(s0, { type: 'set-official-usage', on: false }), s0);
+});
+
 test('remove-session: 비활성 세션 제거는 activeKey를 건드리지 않는다', () => {
   let s = stateWithSession('a');
   s.sessions.set('b', createSessionState({ key: 'b' }));

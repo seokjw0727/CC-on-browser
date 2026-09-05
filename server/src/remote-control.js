@@ -3,8 +3,6 @@
 //
 // 이 파일의 모든 형식 지식은 추측이 아니라 실측이다(2026-07-30, CLI v2.1.220, win32;
 // 2026-08-17에 v2.1.233으로 재실측).
-// 근거와 원시 캡처: .certify/design/2026-07-30-remote-control-running-dock-timestamps.html §3.1.2
-//                  .certify/design/2026-08-17-remote-control-sidebar-toggle.html §2
 //
 // 실측에서 나온 다섯 가지 설계 제약:
 //  1) `Environment ID:` 줄은 -v일 때만 나온다. URL 줄은 항상 나온다 →
@@ -71,7 +69,7 @@ const STATUS_WORDS = new Map([
   ['Ready', 'ready'],
 ]);
 
-// 바이너리 문자열에서 확인한 실패 문구. 부분 일치로 본다 — 앞에 "Error: " 같은 장식이 붙는다.
+// CLI가 실패 시 내보내는 문구. 부분 일치로 본다 — 앞에 "Error: " 같은 장식이 붙는다.
 const ERROR_MARKERS = [
   'You must be logged in to use Remote Control.',
   'Remote Control requires claude.ai subscription auth.',

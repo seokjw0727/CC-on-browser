@@ -1,16 +1,21 @@
-# Claude Code on Browser
+# CC on Browser
 
 [한국어](README.md) · **English**
 
-A **local-only** web app for using the CLI-based Claude Code from your browser.
+A **local-only** web app for driving your installed Claude Code CLI from a browser.
 Instead of the terminal TUI, you get streaming markdown chat, tool-execution cards,
 permission dialogs, and a session-resume UI.
 
+> **Unofficial project.** Not built, endorsed or sponsored by Anthropic.
+> See the [trademark notice](#trademark-notice) below.
+
 **No SDK, no API key.** It drives your locally installed `claude` CLI as a child
 process, so authentication and billing follow your Claude subscription (e.g. Claude
-Max) entirely. The single exception: the status bar's official usage percentages are
-fetched from one api.anthropic.com usage-metadata endpoint using the subscription
-OAuth token the CLI already stored — not a model call, so it costs nothing.
+Max) entirely. The server makes no outbound requests of its own by default. The one
+exception is the status bar's official usage percentages, which are **off by default**:
+turn them on in Settings and the server fetches one api.anthropic.com usage-metadata
+endpoint using the subscription OAuth token the CLI already stored — not a model call,
+so it costs nothing. [SECURITY.md](SECURITY.md) spells out what leaves the machine.
 
 ## Quick start
 
@@ -32,7 +37,7 @@ in the background** with no console window. Once every tab is closed the server 
 itself about 10 seconds later — nothing to shut down manually.
 
 ```
-Claude Code on Browser v1.8.0 — http://127.0.0.1:8787/#token=<random>
+CC on Browser v<version> — http://127.0.0.1:8787/#token=<random>
 Opening your browser... The server runs in the background (127.0.0.1 only)
 and stops automatically once every tab is closed. (--no-open for a foreground server)
 claude CLI: 2.1.215 (Claude Code)
@@ -57,7 +62,7 @@ before Node even starts, so the app cannot hide it. Run this **once**:
 cc-on-browser --shortcut
 ```
 
-You get a **"Claude Code on Browser"** shortcut on your Desktop and in the Start
+You get a **"CC on Browser"** shortcut on your Desktop and in the Start
 Menu; launching from there shows **only your browser** — no console at all
 (internally `wscript.exe` starts the server with a hidden window). Re-run
 `--shortcut` if you reinstall Node and its path changes.
@@ -70,7 +75,7 @@ Re-running `cc-on-browser` during that window no longer fails — it **opens a n
 tab into the running server**, and your live CLI sessions are still there.
 
 ```
-Already running (v1.8.0) on port 8787 — opened a new browser tab.
+Already running (v<version>) on port 8787 — opened a new browser tab.
 ```
 
 > Once the package is published to the npm registry, `npm install -g cc-on-browser`
@@ -104,15 +109,16 @@ Already running (v1.8.0) on port 8787 — opened a new browser tab.
 - **Working-directory picker** — native Windows folder dialog (plain text input on
   other platforms).
 - **Status bar** — session context (vs. the model's window — 200k, or 1M for `[1m]`
-  models) plus the account's official 5-hour/7-day utilization as rings. Per-turn
-  tokens appear as small chat tails (`↑ 12 ↓ 345 tok · 5.3s`), like the CLI.
+  models). Enable **official account usage** in Settings (off by default) to also get
+  5-hour/7-day utilization rings; with it off you get local transcript token counts
+  only. Per-turn tokens appear as small chat tails (`↑ 12 ↓ 345 tok · 5.3s`), like the CLI.
 - **Runtime controls** — claude.ai-style model picker and effort bar, permission-mode
   switch, `/` slash-command and `@` file-reference autocomplete, turn interrupt (Esc).
   Confirmations and errors show as **toast notifications**.
 - **Composer-centric UI** — no top bar; repo, permission mode, model, send and usage
   fold into the input area. Light/dark themes, zero external font/image dependencies.
-- **A living mascot (CLAW'D)** — the official art embedded in the real Claude Code
-  CLI, reacting to session state (idle blinking with cursor-tracking eyes, thinking
+- **A living mascot (CLAW'D)** — a pixel rendition of Claude Code's mascot character,
+  reacting to session state (idle blinking with cursor-tracking eyes, thinking
   bubble, tool-scan scuttle, subagent juggling, permission hop, turn cheers, zzz after
   60s idle — respects `prefers-reduced-motion`).
 - **Remote Control** — **right-click a session row in the sidebar** (Shift+F10 from
@@ -248,23 +254,37 @@ Node server (server/src/server.js — http + ws)
 
 ```
 bin/cc-on-browser.mjs  CLI entry — arg parsing & pre-checks, background server + browser launch
+bin/shortcut.mjs       --shortcut (Windows) — creates a console-free .lnk
+bin/cc-on-browser-silent.vbs  the launcher that shortcut invokes (wscript = no console)
 server/src/
   server.js          HTTP (REST + static) + WebSocket hub. 127.0.0.1-only, token/Origin auth
   session-hub.js     session registry — key↔ClaudeSession, event broadcast/replay
   claude-session.js  wraps one CLI child process — stream-json I/O, protocol isolation
+  lifecycle.js       daemon lifetime state machine — tab close vs. sleep, idle shutdown
+  instance-file.js   ~/.cc-on-browser/instance-<port>.json — recognises our own daemon
   history.js         reads ~/.claude projects/sessions/transcripts (resume & delete)
+  cli-session-names.js  caches the session names the CLI assigns
   usage.js           local transcript aggregation — 5h/7d reference numbers (/api/usage)
-  quota.js           official account utilization (5h/7d %) — the only api.anthropic.com touchpoint
-  fs-api.js          directory listing & filename search — file contents never served
+  quota.js           official account utilization (5h/7d %) — opt-in; only then is api.anthropic.com called
+  fs-api.js          directory listing, filename search, native folder picker — file contents never served
+  preview-api.js     artifact preview tickets & serving (scoped to the session cwd)
+  attachments.js     paste attachments — clipboard file paths, bitmap temp storage
+  git-api.js         branch/worktree info, worktree create & remove
+  remote-control.js  manages the `claude remote-control` process (opt-in feature)
+  claude-config.js   reads and atomically replaces ~/.claude/settings.json
+  claude-plugins.js  lists installed plugins
+  kill-tree.js       terminates a session process and its children
   jsonl.js           line-oriented JSON parser
 client/src/
   App.jsx            shell layout & theme
-  lib/               store.jsx (state) · ws.js (auto-reconnect) · reduce-cli-event.js · markdown.js · api.js
-  components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · QuestionDialog · Toasts · Clawd · Brand
+  lib/               store.jsx (state) · ws.js (auto-reconnect) · reduce-cli-event.js · markdown.js · api.js · clawd.js (mascot data)
+  components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · QuestionDialog · Toasts · Clawd · Brand · PreviewPanel · WorktreePanel
+  fonts/             bundled fonts (Pretendard · Monoplex KR) — licenses in client/public/licenses/
 scripts/dev-fake.mjs subscription-free demo launcher (fake CLI)
 server/test/         fake-CLI-based unit/integration tests (never runs the real claude)
+client/test/         pure-logic unit tests (node --test)
 e2e/                 Playwright browser E2E (fake CLI stack)
-docs/superpowers/    specs & plans
+docs/specs/          archived design snapshot
 ```
 
 ## Security
@@ -282,14 +302,27 @@ Claude Code CLI v2.1.201**, and the app is **confirmed working up to v2.1.215**.
 updates may change the format; unknown messages are never dropped — they surface in
 the UI as raw events.
 
-<a id="protocol-warning"></a>If you suspect a protocol change, re-verify with the
-probe procedure in `docs/superpowers/specs/2026-07-06-claude-code-on-browser-design.md`.
+<a id="protocol-warning"></a>If you suspect a protocol change, re-verify against §2
+(observed CLI behaviour) of
+[`docs/specs/2026-07-06-claude-code-on-browser-design.md`](docs/specs/2026-07-06-claude-code-on-browser-design.md).
 
 ## Limitations (out of v1 scope)
 
 Image attachments, subagent tree visualization, MCP server management UI, PTY
 terminal tabs, multi-browser concurrent session sync, remote (non-localhost) access.
 
+## Trademark notice
+
+"Claude", "Claude Code" and "Anthropic" are trademarks of Anthropic, PBC, and Clawd is
+Anthropic's mascot character. **This project is not affiliated with Anthropic, and was
+not built, endorsed or sponsored by them.** Those names are used only to state, factually,
+what this app does: it is a local web UI that runs the Claude Code CLI you installed
+yourself. This project's own name is **CC on Browser**.
+
 ## Changelog · License
 
 [CHANGELOG.md](CHANGELOG.md) · [MIT](LICENSE)
+
+The bundled fonts (Pretendard, Monoplex KR) and libraries (React, marked, DOMPurify,
+highlight.js, ws) keep their own licenses — full notices are in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

@@ -853,9 +853,9 @@ test('(f) REST auth + /api/projects/sessions/transcript/browse/bootstrap', async
   // 알아채는 근거. 주입하지 않은 이 테스트 서버에서는 null이다(= 구버전과 구분 불가).
   assert.equal(bootstrap.version, null, '주입하지 않으면 null');
 
-  // /api/usage — 픽스처 assistant 엔트리(방금 timestamp) 1건이 양쪽 창에 집계되고,
-  // 주입한 공식 사용률 스텁이 quota 필드로 실린다
-  const usage = await (await fetch(`${base}/api/usage`, auth)).json();
+  // /api/usage — 픽스처 assistant 엔트리(방금 timestamp) 1건이 양쪽 창에 집계된다.
+  // 공식 사용률(quota)은 옵트인이라 `?quota=1`을 붙였을 때만 실린다.
+  const usage = await (await fetch(`${base}/api/usage?quota=1`, auth)).json();
   assert.equal(usage.fiveHour.totalTokens, 185);
   assert.equal(usage.fiveHour.entries, 1);
   assert.equal(usage.sevenDay.totalTokens, 185);
@@ -954,12 +954,59 @@ test('/api/usage quota 실패 → quota:null + 로컬 집계 보존 + 요청마�
   try {
     const b = `http://127.0.0.1:${h.port}`;
     const auth = { headers: { 'x-auth-token': TOKEN } };
-    const r1 = await (await fetch(`${b}/api/usage`, auth)).json();
+    const r1 = await (await fetch(`${b}/api/usage?quota=1`, auth)).json();
     assert.equal(r1.quota, null);
     assert.equal(r1.fiveHour.totalTokens, 185); // quota 실패가 로컬 집계를 막지 않는다
-    const r2 = await (await fetch(`${b}/api/usage`, auth)).json();
+    const r2 = await (await fetch(`${b}/api/usage?quota=1`, auth)).json();
     assert.equal(r2.quota, null);
     assert.equal(calls, 2); // null은 캐시되지 않는다 — 다음 요청에서 재시도
+  } finally {
+    await h.close();
+  }
+});
+
+// 옵트인 관문의 본체. 이 앱에서 유일하게 컴퓨터 밖으로 나가는 정기 조회이고, 그
+// 재료가 사용자의 구독 OAuth 토큰이므로 "기본값이 정말 조회하지 않는가"는 문구가
+// 아니라 테스트로 지켜져야 한다 — quotaFetcher가 **한 번도 불리지 않는 것**이 계약이다.
+test('/api/usage: 공식 사용률은 ?quota=1 옵트인에서만 조회된다(기본은 호출 자체가 없음)', async () => {
+  const calls = [];
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    quotaFetcher: async () => {
+      calls.push(1);
+      return { fiveHour: { utilization: 46, resetsAt: null }, sevenDay: null, fetchedAt: null };
+    },
+  });
+  try {
+    const b = `http://127.0.0.1:${h.port}`;
+    const auth = { headers: { 'x-auth-token': TOKEN } };
+
+    // 기본 요청: quota는 null이고 조회기는 불리지 않는다(자격증명도 읽지 않는다).
+    const off = await (await fetch(`${b}/api/usage`, auth)).json();
+    assert.equal(off.quota, null);
+    assert.equal(off.fiveHour.totalTokens, 185, '로컬 집계는 옵트인과 무관하게 제공된다');
+    assert.equal(calls.length, 0, '옵트인 없이는 quota.js를 호출하지 않는다');
+
+    // 명시적으로 켠 요청에서만 조회가 나간다.
+    const on = await (await fetch(`${b}/api/usage?quota=1`, auth)).json();
+    assert.equal(on.quota.fiveHour.utilization, 46);
+    assert.equal(calls.length, 1);
+
+    // 켠 뒤 다시 끈 요청은 캐시에 남은 값도 돌려주지 않는다 — 껐는데 %가 계속
+    // 보이면 끈 것이 아니다. 동시에 조회기를 새로 부르지도 않는다.
+    const offAgain = await (await fetch(`${b}/api/usage`, auth)).json();
+    assert.equal(offAgain.quota, null, '끈 요청에 캐시된 quota가 새어 나오지 않는다');
+    assert.equal(calls.length, 1, '끈 요청은 추가 조회를 만들지 않는다');
+
+    // quota=1 외의 값은 켠 것으로 치지 않는다(오타·옛 클라이언트가 조회를 켜지 못한다).
+    const bogus = await (await fetch(`${b}/api/usage?quota=true`, auth)).json();
+    assert.equal(bogus.quota, null);
+    assert.equal(calls.length, 1);
   } finally {
     await h.close();
   }

@@ -208,7 +208,6 @@ test('순수성: goal/lastUserText 갱신이 입력 세션을 변형하지 않�
 });
 
 // ----- visibleEffortLevels — 모델을 바꿨을 뿐인데 노력 수준이 '낮음'으로 뭉개지던 문제 -----
-// 설계 근거: .certify/design/2026-08-23-model-effort-change-desync.html
 test('visibleEffortLevels: 지원 목록으로 거르되 현재 값은 표시에서 잃지 않는다', () => {
   const values = (ls) => ls.map((l) => l.value);
 

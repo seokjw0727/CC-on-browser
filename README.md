@@ -1,14 +1,19 @@
-# Claude Code on Browser
+# CC on Browser
 
 **한국어** · [English](README.en.md)
 
-CLI 기반 Claude Code를 브라우저에서 쓰는 **로컬 전용** 웹 앱.
+로컬에 설치된 Claude Code CLI를 브라우저에서 쓰는 **로컬 전용** 웹 앱.
 터미널 TUI 대신 스트리밍 마크다운 채팅, 도구 실행 카드, 권한 다이얼로그, 세션 재개 UI를 제공합니다.
 
+> **비공식 프로젝트입니다.** Anthropic이 만들거나 보증하거나 후원하지 않았습니다.
+> 상표 고지는 [아래](#상표-고지)를 보세요.
+
 **SDK/API 키를 사용하지 않습니다.** 로컬에 설치된 `claude` CLI를 자식 프로세스로 구동하므로
-인증과 과금은 전적으로 사용자의 Claude 구독(예: Claude Max)을 따릅니다. 단 하나의 예외로,
-상태줄의 공식 사용률(%)은 CLI가 저장한 구독 OAuth 토큰으로 api.anthropic.com의 사용량
-메타데이터 endpoint 하나만 조회해 얻습니다 — 모델 호출이 아니므로 과금이 없습니다.
+인증과 과금은 전적으로 사용자의 Claude 구독(예: Claude Max)을 따릅니다. 서버가 스스로 바깥에
+내는 정기 요청은 기본적으로 없습니다 — 상태줄의 계정 공식 사용률(%)만이 예외인데, **기본값이
+꺼짐이고** 설정에서 직접 켜야 CLI가 저장해 둔 구독 OAuth 토큰으로 사용량 메타데이터
+endpoint 하나를 조회합니다(모델 호출이 아니라 과금 없음). 무엇이 언제 나가는지는
+[SECURITY.md](SECURITY.md)에 적어 두었습니다.
 
 ## 빠른 시작
 
@@ -29,7 +34,7 @@ cc-on-browser
 따로 끌 필요가 없습니다.
 
 ```
-Claude Code on Browser v1.8.0 — http://127.0.0.1:8787/#token=<랜덤토큰>
+CC on Browser v<버전> — http://127.0.0.1:8787/#token=<랜덤토큰>
 Opening your browser... The server runs in the background (127.0.0.1 only)
 and stops automatically once every tab is closed. (--no-open for a foreground server)
 claude CLI: 2.1.215 (Claude Code)
@@ -54,7 +59,7 @@ Win+R이나 탐색기에서 `cc-on-browser`를 실행하면 명령 프롬프트 
 cc-on-browser --shortcut
 ```
 
-바탕화면과 시작 메뉴에 **"Claude Code on Browser"** 바로가기가 생기고, 그걸로
+바탕화면과 시작 메뉴에 **"CC on Browser"** 바로가기가 생기고, 그걸로
 실행하면 **콘솔 없이 브라우저만** 뜹니다(내부적으로 `wscript.exe`가 창 숨김으로
 서버를 띄웁니다). Node를 재설치해 경로가 바뀌면 `--shortcut`을 다시 실행하세요.
 
@@ -65,7 +70,7 @@ cc-on-browser --shortcut
 **실행 중인 서버에 새 탭만 열립니다** — 돌고 있던 CLI 세션도 그대로입니다.
 
 ```
-Already running (v1.8.0) on port 8787 — opened a new browser tab.
+Already running (v<버전>) on port 8787 — opened a new browser tab.
 ```
 
 > npm 레지스트리 게시 후에는 `npm install -g cc-on-browser` 한 줄로도 설치할 수
@@ -79,10 +84,10 @@ Already running (v1.8.0) on port 8787 — opened a new browser tab.
 - **권한 다이얼로그** — `can_use_tool` 요청을 모달로 띄워 허용/거부. 제안(suggestion)은 "항상 허용" 같은 모호한 문구 대신 실제 효과를 그대로 서술. **새 세션의 기본 권한 모드는 기본모드(default)** — CLI 정책과 사용자 허용 규칙상 확인이 필요한 도구 사용 전에 묻습니다. 기본·자동·플랜모드는 컴포저에서 언제든 바꿀 수 있고, 모드는 기본모드(무색)·자동모드(파랑)·플랜모드(초록)·신뢰모드(빨강)로 색을 구분해 표시합니다. **신뢰모드(bypassPermissions)는 세션 시작 시(새 세션 모달)에만 선택할 수 있습니다** — 다른 모드로 시작한 세션은 실행 중에 신뢰모드로 전환할 수 없습니다(서버가 차단). 신뢰모드로 시작한 세션은 다른 모드로 갔다가 신뢰모드로 복귀할 수 있습니다.
 - **세션 재개 + 지난 세션 관리** — **새 세션 모달의 "지난 세션" 목록**(요약 제목 · 마지막 접근 · 대화 크기, 기본 20개 + "더 보기"로 50개)에서 클릭 한 번으로 이어가기(`--resume`), 필요 없는 세션은 확인 후 삭제. 재개할 때는 **모달에서 고른 모델·권한 모드가 그대로 적용**됩니다(모델을 "(기본 모델)"로 두면 그 세션이 쓰던 모델이 유지됩니다). 사이드바는 지금 열려 있는 세션만 보여줍니다.
 - **작업 디렉터리 지정** — 새 세션 모달에서 Windows 네이티브 폴더 선택 대화상자로 선택(비-Windows는 직접 입력).
-- **상태줄(statusline)** — 세션 컨텍스트(모델 창 대비 — 기본 200k, `[1m]` 모델은 1M)와 계정의 공식 5시간·7일 사용률(%)을 원형 게이지로 표시. 턴별 토큰 입/출력은 CLI처럼 채팅에 작은 꼬리표(`↑ 12 ↓ 345 tok · 5.3s`)로 남습니다.
+- **상태줄(statusline)** — 세션 컨텍스트(모델 창 대비 — 기본 200k, `[1m]` 모델은 1M)를 원형 게이지로 표시. 설정에서 **계정 공식 사용률 조회**(기본 꺼짐)를 켜면 5시간·7일 사용률(%) 게이지가 함께 뜨고, 꺼 두면 로컬 대화 기록에서 집계한 토큰 수만 나옵니다. 턴별 토큰 입/출력은 CLI처럼 채팅에 작은 꼬리표(`↑ 12 ↓ 345 tok · 5.3s`)로 남습니다.
 - **런타임 컨트롤** — claude.ai식 모델 피커와 노력 수준 진행 바, 권한 모드 전환, `/` 슬래시 커맨드·`@` 파일 참조 자동완성, 턴 중단(Esc). 설정 변경 확인과 오류는 **토스트 알림**으로 표시됩니다.
 - **컴포저 중심 UI** — 상단 바 없이 입력창 한 곳에 모델·전송·사용량을 접어 넣고, 권한 모드도 입력창 안쪽 우측 상단에 얹은 레이아웃. 라이트/다크 테마 × 둥근/각진 모서리 스타일(설정 → 테마), 외부 폰트·이미지 의존 0(로컬 CSP 안전).
-- **살아있는 마스코트(CLAW'D)** — 실제 Claude Code CLI에 내장된 공식 아트를 옮긴 마스코트가 세션 상태에 반응합니다(대기 깜박임·커서 추적 눈, 응답 중 말풍선, 도구 실행 스캐틀, 서브에이전트 저글링, 권한 대기 폴짝, 턴 종료 환호, 60초 무입력 zzz — `prefers-reduced-motion` 존중).
+- **살아있는 마스코트(CLAW'D)** — Claude Code의 마스코트 캐릭터를 픽셀로 옮긴 마스코트가 세션 상태에 반응합니다(대기 깜박임·커서 추적 눈, 응답 중 말풍선, 도구 실행 스캐틀, 서브에이전트 저글링, 권한 대기 폴짝, 턴 종료 환호, 60초 무입력 zzz — `prefers-reduced-motion` 존중).
 - **원격 제어(Remote Control)** — **사이드바 세션 행을 우클릭**(키보드는 Shift+F10)해
   "원격 제어 켜기"를 고르면, 그 레포를 **claude.ai/code와 Claude 모바일 앱에서
   조종**할 수 있습니다. 지금 보고 있지 않은 다른 프로젝트의 세션도 같은 자리에서
@@ -209,23 +214,37 @@ Node 서버 (server/src/server.js — http + ws)
 
 ```
 bin/cc-on-browser.mjs  CLI 진입점 — 인자 파싱·사전 점검 후 백그라운드 서버 기동 + 브라우저 실행
+bin/shortcut.mjs       --shortcut 구현(Windows) — 콘솔 없이 뜨는 바로가기 생성
+bin/cc-on-browser-silent.vbs  그 바로가기가 부르는 런처(wscript = 콘솔 없음)
 server/src/
   server.js          HTTP(REST + 정적 서빙) + WebSocket 허브. 127.0.0.1 전용, 토큰·Origin 인증
   session-hub.js     세션 레지스트리 — 키↔ClaudeSession, 이벤트 브로드캐스트/리플레이 중계
   claude-session.js  CLI 자식 프로세스 1개 래핑 — stream-json 송수신, 미문서 프로토콜 격리
   history.js         ~/.claude 프로젝트·세션·트랜스크립트 읽기 (세션 재개·삭제)
+  lifecycle.js       데몬 수명 상태기계 — 탭 종료와 절전을 구분해 유휴 종료를 판정
+  instance-file.js   ~/.cc-on-browser/instance-<port>.json 기록·검증(재실행 시 탭만 열기)
+  cli-session-names.js  CLI가 붙인 세션 이름 캐시
   usage.js           ~/.claude 트랜스크립트 로컬 집계 — 5h/7d 참고치 (/api/usage)
-  quota.js           계정 공식 사용률(5h/7d %) — CLI의 OAuth 토큰 사용, 유일한 api.anthropic.com 접점
-  fs-api.js          디렉터리 나열·파일명 검색 — 파일 내용은 미제공
+  quota.js           계정 공식 사용률(5h/7d %) — **옵트인**, 켠 경우에만 api.anthropic.com 조회
+  fs-api.js          디렉터리 나열·파일명 검색·네이티브 폴더 선택 — 파일 내용은 미제공
+  preview-api.js     결과물 미리보기 티켓 발급·서빙(세션 cwd 안으로 제한)
+  attachments.js     붙여넣기 첨부 — 클립보드 파일 경로 조회·비트맵 임시 저장
+  git-api.js         브랜치·worktree 정보와 worktree 생성/삭제
+  remote-control.js  `claude remote-control` 프로세스 관리(선택 기능)
+  claude-config.js   ~/.claude/settings.json 읽기·원자적 교체
+  claude-plugins.js  설치된 플러그인 목록 읽기
+  kill-tree.js       세션 프로세스와 그 자식까지 정리
   jsonl.js           라인 단위 JSON 파서
 client/src/
   App.jsx            셸 레이아웃·테마 소유
   lib/               store.jsx(상태) · ws.js(자동 재접속) · reduce-cli-event.js(CLI 이벤트→상태) · markdown.js · api.js
   components/        Sidebar · Composer · ChatView · Message · ToolCard · ThinkingBlock · PermissionDialog · QuestionDialog · Toasts · Clawd · Brand
+  fonts/             번들 폰트(Pretendard · Monoplex KR) — 라이선스는 client/public/licenses/
 scripts/dev-fake.mjs 구독 미소모 데모 런처(fake CLI)
 server/test/         fake CLI 기반 통합·단위 테스트 (실제 claude 미실행)
+client/test/         순수 로직 단위 테스트(node --test)
 e2e/                 Playwright 브라우저 E2E (fake CLI 스택)
-docs/superpowers/    스펙·플랜 문서
+docs/specs/          아카이브된 설계 스냅샷
 ```
 
 ## 보안
@@ -242,13 +261,26 @@ stream-json 제어 프로토콜(`--permission-prompt-tool stdio` 포함)은 **�
 raw 이벤트로 UI에 전달되도록 설계돼 있습니다.
 
 <a id="프로토콜-경고"></a>프로토콜 변경이 의심되면
-`docs/superpowers/specs/2026-07-06-claude-code-on-browser-design.md`의 프로브 절차로 재검증하세요.
+[`docs/specs/2026-07-06-claude-code-on-browser-design.md`](docs/specs/2026-07-06-claude-code-on-browser-design.md)
+§2(관측된 CLI 동작)를 기준으로 재검증하세요.
 
 ## 제한 사항 (v1 범위 밖)
 
 이미지 첨부, 서브에이전트 트리 시각화, MCP 서버 관리 UI, PTY 터미널 탭,
 다중 브라우저 클라이언트 동시 접속 동기화, 원격(비 localhost) 접근.
 
+## 상표 고지
+
+"Claude", "Claude Code", "Anthropic"은 Anthropic PBC의 상표이고, 마스코트 캐릭터 Clawd도
+Anthropic의 것입니다. **이 프로젝트는 Anthropic과 아무 관련이 없으며 Anthropic이 만들거나
+보증하거나 후원하지 않았습니다.** 이 이름들은 이 앱이 하는 일 — 사용자가 직접 설치한
+Claude Code CLI를 구동하는 로컬 웹 UI — 을 사실대로 설명하기 위해서만 씁니다.
+이 프로젝트의 이름은 **CC on Browser**입니다.
+
 ## 변경 이력 · 라이선스
 
 [CHANGELOG.md](CHANGELOG.md) · [MIT](LICENSE)
+
+번들된 폰트(Pretendard · Monoplex KR)와 라이브러리(React · marked · DOMPurify ·
+highlight.js · ws)는 각자의 라이선스를 따릅니다 — 전체 고지는
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)에 있습니다.

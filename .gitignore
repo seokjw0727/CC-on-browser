@@ -1,8 +1,13 @@
 node_modules/
 client/dist/
 *.local
-.claude/settings.local.json
 .DS_Store
+
+# 이 레포에서 Claude Code를 돌릴 때 생기는 로컬 설정·훅. 저장소에 올릴 것이 아니고,
+# 개인 환경(경로·권한 규칙)이 그대로 담기므로 디렉터리째 제외한다. 종전에는
+# settings.local.json 한 줄만 막고 있었는데, 그것이 걸린 이유는 전역 gitignore 덕이라
+# 그 설정이 없는 기여자에게는 추적 후보로 보였다.
+.claude/
 
 # 로컬 개발/테스트 산출물 (커밋 제외)
 .devils-advocate/

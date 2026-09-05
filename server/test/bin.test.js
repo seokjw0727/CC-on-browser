@@ -653,7 +653,7 @@ test('--shortcut reports partial success (one location fails) and still exits 0'
     platform: 'win32',
     tmpdir: scTmp(),
     spawnFn: fakePowerShell([
-      '{"name":"Desktop","ok":true,"path":"D:/Desktop/Claude Code on Browser.lnk"}',
+      '{"name":"Desktop","ok":true,"path":"D:/Desktop/CC on Browser.lnk"}',
       '{"name":"StartMenu","ok":false,"path":"","error":"access denied"}',
       '{"name":"WshEnabled","ok":true,"path":"","error":""}',
     ]),
@@ -752,6 +752,16 @@ test('--shortcut generates a PowerShell script with the right target and cleans 
   assert.ok(seen.script.includes('//nologo'), 'Arguments에 //nologo가 실린다');
   assert.ok(seen.script.includes('cc-on-browser-silent.vbs'));
   assert.ok(seen.script.includes('HKCU:') && seen.script.includes('HKLM:'), 'WSH 정책은 양쪽 하이브 확인');
+  // 개명(v1.11.5까지 "Claude Code on Browser") 뒤 두 개가 남지 않도록, 새 이름을 만들고
+  // 옛 이름을 치운다. 옛 것을 지우는 조건은 "우리 .vbs를 가리키는 바로가기"뿐이다 —
+  // 이 가드가 빠지면 우연히 같은 이름을 쓰는 남의 바로가기를 지운다.
+  assert.ok(seen.script.includes("$name = 'CC on Browser.lnk'"), '새 이름으로 만든다');
+  assert.ok(
+    seen.script.includes("$legacyName = 'Claude Code on Browser.lnk'"),
+    '옛 이름을 정리 대상으로 안다',
+  );
+  assert.match(seen.script, /\$old\.Arguments\.Contains\(\$vbsPath\)/, '우리 바로가기일 때만 지운다');
+  assert.match(seen.script, /Remove-Item -LiteralPath \$legacy -Force/);
   assert.equal(existsSync(seen.file), false, '임시 .ps1은 삭제된다');
 });
 

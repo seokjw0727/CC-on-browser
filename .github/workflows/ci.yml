@@ -6,6 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# 이 워크플로는 포크 PR의 코드를 그대로 돌린다(npm install이 그 PR의 postinstall을
+# 실행한다). 그러니 토큰은 읽기만 할 수 있어야 한다 — permissions를 비워 두면
+# 저장소/조직 기본값(쓰기일 수 있다)을 상속한다.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -20,6 +26,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -36,6 +44,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -62,6 +72,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           node-version: 22
