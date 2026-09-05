@@ -277,10 +277,55 @@ Anthropic의 것입니다. **이 프로젝트는 Anthropic과 아무 관련이 �
 Claude Code CLI를 구동하는 로컬 웹 UI — 을 사실대로 설명하기 위해서만 씁니다.
 이 프로젝트의 이름은 **CC on Browser**입니다.
 
+## 참고한 프로젝트
+
+이 앱이 빚진 곳들입니다. 라이선스 원문과 검증 노트는
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)에 있습니다.
+
+**아이디어를 참고한 저장소**
+
+- [clawd-on-desk](https://github.com/rullerzhou-afk/clawd-on-desk) — AGPL-3.0.
+  마스코트의 상태→연출 어휘(think · busy · juggle · sweep · carry · read · alert ·
+  notify · sleep · doze)를 이 저장소의 state-mapping 문서에서 **아이디어만** 가져왔습니다.
+  코드도 자산도 문구도 복사하지 않았으므로 AGPL이 이 코드베이스로 번지지는 않습니다.
+  그래도 크레딧을 적는 것은 그 설계가 그럴 만해서입니다.
+- [highlight.js](https://github.com/highlightjs/highlight.js)의 **Atom One Dark ·
+  One Light 테마** (Daniel Gamage, BSD-3-Clause) — `client/src/components/chat.css`의
+  `.hljs-*` 토큰 색을 이 테마에서 손으로 옮겨 맞췄습니다. CSS 규칙은 이 프로젝트가 직접
+  썼지만 색상은 Atom One 팔레트라, 예의가 아니라 의무로 적는 출처입니다. 두 테마는 다시
+  Atom의 [One Dark Syntax](https://github.com/atom/one-dark-syntax) ·
+  [One Light Syntax](https://github.com/atom/one-light-syntax)(MIT, © 2016 GitHub Inc.)에서
+  파생된 것입니다.
+
+**번들되어 함께 배포되는 오픈소스**
+
+npm 패키지에는 빌드된 브라우저 번들(`client/dist/`)이 들어 있고, 설치하면 서버 의존성도
+함께 받습니다. 아래는 그렇게 사용자 기기까지 따라오는 것들이라 라이선스 고지가 필요합니다 —
+무엇이 번들 안에 있고 무엇이 서버 쪽인지는 항목마다 적었습니다.
+
+- [React · React DOM](https://github.com/facebook/react) 19.2.7 — MIT. UI 프레임워크.
+  같은 저장소의 scheduler 0.27.0도 번들에 함께 들어갑니다.
+- [marked](https://github.com/markedjs/marked) 18.0.5 — MIT. 채팅 메시지의 마크다운 파서.
+- [DOMPurify](https://github.com/cure53/DOMPurify) 3.4.11 — Apache-2.0(택일) 또는 MPL-2.0.
+  렌더링 전 HTML 살균.
+- [highlight.js](https://github.com/highlightjs/highlight.js) 11.11.1 — BSD-3-Clause.
+  코드 블록 문법 강조.
+- [ws](https://github.com/websockets/ws) 8.21.0 — MIT. 서버와 브라우저를 잇는 WebSocket
+  (브라우저 번들이 아니라 Node 서버 쪽 의존성입니다).
+- [Rolldown](https://github.com/rolldown/rolldown) 1.1.4 — MIT. 빌드 도구이지만
+  모듈 인터롭 런타임 헬퍼가 번들에 실려 함께 배포됩니다.
+- [Pretendard](https://github.com/orioncactus/pretendard) v1.3.9 — SIL OFL 1.1. 본문 글꼴.
+- [Monoplex KR](https://github.com/y-kim/monoplex) v0.0.2 — SIL OFL 1.1. 코드·터미널 글꼴.
+
+빌드에만 쓰이고 배포물에는 들어가지 않는 Vite · lightningcss · Playwright는 뺐습니다.
+
+마스코트 캐릭터 Clawd는 위 저장소들에서 온 것이 아니라 Anthropic의 것입니다 —
+[상표 고지](#상표-고지)를 보세요.
+
 ## 변경 이력 · 라이선스
 
 [CHANGELOG.md](CHANGELOG.md) · [MIT](LICENSE)
 
-번들된 폰트(Pretendard · Monoplex KR)와 라이브러리(React · marked · DOMPurify ·
-highlight.js · ws)는 각자의 라이선스를 따릅니다 — 전체 고지는
+번들된 폰트와 라이브러리는 각자의 라이선스를 따릅니다 — 목록은
+[참고한 프로젝트](#참고한-프로젝트)에, 전체 고지는
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)에 있습니다.

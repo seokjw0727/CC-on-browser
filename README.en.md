@@ -319,10 +319,57 @@ not built, endorsed or sponsored by them.** Those names are used only to state, 
 what this app does: it is a local web UI that runs the Claude Code CLI you installed
 yourself. This project's own name is **CC on Browser**.
 
+## Credits
+
+What this app owes to others. Full license texts and verification notes are in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+**Ideas referenced**
+
+- [clawd-on-desk](https://github.com/rullerzhou-afk/clawd-on-desk) — AGPL-3.0.
+  The mascot's state-to-animation vocabulary (think · busy · juggle · sweep · carry ·
+  read · alert · notify · sleep · doze) is an **idea taken** from that project's
+  state-mapping document. No code, no assets and no text were copied, so the AGPL does
+  not extend to this codebase. The credit is given because the design deserves it.
+- The **Atom One Dark · One Light themes** that ship with
+  [highlight.js](https://github.com/highlightjs/highlight.js) (by Daniel Gamage,
+  BSD-3-Clause) — the `.hljs-*` token colors in `client/src/components/chat.css` were
+  hand-adapted from them. The CSS rules are written for this project, but the hues are
+  the Atom One palette, so the attribution is required rather than courteous. Those
+  themes in turn derive from Atom's
+  [One Dark Syntax](https://github.com/atom/one-dark-syntax) ·
+  [One Light Syntax](https://github.com/atom/one-light-syntax) (MIT, © 2016 GitHub Inc.).
+
+**Bundled and shipped**
+
+The npm package contains the built browser bundle (`client/dist/`), and installing it
+also pulls the server dependency. Everything below therefore reaches your machine and
+needs its notice — each entry says whether it is in the browser bundle or server-side.
+
+- [React · React DOM](https://github.com/facebook/react) 19.2.7 — MIT. The UI framework.
+  Scheduler 0.27.0, from the same repository, is bundled with it.
+- [marked](https://github.com/markedjs/marked) 18.0.5 — MIT. Markdown parser for chat messages.
+- [DOMPurify](https://github.com/cure53/DOMPurify) 3.4.11 — Apache-2.0 (elected) or MPL-2.0.
+  Sanitizes HTML before it is rendered.
+- [highlight.js](https://github.com/highlightjs/highlight.js) 11.11.1 — BSD-3-Clause.
+  Syntax highlighting for code blocks.
+- [ws](https://github.com/websockets/ws) 8.21.0 — MIT. The WebSocket between server and
+  browser (a Node server dependency, not part of the browser bundle).
+- [Rolldown](https://github.com/rolldown/rolldown) 1.1.4 — MIT. A build tool, but the
+  module-interop runtime helpers it emits are shipped inside the bundle.
+- [Pretendard](https://github.com/orioncactus/pretendard) v1.3.9 — SIL OFL 1.1. Body font.
+- [Monoplex KR](https://github.com/y-kim/monoplex) v0.0.2 — SIL OFL 1.1. Code and terminal font.
+
+Vite, lightningcss and Playwright are build-time only and never reach the published
+package, so they are not listed here.
+
+Clawd the mascot character did not come from any of the repositories above — it is
+Anthropic's. See the [trademark notice](#trademark-notice).
+
 ## Changelog · License
 
 [CHANGELOG.md](CHANGELOG.md) · [MIT](LICENSE)
 
-The bundled fonts (Pretendard, Monoplex KR) and libraries (React, marked, DOMPurify,
-highlight.js, ws) keep their own licenses — full notices are in
+The bundled fonts and libraries keep their own licenses — they are listed under
+[Credits](#credits), and the full notices are in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
