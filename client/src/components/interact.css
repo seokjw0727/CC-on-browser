@@ -2505,6 +2505,13 @@ select.mode-trust:focus {
   user-select: all;
   word-break: break-all;
 }
+/* 받는 곳 — 위의 명령은 "받은 뒤" 칠 한 줄이라, 그 앞에 어디서 받는지가 서야 한다.
+   밑줄을 늘 켜 두는 이유: 이 영역에는 다른 링크가 없어, 색만으로는 누를 수 있는
+   것인지 읽히지 않는다. */
+.update-link {
+  font-size: 12px;
+  text-decoration: underline;
+}
 
 .settings-panel {
   display: flex;

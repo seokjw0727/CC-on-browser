@@ -1,6 +1,7 @@
 // worktree 브랜치 칩과 그 패널의 E2E — fake CLI 'echo' 스택 대상. 조회 전용 계약을
-// 브라우저에서 확인한다. 패널로 들어가는 문은 사이드바 하단 버튼이 아니라 입력창 아래
-// 칩이다(v1.11.2 다음 변경) — 그 자리와 라벨 자체도 여기서 함께 못박는다.
+// 브라우저에서 확인한다. 패널로 들어가는 문은 사이드바 하단 버튼이 아니라 컴포저
+// 상태줄의 칩이다(v1.11.2 다음 변경, 자리는 그 뒤 입력창 아래 독립 행에서 상태줄로
+// 한 번 더 옮겼다) — 그 자리와 라벨 자체도 여기서 함께 못박는다.
 //
 // 이 스택의 세션 cwd는 이 레포 자신(process.cwd())이라, 패널이 상대하는 것은 픽스처가
 // 아니라 **실제 git 저장소**다. 그래서 여기서만 증명되는 것이 있다: git 하위 프로세스가
@@ -200,27 +201,54 @@ test('턴이 끝날 때와 패널을 닫을 때 칩이 브랜치를 다시 읽�
     .toBeGreaterThan(beforeClose);
 });
 
-test('브랜치 칩은 입력창 아래에 있고 사이드바에는 없다', async ({ page }) => {
+test('브랜치 칩은 상태줄의 사용량 오른쪽에 있고 사이드바에는 없다', async ({ page }) => {
   // 이 작업의 요점 자체를 못박는다: 패널로 들어가는 문이 사이드바 하단 버튼 행에서
-  // 컴포저 아래로 **옮겨졌다**(복제된 것이 아니다).
+  // 컴포저로 **옮겨졌고**(복제된 것이 아니다), 그 안에서 다시 입력창 아래 독립 행에서
+  // 상태줄로 들어왔다. 독립 행이던 시절엔 실행 중 작업 도크가 뜰 때마다 칩이 그것을
+  // 한 칸 밀어냈다.
   await startSession(page);
 
   const trigger = chip(page);
   await expect(trigger).toHaveCount(1);
   await expect(trigger).toBeVisible();
 
-  // ① 자리 — 컴포저 도크 안, 입력 상자 **밖**이자 아래다.
-  await expect(page.locator('.composer-dock .wt-chip-row .wt-chip')).toHaveCount(1);
+  // ① 자리 — 상태줄(.composer-meta) 안, 입력 상자 **밖**이자 아래다.
+  await expect(page.locator('.composer-dock .composer-meta .wt-chip')).toHaveCount(1);
   await expect(page.locator('.composer-shell .wt-chip')).toHaveCount(0);
+  // 옛 자리(독립 행)는 흔적도 없어야 한다 — 남아 있으면 도크를 다시 밀어낸다.
+  await expect(page.locator('.wt-chip-row')).toHaveCount(0);
   const inputBox = await page.getByLabel('메시지 입력').boundingBox();
   const chipBox = await trigger.boundingBox();
   expect(chipBox.y).toBeGreaterThan(inputBox.y + inputBox.height - 1);
 
-  // ② 사이드바 하단 버튼 행에는 더 이상 없다 — 통계·설정·정보 셋만 남는다.
+  // ② 상태줄 안에서의 순서 — **모든** 사용량 표시보다 뒤, 연결 표시보다 앞이다.
+  //    좌표가 아니라 형제 순서로 본다: 좌표 비교는 첫 항목 하나만 견주기 쉬워
+  //    CTX와 5h 사이에 끼어든 칩도 통과시킨다. 사용량이 하나도 없으면 이 단언 자체가
+  //    헛도는 셈이라, 개수부터 못박는다(공식 %가 꺼져 있어도 로컬 집계 5h·7d는 뜬다).
+  const order = await page.locator('.composer-meta').evaluate((el) => {
+    const kids = [...el.children];
+    const isUsage = (k) => /^(CTX|\d+[hd])\b/.test((k.textContent || '').trim());
+    return {
+      chip: kids.findIndex((k) => k.classList.contains('wt-chip')),
+      conn: kids.findIndex((k) => k.querySelector('.conn-dot')),
+      usage: kids.map((k, i) => (isUsage(k) ? i : -1)).filter((i) => i >= 0),
+    };
+  });
+  expect(order.usage.length).toBeGreaterThan(0);
+  expect(order.chip).toBeGreaterThan(Math.max(...order.usage));
+  expect(order.chip).toBeLessThan(order.conn);
+
+  // ③ 눈에 보이는 자리도 함께 본다 — 형제 순서만 보면 상태줄이 줄바꿈해 칩이 연결
+  //    표시 **아래**로 내려간 경우를 통과시킨다. 기본 창 폭에서는 한 줄이어야 한다.
+  const connBox = await page.locator('.composer-meta .conn-dot').boundingBox();
+  expect(chipBox.y).toBeLessThan(connBox.y + connBox.height);
+  expect(chipBox.x).toBeLessThan(connBox.x);
+
+  // ④ 사이드바 하단 버튼 행에는 더 이상 없다 — 통계·설정·정보 셋만 남는다.
   await expect(page.locator('.sidebar-foot').getByRole('button', { name: /worktree/ }))
     .toHaveCount(0);
 
-  // ③ 라벨은 이 저장소의 실제 HEAD를 말한다. CI는 얕은 클론에 태그 체크아웃이라
+  // ⑤ 라벨은 이 저장소의 실제 HEAD를 말한다. CI는 얕은 클론에 태그 체크아웃이라
   //    detached일 수 있으므로 브랜치명을 못박지 않고, 패널이 같은 값을 말하는지로 본다.
   const label = (await trigger.locator('.wt-chip-label').innerText()).trim();
   expect(label).not.toBe('');

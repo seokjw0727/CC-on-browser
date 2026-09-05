@@ -1012,16 +1012,21 @@ test('/api/usage: 공식 사용률은 ?quota=1 옵트인에서만 조회된다(�
   }
 });
 
-// registry.npmjs.org로 실제로 나가지 않게 하는 유일한 seam. 전역 fetch와 같은
-// 시그니처라 수용 기준(200 AND 문자열 version) 판정은 서버 코드가 그대로 수행한다 —
+// api.github.com으로 실제로 나가지 않게 하는 유일한 seam. 전역 fetch와 같은
+// 시그니처라 수용 기준(200 AND 문자열 tag_name) 판정은 서버 코드가 그대로 수행한다 —
 // 가짜가 그 판정까지 대신하면 테스트가 코드가 아니라 가짜를 검증하게 된다.
-function fakeRegistry(initial = { mode: 'ok', version: '9.9.9' }) {
+// (이름은 npm 레지스트리를 보던 시절 그대로다 — server.js의 registryFetch 인자와 같은 이유.)
+function fakeRegistry(initial = { mode: 'ok', tag: 'v9.9.9' }) {
   const calls = [];
   const state = { ...initial };
   const fn = async (url, init) => {
     calls.push({ url, init });
     if (state.mode === 'throw') throw new Error('offline');
     if (state.mode === 'http500') return { ok: false, status: 503, json: async () => ({}) };
+    // 릴리스가 없거나 저장소가 비공개일 때 익명 요청이 받는 응답 — 이것만 따로 말한다.
+    if (state.mode === 'http404') {
+      return { ok: false, status: 404, json: async () => ({ message: 'Not Found' }) };
+    }
     // 2xx지만 본문이 없는 응답 — res.ok로 거르면 통과해 버린다(정확히 200만 성공).
     if (state.mode === 'http204') {
       return { ok: true, status: 204, json: async () => { throw new SyntaxError('no body'); } };
@@ -1029,8 +1034,10 @@ function fakeRegistry(initial = { mode: 'ok', version: '9.9.9' }) {
     if (state.mode === 'notjson') {
       return { ok: true, status: 200, json: async () => { throw new SyntaxError('bad'); } };
     }
-    if (state.mode === 'badshape') return { ok: true, status: 200, json: async () => ({ version: 42 }) };
-    return { ok: true, status: 200, json: async () => ({ version: state.version }) };
+    if (state.mode === 'badshape') {
+      return { ok: true, status: 200, json: async () => ({ tag_name: 42 }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ tag_name: state.tag }) };
   };
   return { fn, calls, state };
 }
@@ -1050,23 +1057,30 @@ test('/api/update-check: 성공 + 캐시 + 보내는 것은 URL 하나뿐', asyn
   try {
     const b = `http://127.0.0.1:${h.port}`;
     const auth = { headers: { 'x-auth-token': TOKEN } };
-    // 인증 없이는 레지스트리에 나가지도 않는다
+    // 인증 없이는 GitHub에 나가지도 않는다
     assert.equal((await fetch(`${b}/api/update-check`)).status, 401);
     assert.equal(reg.calls.length, 0);
 
     const r1 = await (await fetch(`${b}/api/update-check`, auth)).json();
+    // 태그의 선행 v는 떼고 보고한다 — package.json과 같은 표기여야 비교가 선다.
     assert.deepEqual(r1, { latest: '9.9.9', current: '1.0.0' });
     const r2 = await (await fetch(`${b}/api/update-check`, auth)).json();
     assert.deepEqual(r2, r1);
     assert.equal(reg.calls.length, 1, '성공은 캐시된다 — 두 번째 요청은 나가지 않는다');
 
     // 보안 회귀 가드: 나가는 것은 이 URL의 GET 한 줄뿐이어야 한다.
-    assert.equal(reg.calls[0].url, 'https://registry.npmjs.org/cc-on-browser/latest');
+    assert.equal(
+      reg.calls[0].url,
+      'https://api.github.com/repos/seokjw0727/CC-on-browser/releases/latest',
+    );
     assert.ok(!reg.calls[0].url.includes('?'), '쿼리스트링으로 무언가 실어 보내지 않는다');
     const headers = JSON.stringify(reg.calls[0].init.headers).toLowerCase();
     for (const leak of ['token', 'authorization', 'cookie']) {
       assert.ok(!headers.includes(leak), `${leak}이 헤더에 실리면 안 된다`);
     }
+    // GitHub은 User-Agent 없는 요청을 거절한다 — 다만 실리는 것은 앱 이름 한 단어뿐이어야
+    // 한다. 버전·설치 식별자가 붙는 순간 이 GET이 설치 통계로 변한다.
+    assert.equal(reg.calls[0].init.headers['user-agent'], 'cc-on-browser');
     assert.ok(reg.calls[0].init.signal, '타임아웃 시그널이 배선돼 있다');
   } finally {
     await h.close();
@@ -1100,6 +1114,48 @@ test('/api/update-check: 실패 다섯 갈래는 모두 200이고 캐시되지 �
       assert.equal(reg.calls.length, expected, `${mode} 실패가 캐시되면 다시 눌러도 안 나간다`);
     }
     // 실패가 캐시를 오염시키지 않았다 — 회복되면 바로 결과가 나온다
+    reg.state.mode = 'ok';
+    assert.deepEqual(
+      await (await fetch(`${b}/api/update-check`, auth)).json(),
+      { latest: '9.9.9', current: '1.0.0' },
+    );
+  } finally {
+    await h.close();
+  }
+});
+
+test("/api/update-check: 404는 'not published'로 따로 말하고 캐시되지 않는다", async () => {
+  // 릴리스가 아직 없거나 저장소가 비공개면 익명 요청은 404를 받는다. 그것을 일반
+  // 실패와 한 칸에 넣으면 화면이 "네트워크를 확인하세요"라고 오진한다 — 사용자가
+  // 고칠 수 없는 것을 고치라고 시키는 셈이다. 익명 조회로는 둘을 가를 수 없어
+  // 서버도 가르지 않는다(합쳐서 "게시된 릴리스를 찾지 못했다").
+  const reg = fakeRegistry({ mode: 'http404', tag: 'v9.9.9' });
+  const h = await startServer({
+    port: 0,
+    token: TOKEN,
+    cliPath: process.execPath,
+    cliArgsPrefix: [fakeCliPath],
+    projectsRoot,
+    staticDir,
+    version: '1.0.0',
+    registryFetch: reg.fn,
+  });
+  try {
+    const b = `http://127.0.0.1:${h.port}`;
+    const auth = { headers: { 'x-auth-token': TOKEN } };
+    // 상태코드까지 본다 — 이 응답이 404로 새어 나가면 클라이언트의 get()이 throw하고,
+    // 화면은 이 갈래를 만나 보지도 못한 채 일반 실패 UI(다시 시도)로 떨어진다.
+    const res1 = await fetch(`${b}/api/update-check`, auth);
+    assert.equal(res1.status, 200, '상류의 404를 그대로 흘려보내면 안 된다');
+    assert.deepEqual(await res1.json(), { latest: null, current: '1.0.0', error: 'not published' });
+
+    // 캐시되지 않는다 — 그 사이 릴리스가 올라오면 다시 눌러 확인할 수 있어야 한다.
+    const res2 = await fetch(`${b}/api/update-check`, auth);
+    assert.equal(res2.status, 200);
+    assert.deepEqual(await res2.json(), { latest: null, current: '1.0.0', error: 'not published' });
+    assert.equal(reg.calls.length, 2, "'게시 전'이 캐시되면 릴리스가 나도 한 시간 못 본다");
+
+    // 실제로 릴리스가 생기면 그 다음 요청부터 바로 보인다.
     reg.state.mode = 'ok';
     assert.deepEqual(
       await (await fetch(`${b}/api/update-check`, auth)).json(),

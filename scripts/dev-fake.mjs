@@ -59,6 +59,17 @@ const handle = await startServer({
   // 미설정 시 실제 ~/.claude/plugins(읽기 전용이라 위험하진 않지만, 개발자 머신의
   // 설치 목록에 따라 테스트 결과가 달라지므로 격리한다).
   claudePluginsDir: process.env.FAKE_CLAUDE_PLUGINS_DIR || undefined,
+  // FAKE_RELEASE: E2E 전용 — 업데이트 확인이 api.github.com으로 **실제로 나가지
+  // 않게** 하는 유일한 창구다(테스트가 바깥 서비스에 의존하면 GitHub이 느린 날
+  // 우리 CI가 빨개진다). 값의 뜻:
+  //   'none'          → 404, 즉 "게시된 릴리스가 없다"(서버가 not published로 옮긴다)
+  //   'v1.2.3' 같은 값 → 그 태그를 단 정식 릴리스 하나
+  // 미설정 시 주입하지 않는다 = 실제 GitHub 조회(개발자가 손으로 눌러 보는 경우).
+  registryFetch: process.env.FAKE_RELEASE
+    ? async () => (process.env.FAKE_RELEASE === 'none'
+      ? { ok: false, status: 404, json: async () => ({ message: 'Not Found' }) }
+      : { ok: true, status: 200, json: async () => ({ tag_name: process.env.FAKE_RELEASE }) })
+    : undefined,
 });
 
 console.log(`[dev-fake] scenario=${process.env.FAKE_SCENARIO || 'echo'}`);

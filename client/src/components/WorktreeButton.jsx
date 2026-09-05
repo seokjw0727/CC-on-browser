@@ -1,15 +1,22 @@
-// WorktreeButton — 입력창 아래에 늘 떠 있는 브랜치 칩과, 그것이 여는 worktree 모달.
+// WorktreeButton — 입력창 아래 상태줄에 늘 떠 있는 브랜치 칩과, 그것이 여는 worktree 모달.
 //
 // 원래 이 패널은 사이드바 하단 네 버튼 중 두 번째였다. 거기서는 "통계·설정·정보와
 // 나란한 부가 패널"이었는데, 지금 작업이 어느 브랜치에서 일어나고 있는지는 그런 종류의
 // 정보가 아니다 — 프롬프트를 보내기 직전에 보여야 하는 값이라 입력창 옆으로 내려왔다.
 // 모양이 VS Code 상태줄의 브랜치 표시를 닮은 것도 같은 이유다.
 //
+// 자리는 한 번 더 옮겼다: 입력 상자 바로 아래의 **독립 행**이던 시절, 실행 중 작업 도크
+// (RunningWork — 셸·서브에이전트 항목)가 뜨면 칩이 입력창과 도크 사이에 끼어 도크를 한 칸
+// 밀어냈다. 지금은 상태줄(.composer-meta)의 사용량 링(CTX·5h·7d) 오른쪽에 들어가 있다 —
+// 컨텍스트·사용량과 나란한 "지금 상태" 값이고, 그 줄은 조건과 무관하게 늘 있으므로
+// 도크가 뜨고 지는 것과 서로를 밀지 않는다.
+//
 // 자리만 컴포저에 얹혀 있을 뿐 스토어에서 직접 읽는다(PermissionModeBar와 같은 규약) —
 // Composer.jsx는 위치만 잡아 주고 props를 흘려보내지 않는다. 모달 역시 사이드바의
 // FootModal을 빌려 쓰지 않고 같은 패턴을 자기 것으로 가진다: 사이드바에서 떼어낸다는
 // 것은 화면 위치만 옮기는 일이 아니라 그쪽 표(FOOT_PANELS)에서 벗어난다는 뜻이다.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore, useActiveSession } from '../lib/store.jsx';
 import { fetchBranch } from '../lib/api.js';
 import { useFocusTrap } from '../lib/useFocusTrap.js';
@@ -66,10 +73,17 @@ function chipText(info) {
 
 // worktree 모달 — 사이드바 FootModal과 같은 오버레이/포커스 트랩/페이드 규약.
 // 본문은 예전과 완전히 같은 WorktreePanel이다(조회·새로고침·오류 처리는 전부 그쪽 몫).
+//
+// **body로 포털**한다(이 앱에서 여기만 그렇다). 칩이 상태줄로 들어가면서 모달의 JSX
+// 부모가 .composer-meta가 됐는데, 그 줄은 color: var(--text-faint)와 font-size: 13px을
+// 갖는다 — position:fixed는 위치만 흐름 밖으로 뺄 뿐 **상속은 그대로**라, 그냥 두면
+// 모달 제목·커밋 제목·브랜치명이 통째로 흐려진다(codex 지적). 포털은 상속 사슬 자체를
+// body로 옮겨 그 문제를 없애고, 상태줄에 훗날 transform/overflow가 붙어도 fixed가
+// 깨지지 않게 한다.
 function WorktreeModal({ presenceStatus, onClose }) {
   const { state } = useStore();
   const dialogRef = useFocusTrap(true);
-  return (
+  return createPortal(
     <div
       className={`modal-overlay${presenceStatus === 'closing' ? ' closing' : ''}`}
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
@@ -102,7 +116,8 @@ function WorktreeModal({ presenceStatus, onClose }) {
           <WorktreePanel state={state} />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -169,24 +184,25 @@ export default function WorktreeButton() {
   const { label, tip, unknown } = chipText(info);
 
   return (
+    // 감싸는 상자가 없다 — 칩 자체가 상태줄(.composer-meta)의 flex 항목이라, 예전의
+    // .wt-chip-row 같은 래퍼를 두면 그 상자가 항목이 되어 gap·정렬이 한 겹 어긋난다.
+    // 모달은 position:fixed라 흐름 밖이므로 형제로 두어도 상태줄 배치에 끼어들지 않는다.
     <>
-      <div className="wt-chip-row">
-        <button
-          type="button"
-          className={`wt-chip${unknown ? ' unknown' : ''}${open ? ' open' : ''}`}
-          onClick={() => setOpen((o) => !o)}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          aria-controls={open ? 'worktree-modal' : undefined}
-          // 보이는 라벨은 브랜치명이라 매번 달라진다 — 접근성 이름 앞머리는 고정해
-          // 스크린리더와 테스트가 항상 같은 이름으로 이 버튼을 찾을 수 있게 한다.
-          aria-label={`worktree — ${label}`}
-          data-tip={tip}
-        >
-          <WorktreeIcon className="wt-chip-ico" />
-          <span className="wt-chip-label">{label}</span>
-        </button>
-      </div>
+      <button
+        type="button"
+        className={`wt-chip${unknown ? ' unknown' : ''}${open ? ' open' : ''}`}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? 'worktree-modal' : undefined}
+        // 보이는 라벨은 브랜치명이라 매번 달라진다 — 접근성 이름 앞머리는 고정해
+        // 스크린리더와 테스트가 항상 같은 이름으로 이 버튼을 찾을 수 있게 한다.
+        aria-label={`worktree — ${label}`}
+        data-tip={tip}
+      >
+        <WorktreeIcon className="wt-chip-ico" />
+        <span className="wt-chip-label">{label}</span>
+      </button>
 
       <WorktreeModalPresence open={open} onClose={closeModal} />
     </>

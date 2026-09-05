@@ -213,6 +213,25 @@ test('설정 모달 — 네 탭이 있고 선택된 탭의 패널만 보인다',
   await expect(settings.locator('.update-status')).toBeEmpty();
 });
 
+test('업데이트 확인 — 게시된 릴리스가 없으면 네트워크 탓으로 오진하지 않는다', async ({ page }) => {
+  // 이 스택은 FAKE_RELEASE=none이라 조회가 404로 돌아온다(global-setup) — 진짜
+  // api.github.com으로는 나가지 않는다. 404는 이 저장소의 실제 상태이기도 하고,
+  // 예전 화면이 "네트워크를 확인해 주세요"라고 잘못 말하던 바로 그 경우다.
+  await page.goto(servers.echo.url);
+  await page.getByRole('button', { name: '설정' }).click();
+  const settings = page.getByRole('dialog', { name: '설정' });
+  await settings.getByRole('tab', { name: '업데이트' }).click();
+  await settings.getByRole('button', { name: '확인', exact: true }).click();
+
+  const status = settings.locator('.update-status');
+  await expect(status).toContainText('배포된 릴리스를 찾지 못했습니다');
+  await expect(status).not.toContainText('네트워크');
+  // 다시 눌러도 달라질 것이 없으므로 재시도를 권하지 않는다.
+  await expect(settings.getByRole('button', { name: '다시 시도' })).toHaveCount(0);
+  // 설치 안내도 뜨지 않는다 — 받을 것이 없는데 명령만 보이면 그 자체가 오답이다.
+  await expect(settings.locator('.update-cmd')).toHaveCount(0);
+});
+
 test('설정의 기본 권한 모드가 새 세션 모달의 초기값이 된다', async ({ page }) => {
   await page.goto(servers.echo.url);
   await page.getByRole('button', { name: '설정' }).click();

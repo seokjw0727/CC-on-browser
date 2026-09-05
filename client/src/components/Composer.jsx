@@ -1165,14 +1165,6 @@ export default function Composer() {
 
       </div>
 
-      {/* worktree 브랜치 칩 — 입력 상자 **바로 아래**의 독립 버튼(사이드바 하단
-          네 버튼 중 하나였던 것을 떼어 왔다). 여기가 셸 밖·RunningWork 앞인 이유는
-          "입력창 아래"라는 자리가 조건부로 흔들리면 안 되기 때문이다: 셸 안에 두면
-          입력 상자 테두리 안으로 들어가고, RunningWork 뒤에 두면 작업이 돌 때만
-          한 칸 밀려난다. 데이터·여닫음은 전부 자기가 처리하므로 props가 없다
-          (PermissionModeBar와 같은 규약). */}
-      <WorktreeButton />
-
       {/* 실행 중 작업 도크 — 입력창 박스 **밖**의 독립 카드(.composer-shell의 형제).
           셸 안에 있던 시절엔 도크에 포커스만 가도 .composer-shell:focus-within이 입력창
           테두리를 물들였고, 상세를 펼치면 입력 박스가 통째로 늘어났다. 셸 **뒤**여야
@@ -1186,7 +1178,7 @@ export default function Composer() {
         />
       )}
 
-      {/* 상태줄 — 컨텍스트·5h/7d 사용량·연결 */}
+      {/* 상태줄 — 컨텍스트·5h/7d 사용량·worktree 브랜치·연결 */}
       <div className="composer-meta">
         {/* 표시 여부는 값이 아니라 플래그로 — /clear 직후의 0은 "보여줄 값이 없음"이
             아니라 "비웠음"이라 링이 사라지면 안 된다(format.js hasDisplayableCtx 주석 참조) */}
@@ -1229,6 +1221,13 @@ export default function Composer() {
             </span>
           )
         )}
+        {/* worktree 브랜치 칩 — 사용량 링 **오른쪽**의 상태줄 항목. 예전에는 입력 상자와
+            실행 중 작업 도크 사이의 독립 행이어서, 도크가 뜰 때마다 셸·서브에이전트 항목을
+            한 칸 아래로 밀어냈다. 상태줄은 조건과 무관하게 늘 있는 줄이라 그 밀침이 없고,
+            브랜치는 컨텍스트·사용량과 성격이 같은 "지금 상태" 값이다. busy/연결 끊김 안내
+            **앞**인 이유: 그 둘은 조건부라, 뒤에 두면 안내가 뜰 때마다 칩이 옆으로 뛴다.
+            데이터·여닫음은 전부 자기가 처리하므로 props가 없다(PermissionModeBar와 같은 규약). */}
+        <WorktreeButton />
         {busy && <span className="meta-item accent">응답 생성 중 — Esc로 중단</span>}
         {session && state.conn !== 'open' && (
           <span className="meta-item danger">연결 끊김 — 재접속 중…</span>

@@ -98,8 +98,11 @@ on your machine. That makes the security boundary explicit:
     that intent. That is why the default is off and why this is your decision, not
     the app's. Everything else in the app works with it off; you simply see local
     transcript token counts instead of official percentages.
-  - **Update check (manual only).** Settings → Updates fetches one npm registry URL
-    when you press the button. Nothing is sent with it.
+  - **Update check (manual only).** Settings → Updates fetches one GitHub Releases URL
+    (`api.github.com/repos/seokjw0727/CC-on-browser/releases/latest`) when you press the
+    button, and reads the release tag from it. It sends three generic headers GitHub asks
+    of every API request (`User-Agent: cc-on-browser`, `Accept`, `X-GitHub-Api-Version`)
+    and nothing else — no token, no cookie, no query string, no installation identifier.
 
   No model calls are ever made outside your own CLI sessions.
 - The daemon scrubs the auth token from its process environment after startup
@@ -227,8 +230,11 @@ CC on Browser는 로컬에 설치된 Claude Code CLI를 자식 프로세스로 �
     그 취지 밖에 있습니다. 기본값을 꺼 둔 이유이자, 이 판단을 앱이 대신하지 않고
     사용자에게 맡기는 이유입니다. 꺼 두어도 나머지 기능은 모두 그대로 동작하며,
     공식 %(퍼센트) 자리에 로컬 대화 기록 집계가 표시됩니다.
-  - **업데이트 확인 (수동).** 설정 → 업데이트에서 버튼을 누를 때만 npm 레지스트리
-    URL 하나를 조회합니다. 함께 보내는 정보는 없습니다.
+  - **업데이트 확인 (수동).** 설정 → 업데이트에서 버튼을 누를 때만 GitHub Releases
+    URL 하나(`api.github.com/repos/seokjw0727/CC-on-browser/releases/latest`)를 조회해
+    릴리스 태그를 읽습니다. 함께 나가는 것은 GitHub API가 모든 요청에 요구하는 일반
+    헤더 셋(`User-Agent: cc-on-browser`, `Accept`, `X-GitHub-Api-Version`)뿐이며,
+    토큰·쿠키·쿼리스트링·설치 식별자는 싣지 않습니다.
 
   사용자의 CLI 세션 밖에서 모델을 호출하는 일은 어떤 경우에도 없습니다.
 - 데몬은 기동 직후 인증 토큰을 자신의 env에서 제거해, 스폰된 CLI 세션과 그

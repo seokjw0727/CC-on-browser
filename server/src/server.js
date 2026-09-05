@@ -40,11 +40,19 @@ const QUOTA_CACHE_MS = 60_000;
 const DAILY_CACHE_MS = 5 * 60_000;
 // --effort 허용값 (claude --help 실측)
 const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
-// npm 레지스트리의 dist-tag 'latest' 문서. 서버가 바깥으로 내는 요청은 둘뿐이고
+// GitHub Releases의 '가장 최근 정식 릴리스' 문서. 서버가 바깥으로 내는 요청은 둘뿐이고
 // **둘 다 사용자가 켜거나 눌러야만** 나간다: 이쪽(설정 → 업데이트 버튼)과
 // quota.js의 사용률 조회(설정 토글, 기본 꺼짐 — /api/usage의 ?quota=1 관문).
 // 이 요청이 보내는 것은 이 URL의 GET 한 줄뿐이다(토큰·세션·경로·설치 식별자를 싣지 않는다).
-const REGISTRY_LATEST_URL = 'https://registry.npmjs.org/cc-on-browser/latest';
+//
+// 왜 npm이 아니라 여기인가: 이 패키지는 npm에 게시된 적이 없어(레지스트리가 404)
+// 예전 조회는 **언제나** 실패했고, 화면은 그것을 "네트워크를 확인하세요"라는 틀린
+// 진단으로 옮겼다. 실제 배포 채널은 릴리스 워크플로가 태그마다 올리는
+// cc-on-browser-<버전>.tgz 자산이고(README의 설치 안내도 그것이다), npm publish는
+// NPM_TOKEN이 있을 때만 곁들여 도는 선택지다. 버전의 출처는 그래서 릴리스가 맞다.
+// /releases/latest는 draft와 프리릴리스를 스스로 걸러 내므로 "권할 수 있는 최신"과
+// 뜻이 정확히 겹친다.
+const RELEASES_LATEST_URL = 'https://api.github.com/repos/seokjw0727/CC-on-browser/releases/latest';
 // 사용자가 버튼을 누르고 기다리는 전경 요청이라 quota(4s)보다 살짝 길게 잡되,
 // 행 걸린 네트워크가 설정 모달을 붙잡지 않도록 상한은 반드시 둔다.
 const UPDATE_TIMEOUT_MS = 5_000;
@@ -91,24 +99,38 @@ const CONTENT_TYPES = {
 };
 
 /**
- * 레지스트리가 말하는 최신 배포 버전. 성공 판정은 **HTTP 200 AND version이 비지 않은
- * 문자열**뿐이고, 그 밖(타임아웃·네트워크 오류·비200·JSON 아님·version이 문자열이
- * 아님)은 전부 null이다 — 부가 기능이라 어떤 실패도 사용자에게 원문 오류를 보일
- * 이유가 없고, 원문을 흘리면 응답이 실패 종류마다 달라져 UI가 분기를 떠안는다.
+ * GitHub Releases가 말하는 최신 배포 버전. 성공 판정은 **HTTP 200 AND tag_name이 비지
+ * 않은 문자열**뿐이고, 그 밖(타임아웃·네트워크 오류·비200·JSON 아님·tag_name이 문자열이
+ * 아님)은 전부 실패다 — 부가 기능이라 어떤 실패도 사용자에게 원문 오류를 보일 이유가
+ * 없고, 원문을 흘리면 응답이 실패 종류마다 달라져 UI가 분기를 떠안는다.
  * redirect는 명시 차단한다: 이 GET에 추종이 필요 없고, 모르는 호스트로 끌려가는
  * 것이 '확인 실패'보다 나쁘다(quota.js와 같은 선택).
+ *
+ * 실패 중 **404만** 따로 말한다. 그 하나는 네트워크 사정이 아니라 "아직 올라온 정식
+ * 릴리스가 없다(또는 저장소가 비공개다)"라는 뜻이고, 그때 사용자가 할 일은 재시도가
+ * 아니라 기다림이라 화면 문구가 달라야 하기 때문이다. 익명 요청에는 이 둘이 같은
+ * 404로 오므로 서버도 둘을 구분하지 않는다 — 합쳐서 "게시된 릴리스를 찾지 못했다"이다.
+ *
+ * @returns {Promise<{latest: string} | {notPublished: true} | null>} null이면 일반 실패
  */
 async function fetchLatestVersion(fetchFn) {
   let res;
   try {
-    res = await fetchFn(REGISTRY_LATEST_URL, {
-      headers: { accept: 'application/json' },
+    res = await fetchFn(RELEASES_LATEST_URL, {
+      headers: {
+        accept: 'application/vnd.github+json',
+        // GitHub API는 User-Agent 없는 요청을 403으로 되돌린다. 값은 앱 이름 한 단어뿐
+        // (버전·설치 식별자를 붙이지 않는다 — 그 순간 이 GET이 설치 통계가 된다).
+        'user-agent': 'cc-on-browser',
+        'x-github-api-version': '2022-11-28',
+      },
       signal: AbortSignal.timeout(UPDATE_TIMEOUT_MS),
       redirect: 'error',
     });
   } catch {
     return null;
   }
+  if (res?.status === 404) return { notPublished: true };
   // res.ok(200~299)가 아니라 정확히 200만 받는다 — 이 엔드포인트가 본문을 싣고
   // 돌려주는 응답은 200뿐이고, 204·206 같은 나머지 2xx는 "성공했지만 읽을 것이
   // 없다"라서 아래 json()에서 어차피 터진다. 여기서 거르면 실패 경로가 하나로 모인다.
@@ -119,8 +141,13 @@ async function fetchLatestVersion(fetchFn) {
   } catch {
     return null;
   }
-  const latest = body?.version;
-  return typeof latest === 'string' && latest ? latest : null;
+  const tag = body?.tag_name;
+  if (typeof tag !== 'string') return null;
+  // 태그는 이 저장소 관례대로 'v1.11.5' 꼴이다. 선행 v 하나만 떼어 package.json과 같은
+  // 표기로 맞추고, 그 밖의 형식 판정(비교 가능한가)은 클라이언트 몫으로 남긴다 —
+  // 서버가 여기서 더 판정하면 "무엇을 알아냈는가"만 보고한다는 계약이 흐려진다.
+  const latest = tag.trim().replace(/^v/, '');
+  return latest ? { latest } : null;
 }
 
 // /api/* 경로별 허용 메서드. 405의 Allow 헤더와 "이 메서드를 받아 주는가" 판정이 같은
@@ -152,10 +179,12 @@ export async function startServer({
   staticDir,
   exitedRetentionMs,
   quotaFetcher, // 테스트 주입용 — 기본은 quota.js의 공식 사용률 조회
-  // 테스트 주입용 — 전역 fetch와 같은 시그니처. 통합 테스트가 registry.npmjs.org로
+  // 테스트 주입용 — 전역 fetch와 같은 시그니처. 통합 테스트가 api.github.com으로
   // 실제로 나가지 않게 하는 유일한 창구다. 여기가 fetchLatestVersion 자체가 아니라
-  // fetch인 이유: 비200·형식 불일치 같은 '수용 기준' 분기를 가짜가 대신 판정해
+  // fetch인 이유: 비200·404·형식 불일치 같은 '수용 기준' 분기를 가짜가 대신 판정해
   // 버리면 테스트가 코드가 아니라 가짜를 검증하게 된다.
+  // 이름은 npm 레지스트리를 보던 시절 그대로다 — 조회처가 GitHub Releases로 바뀌었어도
+  // 이 인자가 하는 일("업데이트 조회용 fetch")은 같아, 굳이 갈아 끼우지 않았다.
   registryFetch = fetch,
   // 이 서버가 보고할 자기 버전(/api/bootstrap). 클라이언트 번들이 자기 빌드 버전과
   // 견줘 "구 데몬 + 새 번들" 스큐를 알아채는 데 쓴다 — 그 상태에서는 새로 생긴 WS
@@ -804,27 +833,35 @@ export async function startServer({
           return;
         case '/api/update-check': {
           // 사용자가 명시적으로 버튼을 눌렀을 때만 나가는 외부 요청이다(자동 조회 없음,
-          // 설계도 §4). 브라우저가 직접 레지스트리를 치지 않고 서버를 거치는 이유는
+          // 설계도 §4). 브라우저가 직접 GitHub을 치지 않고 서버를 거치는 이유는
           // CORS 회피와 "무엇이 밖으로 나가는가"의 창구를 한 곳으로 모으기 위함이다.
           if (!updateCache.promise || Date.now() - updateCache.at > UPDATE_CACHE_MS) {
             const promise = Promise.resolve()
               .then(() => fetchLatestVersion(registryFetch))
               .catch(() => null)
-              .then((latest) => {
-                // 실패는 캐시하지 않는다 — 단, 그 사이 들어선 새 캐시는 건드리지 않는다.
-                if (latest == null && updateCache.promise === promise) {
+              .then((found) => {
+                // **성공만** 캐시한다 — 단, 그 사이 들어선 새 캐시는 건드리지 않는다.
+                // '게시된 릴리스 없음'도 캐시하지 않는 이유: 그 사이 릴리스가 올라오면
+                // 다시 눌러 확인할 수 있어야 하는데, 캐시하면 한 시간 동안 같은 답만 나온다.
+                if (!found?.latest && updateCache.promise === promise) {
                   updateCache = { at: 0, promise: null };
                 }
-                return latest;
+                return found;
               });
             updateCache = { at: Date.now(), promise };
           }
-          const latest = await updateCache.promise;
+          const found = await updateCache.promise;
           // current는 런처가 넘긴 패키지 버전이고 **null일 수 있다**. 그래도 200이다 —
           // 비교 가능 여부 판정은 클라이언트 몫이고, 서버는 무엇을 알아냈는지만 보고한다.
-          json(res, 200, latest
-            ? { latest, current: version }
-            : { latest: null, current: version, error: 'update check failed' });
+          // 실패도 두 갈래를 그대로 옮긴다: 'not published'는 재시도가 아니라 기다림이
+          // 답이라, 화면이 네트워크를 의심하게 두면 안 된다.
+          json(res, 200, found?.latest
+            ? { latest: found.latest, current: version }
+            : {
+              latest: null,
+              current: version,
+              error: found?.notPublished ? 'not published' : 'update check failed',
+            });
           return;
         }
         case '/api/projects':

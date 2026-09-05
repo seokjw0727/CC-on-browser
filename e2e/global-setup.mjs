@@ -96,6 +96,11 @@ function startFakeServer(scenario) {
           // bulk 시나리오의 한 턴 분량 — 채팅 윈도잉(기본 창 200)의 경계를 넘겨야
           // "창 상한 · 더 보기 · 모두 불러오기"를 관측할 수 있다.
           FAKE_BULK_COUNT: '500',
+          // 업데이트 확인이 진짜 api.github.com으로 나가지 않게 한다. 'none'을 주는
+          // 이유는 그것이 지금 이 저장소의 실제 상태이자(정식 릴리스 없음) 예전에
+          // 화면이 오진하던 바로 그 경우이기 때문이다 — 눌러 보는 테스트가 그 문구를
+          // 확인한다(e2e/app.spec.js). 값을 'v9.9.9'로 바꾸면 '새 버전 있음' 쪽을 본다.
+          FAKE_RELEASE: 'none',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,

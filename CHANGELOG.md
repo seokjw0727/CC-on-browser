@@ -8,20 +8,28 @@ Full bilingual (EN/KO) release notes live on the
 
 ## [Unreleased]
 
-> 저장소를 공개하기 위한 정리입니다. 눈에 보이는 변화는 셋입니다. **계정 공식 사용률
-> 조회가 옵트인이 되어 기본으로 꺼집니다** — 지금까지는 앱을 켜기만 해도 60초마다 CLI가
-> 저장해 둔 구독 OAuth 토큰으로 api.anthropic.com을 조회했는데, 그 자격증명은 원래
-> Claude Code와 Anthropic 자체 앱을 위한 것이라 서드파티 도구가 대신 쓰는 판단은 사용자가
-> 직접 내려야 한다고 보았습니다. 설정에서 켜면 예전과 똑같이 동작하고, 꺼 두면 로컬 대화
-> 기록 집계만 표시됩니다. 다음으로 **앱 이름이 "CC on Browser"가 됩니다** — Anthropic의
-> 상표 정책이 제품명·로고에 "Claude Code"를 쓰는 것을 금지하기 때문이며, 이 앱이 Claude
-> Code CLI를 구동한다는 설명은 평문으로 그대로 남습니다. 마지막으로 **번들된 폰트와
-> 라이브러리의 라이선스 고지가 추가됩니다** — 빌드가 라이선스 배너를 지운 채 배포되고
-> 있어 THIRD-PARTY-NOTICES.md가 유일한 고지가 되기 때문입니다.
-> (Prepares the repository for public release. Three user-visible changes: official
-> account-usage lookups become opt-in and default to off; the app is renamed to
-> "CC on Browser"; and the bundled fonts and libraries now carry the license notices
-> that minification strips from the shipped bundle.)
+## [1.11.6] - 2026-09-06
+
+> 저장소를 공개하기 위한 정리이자, 그 과정에서 드러난 두 가지를 함께 고친 릴리스입니다.
+> 먼저 **계정 공식 사용률 조회가 옵트인이 되어 기본으로 꺼집니다** — 지금까지는 앱을
+> 켜기만 해도 60초마다 CLI가 저장해 둔 구독 OAuth 토큰으로 api.anthropic.com을 조회했는데,
+> 그 자격증명은 원래 Claude Code와 Anthropic 자체 앱을 위한 것이라 서드파티 도구가 대신
+> 쓰는 판단은 사용자가 직접 내려야 한다고 보았습니다. 설정에서 켜면 예전과 똑같이
+> 동작하고, 꺼 두면 로컬 대화 기록 집계만 표시됩니다. 다음으로 **앱 이름이 "CC on
+> Browser"가 됩니다** — Anthropic의 상표 정책이 제품명·로고에 "Claude Code"를 쓰는 것을
+> 금지하기 때문이며, 이 앱이 Claude Code CLI를 구동한다는 설명은 평문으로 그대로 남습니다.
+> **번들된 폰트와 라이브러리의 라이선스 고지도 추가됩니다** — 빌드가 라이선스 배너를 지운
+> 채 배포되고 있어 THIRD-PARTY-NOTICES.md가 유일한 고지가 되기 때문입니다. 화면에서는
+> **worktree 브랜치 칩이 상태줄로 들어가** 실행 중 작업 도크를 더는 밀어내지 않고,
+> **설정의 업데이트 확인이 실제로 동작합니다** — 게시된 적 없는 npm 패키지를 보느라 늘
+> 실패하던 조회가 이제 진짜 배포 채널인 GitHub Releases를 봅니다.
+> (Prepares the repository for public release and fixes two things found along the way.
+> Official account-usage lookups become opt-in and default to off; the app is renamed to
+> "CC on Browser"; the bundled fonts and libraries now carry the license notices that
+> minification strips from the shipped bundle; the worktree branch chip moves into the
+> status bar so it no longer displaces the running-work dock; and the update check now
+> reads GitHub Releases — the actual distribution channel — instead of an npm package that
+> was never published.)
 
 ### Added
 - **THIRD-PARTY-NOTICES.md** — 번들되는 폰트(Pretendard, Monoplex KR)와 라이브러리
@@ -61,6 +69,20 @@ Full bilingual (EN/KO) release notes live on the
 - 마스코트 주석과 README가 캐릭터의 출처를 정확히 밝히고, 무드 어휘를 참고한
   clawd-on-desk(AGPL-3.0)를 출처로 표기합니다.
   (Accurate provenance for the mascot, plus credit for the mood vocabulary it borrows.)
+- **worktree 브랜치 칩이 상태줄로 들어갔습니다** — 컨텍스트·사용량 표시 오른쪽입니다.
+  입력창과 "실행 중" 도크 사이에 독립 행으로 서 있던 자리에서는, 셸이나 서브에이전트가
+  돌기 시작할 때마다 칩이 그 도크를 한 칸 아래로 밀어냈습니다. 상태줄은 조건과 무관하게
+  늘 있는 줄이라 그 밀침이 사라집니다. 브랜치를 다시 읽는 시점(세션 전환·턴 종료·창
+  포커스·패널 닫기)과 패널 내용은 그대로입니다.
+  (Moves the worktree branch chip into the status bar, right of the usage readouts, so it
+  no longer displaces the running-work dock.)
+- 업데이트 확인이 이제 **GitHub Releases**를 봅니다(예전에는 npm 레지스트리). 이 패키지는
+  npm에 게시된 적이 없어 그 조회는 언제나 빈손이었고, 실제 배포 채널은 릴리스마다 붙는
+  `cc-on-browser-<버전>.tgz` 자산입니다. 새 버전이 있으면 릴리스 페이지 링크와 그 버전의
+  tarball을 가리키는 설치 명령을 함께 보여 줍니다. 나가는 것은 여전히 버튼을 눌렀을 때의
+  URL 하나뿐입니다.
+  (The update check now reads GitHub Releases — the actual distribution channel — and
+  shows the release link plus the matching tarball install command.)
 
 ### Removed
 - 쓰이지 않던 클라이언트 헬퍼 `fetchSessions`·`browseDirs`와 참조되지 않는 `.faint`
@@ -81,6 +103,14 @@ Full bilingual (EN/KO) release notes live on the
 - `claude-settings-form.js`에 이스케이프 대신 실제 NUL 바이트가 들어 있어 git과 ripgrep이
   이 파일을 바이너리로 취급하던 문제 — 코드 리뷰에서 diff가 보이지 않았습니다.
   (A literal NUL byte made one source file register as binary to git and ripgrep.)
+- **설정 → 업데이트의 "확인"이 언제나 실패하던 문제.** 조회처가 게시된 적 없는 npm
+  패키지 이름이라 응답은 늘 404였고, 화면은 그것을 "네트워크를 확인해 주세요"라는 틀린
+  진단으로 옮겼습니다. 이제 실제 배포 채널인 GitHub Releases를 보고, 아직 올라온 릴리스가
+  없거나 저장소가 비공개라 확인할 수 없는 경우를 네트워크 오류와 구분해 말합니다 —
+  그때는 재시도 버튼을 내주지 않습니다(다시 눌러도 달라질 것이 없기 때문입니다).
+  (Fixes the Updates tab always reporting a network failure: it checked an npm package
+  that was never published. It now reads GitHub Releases and distinguishes "no published
+  release yet" from a genuine lookup failure.)
 
 ## [1.11.5] - 2026-09-04
 
@@ -1140,7 +1170,8 @@ First distributable release — streaming markdown chat, tool cards, permission
 dialogs, session resume, local-only server (127.0.0.1 + token auth) driving the
 locally installed Claude Code CLI. No SDK, no API key.
 
-[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.5...HEAD
+[Unreleased]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.6...HEAD
+[1.11.6]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.5...v1.11.6
 [1.11.5]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.4...v1.11.5
 [1.11.4]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.3...v1.11.4
 [1.11.3]: https://github.com/seokjw0727/CC-on-browser/compare/v1.11.2...v1.11.3

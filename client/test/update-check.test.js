@@ -7,9 +7,10 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
-  UPDATE_COMMAND,
+  RELEASES_URL,
   compareSemver,
   parseSemver,
+  updateCommand,
   updateMessage,
   updateStatus,
 } from '../src/lib/update-check.js';
@@ -58,10 +59,13 @@ test('updateStatus — 최신이면 current(ahead=false)', () => {
   assert.match(msg, /최신/);
 });
 
-test('updateStatus — 낮으면 outdated + 안내 명령', () => {
+test('updateStatus — 낮으면 outdated + 받는 곳과 안내 명령', () => {
   const r = updateStatus({ current: '1.9.5', latest: '1.10.0' });
   assert.equal(r.state, 'outdated');
-  assert.equal(r.command, UPDATE_COMMAND);
+  // 명령은 **그 버전의** tarball을 가리켜야 한다 — 고정 문자열이면 사용자가 방금 받은
+  // 파일 이름과 어긋나 그대로 붙여 넣을 수 없다.
+  assert.equal(r.command, 'npm install -g ./cc-on-browser-1.10.0.tgz');
+  assert.equal(r.url, RELEASES_URL);
   const msg = updateMessage(r);
   assert.match(msg, /1\.10\.0/);
   assert.match(msg, /1\.9\.5/);
@@ -82,6 +86,41 @@ test('updateStatus — error가 있으면 latest 유무보다 우선한다', () 
   assert.equal(b.reason, 'fetch-failed');
 });
 
+test("updateStatus — 'not published'는 조회 실패와 다른 갈래다", () => {
+  // 릴리스가 아직 없는 것(또는 저장소가 비공개인 것)은 네트워크 사정이 아니다.
+  // 같은 fetch-failed로 접으면 화면이 '다시 시도'를 내주고, 사용자는 있지도 않은
+  // 네트워크 고장을 의심하며 버튼만 다시 누르게 된다.
+  const r = updateStatus({ current: '1.9.5', latest: null, error: 'not published' });
+  assert.equal(r.state, 'unknown');
+  assert.equal(r.reason, 'not-published');
+  const msg = updateMessage(r);
+  assert.doesNotMatch(msg, /네트워크/, '네트워크를 의심하게 만들면 안 된다');
+  // 두 사정을 모두 말해야 한다 — 익명 조회에는 '아직 게시 전'과 '비공개 저장소'가
+  // 같은 404로 오므로, 한쪽만 적으면 나머지 절반의 사용자에게 거짓을 말하게 된다.
+  assert.match(msg, /게시 전/);
+  assert.match(msg, /비공개/);
+});
+
+test('not-published에는 다시 시도 버튼이 붙지 않는다 (배선 가드)', () => {
+  // 다시 눌러도 달라질 것이 없는 상태에 재시도를 내주면, 사용자는 있지도 않은
+  // 네트워크 고장을 의심하며 버튼만 누르게 된다. 화면 조건이 reason까지 보는지를
+  // 소스 텍스트로 못박는다(이 저장소에는 컴포넌트 렌더 테스트가 없다 — 같은 방식의
+  // 배선 가드가 아래 '자동으로 나가지 않는다'와 app-version.test.js에도 있다).
+  const sidebar = readFileSync(join(__dirname, '..', 'src', 'components', 'Sidebar.jsx'), 'utf8');
+  assert.match(
+    sidebar,
+    /result\.state === 'unknown' && result\.reason === 'fetch-failed'/,
+    "재시도 조건이 reason을 보지 않으면 not-published에도 버튼이 붙는다",
+  );
+});
+
+test('updateCommand — 릴리스 자산 이름과 같은 꼴이다', () => {
+  // 릴리스 워크플로가 올리는 자산은 npm pack의 이름 규약(cc-on-browser-<버전>.tgz)을
+  // 그대로 쓴다. 이 문구가 그 규약에서 벗어나면 안내가 곧 오답이 된다.
+  assert.equal(updateCommand('1.11.5'), 'npm install -g ./cc-on-browser-1.11.5.tgz');
+  assert.equal(RELEASES_URL, 'https://github.com/seokjw0727/CC-on-browser/releases');
+});
+
 test('updateStatus — 한쪽 버전을 모르면 missing (구 데몬·번들 정의 없음)', () => {
   assert.equal(updateStatus({ current: null, latest: '1.10.0' }).reason, 'missing');
   assert.equal(updateStatus({ current: '1.9.5', latest: null }).reason, 'missing');
@@ -100,16 +139,13 @@ test('updateStatus — 문자열이 아닌 값을 방어한다', () => {
   assert.equal(r.latest, null);
 });
 
-test('안내 명령 문구를 고정한다 (바뀌면 여기서 먼저 깨진다)', () => {
-  assert.equal(UPDATE_COMMAND, 'npm i -g cc-on-browser@latest');
-});
-
-test('updateMessage — 네 갈래가 서로 다르고 undefined/null이 새지 않는다', () => {
+test('updateMessage — 일곱 갈래가 서로 다르고 undefined/null이 새지 않는다', () => {
   const msgs = [
     updateMessage(updateStatus({ current: '1.9.5', latest: '1.10.0' })),
     updateMessage(updateStatus({ current: '1.9.5', latest: '1.9.5' })),
     updateMessage(updateStatus({ current: '2.0.0', latest: '1.9.5' })),
     updateMessage(updateStatus({ current: '1.9.5', latest: null, error: 'x' })),
+    updateMessage(updateStatus({ current: '1.9.5', latest: null, error: 'not published' })),
     updateMessage(updateStatus({ current: null, latest: '1.9.5' })),
     updateMessage(updateStatus({ current: '1.9.5', latest: 'latest' })),
   ];

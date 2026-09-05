@@ -1202,7 +1202,7 @@ function UpdateSettings() {
       <div className="setting-row">
         <span
           className="setting-label"
-          data-tip="npm 레지스트리에서 배포된 최신 버전만 조회합니다 — 개인 정보는 보내지 않습니다"
+          data-tip="GitHub Releases에서 배포된 최신 버전만 조회합니다 — 개인 정보는 보내지 않습니다"
         >
           업데이트 확인
         </span>
@@ -1217,7 +1217,8 @@ function UpdateSettings() {
         </button>
       </div>
       <div className="dim setting-note">
-        자동으로 확인하지 않습니다. 버튼을 누를 때만 registry.npmjs.org에 버전을 물어봅니다.
+        자동으로 확인하지 않습니다. 버튼을 누를 때만 api.github.com에 최신 릴리스 번호를
+        물어봅니다.
       </div>
 
       <div className="update-status" id="update-status" role="status">
@@ -1238,8 +1239,21 @@ function UpdateSettings() {
                 다시 시도
               </button>
             )}
-            {/* 실행은 사용자 손에 남긴다 — 서버가 npm install을 대신 돌리지 않는다. */}
-            {result.state === 'outdated' && <code className="update-cmd">{result.command}</code>}
+            {/* 실행은 사용자 손에 남긴다 — 서버가 내려받지도, 설치하지도 않는다.
+                받는 곳(릴리스 페이지)과 받은 뒤 칠 한 줄을 나란히 보여 준다. */}
+            {result.state === 'outdated' && (
+              <>
+                <a
+                  className="update-link"
+                  href={result.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  릴리스 페이지에서 내려받기
+                </a>
+                <code className="update-cmd">{result.command}</code>
+              </>
+            )}
           </>
         )}
       </div>

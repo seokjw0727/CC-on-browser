@@ -331,25 +331,23 @@ code.wt-sha { color: var(--wt-lane, var(--text-faint)); }
   .wt-commits { min-width: 180px; }
 }
 
-/* ===================== 입력창 아래 브랜치 칩 (WorktreeButton) =====================
-   가로 정렬은 컴포저 식구들과 같은 규약을 따른다: max-width는 --composer-max,
-   좌우 가운데. 왼쪽 안여백만 13px인 이유는 입력 상자의 테두리 1px + 안여백 12px을
-   더한 값이라, 칩의 왼쪽 끝이 상자 안 첫 글자·모델 pill과 정확히 한 줄에 선다
-   (.composer-meta의 4px을 그대로 쓰면 이 칩만 왼쪽으로 9px 튀어나온다). */
-.wt-chip-row {
-  display: flex;
-  max-width: var(--composer-max);
-  margin: 8px auto 0;
-  padding-left: 13px;
-}
+/* ===================== 상태줄 브랜치 칩 (WorktreeButton) =====================
+   이 칩은 .composer-meta(상태줄)의 flex 항목이다 — 가로 정렬·좌우 여백은 그 줄이
+   이미 --composer-max로 잡아 두었으므로 여기서 다시 잡지 않는다. 예전의 .wt-chip-row
+   래퍼가 하던 일이 그것이었고, 상태줄로 들어오면서 통째로 사라졌다.
+
+   크기는 옆에 서는 사용량 링(22px)에 맞춘다: 높이를 그 값으로 고정하고 세로 여백을
+   0으로 두어(가운데 정렬은 flex가 한다) 칩만 한 줄을 키우지 않게 한다. 그러면서도
+   눌리는 대상임이 보이도록 테두리와 pill 모양은 남긴다. */
 .wt-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  padding: 3px 10px 3px 8px;
+  gap: 5px;
+  height: 22px; /* = .ring의 높이 */
+  padding: 0 9px 0 7px;
   font-family: inherit;
   font-size: 12px;
+  line-height: 1;
   color: var(--text-dim);
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -366,9 +364,9 @@ code.wt-sha { color: var(--wt-lane, var(--text-faint)); }
   border-color: var(--border-strong);
 }
 .wt-chip-ico {
-  flex: 0 0 14px;
-  width: 14px;
-  height: 14px;
+  flex: 0 0 13px;
+  width: 13px;
+  height: 13px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.5;
@@ -382,8 +380,12 @@ code.wt-sha { color: var(--wt-lane, var(--text-faint)); }
 .wt-chip.unknown .wt-chip-ico {
   color: inherit;
 }
+/* 상한은 **라벨**에 건다(칩 전체가 아니라). 상태줄은 flex-wrap이라, 긴 브랜치명이
+   칩을 넓히면 연결 표시가 다음 줄로 밀려난다 — 아이콘·여백을 뺀 글자 폭만 제한해야
+   그 밀침 없이 정확히 이름만 잘린다. 잘린 전체 이름은 툴팁이 그대로 말해 준다. */
 .wt-chip-label {
   min-width: 0;
+  max-width: 150px;
   font-family: var(--font-mono);
   font-size: 11.5px;
   white-space: nowrap;
