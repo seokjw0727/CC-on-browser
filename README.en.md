@@ -344,7 +344,8 @@ What this app owes to others. Full license texts and verification notes are in
 
 The npm package contains the built browser bundle (`client/dist/`), and installing it
 also pulls the server dependency. Everything below therefore reaches your machine and
-needs its notice — each entry says whether it is in the browser bundle or server-side.
+needs its notice. Most of it lives inside the browser bundle; the entries that do not
+say where they actually ship.
 
 - [React · React DOM](https://github.com/facebook/react) 19.2.7 — MIT. The UI framework.
   Scheduler 0.27.0, from the same repository, is bundled with it.
