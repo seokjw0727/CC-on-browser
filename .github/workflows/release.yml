@@ -68,7 +68,7 @@ jobs:
           # 실제로 토큰을 쓰는 곳은 gh CLI 단계뿐이고 그쪽은 env로 따로 받는다.
           persist-credentials: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           registry-url: 'https://registry.npmjs.org'
