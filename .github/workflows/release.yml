@@ -59,7 +59,7 @@ jobs:
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # dry-run(태그 미지정)은 디스패치된 브랜치를, 그 외에는 대상 태그를 체크아웃.
           ref: ${{ steps.cfg.outputs.tag || github.ref }}
