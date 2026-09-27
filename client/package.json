@@ -11,7 +11,7 @@
     "dompurify": "^3.4.11",
     "highlight.js": "^11.11.1",
     "marked": "^18.0.5",
-    "react": "^19.2.7",
+    "react": "^19.2.8",
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
